@@ -1,0 +1,44 @@
+[
+  {
+    "id": "agent:main:main",
+    "name": "Main",
+    "creature": "agent",
+    "active": true
+  },
+  {
+    "id": "agent:cto:main",
+    "name": "CTO Agent",
+    "creature": "agent",
+    "active": true
+  },
+  {
+    "id": "agent:swe-architect:main",
+    "name": "Software Architect",
+    "creature": "agent",
+    "active": true
+  },
+  {
+    "id": "agent:swe-backend:main",
+    "name": "Backend Engineer",
+    "creature": "agent",
+    "active": true
+  },
+  {
+    "id": "agent:frontend-lead:main",
+    "name": "Frontend Lead",
+    "creature": "agent",
+    "active": true
+  },
+  {
+    "id": "agent:ops-lead:main",
+    "name": "Operations Lead",
+    "creature": "agent",
+    "active": true
+  },
+  {
+    "id": "agent:ops-sre:main",
+    "name": "SRE Agent",
+    "creature": "agent",
+    "active": true
+  }
+]

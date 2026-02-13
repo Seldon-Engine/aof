@@ -1,0 +1,387 @@
+# Golden Example: Phase 1 Org Chart
+# Demonstrates all P1.1 features: orgUnits, groups, memberships, relationships, policies
+
+schemaVersion: 1
+template: "swe-ops-team"
+
+# Memory pools (Memory V2 scoping)
+memoryPools:
+  hot:
+    path: "Resources/OpenClaw/_Core"
+    description: "Canonical operator context (always indexed)"
+  warm:
+    - id: "runbooks"
+      path: "Resources/OpenClaw/Runbooks"
+      description: "Operational runbooks"
+      roles: [main, ops-lead, ops-sre, swe-*, frontend-lead]
+    - id: "ops"
+      path: "Resources/OpenClaw/Ops"
+      description: "Ops procedures"
+      roles: [main, ops-lead, ops-sre]
+    - id: "architecture"
+      path: "Resources/OpenClaw/Architecture"
+      description: "Architecture references"
+      roles: [main, cto, swe-*]
+    - id: "policies"
+      path: "Resources/OpenClaw/Policies"
+      description: "Governance policies"
+      roles: [main, cto, ops-lead]
+    - id: "swe-suite"
+      path: "Resources/OpenClaw/Agents/swe-suite"
+      description: "SWE suite docs"
+      roles: [swe-*]
+  cold:
+    - Logs
+    - Approvals
+    - _archived
+
+# Organizational Units (tree structure with single root)
+orgUnits:
+  - id: "company"
+    name: "Company"
+    type: "company"
+    description: "Root organizational unit"
+    active: true
+
+  - id: "engineering"
+    name: "Engineering Department"
+    type: "department"
+    parentId: "company"
+    leadId: "cto"
+    active: true
+
+  - id: "backend-team"
+    name: "Backend Team"
+    type: "team"
+    parentId: "engineering"
+    leadId: "swe-architect"
+    active: true
+
+  - id: "frontend-team"
+    name: "Frontend Team"
+    type: "team"
+    parentId: "engineering"
+    leadId: "frontend-lead"
+    active: true
+
+  - id: "ops"
+    name: "Operations"
+    type: "department"
+    parentId: "company"
+    leadId: "ops-lead"
+    active: true
+
+# Groups (cross-cutting collections)
+groups:
+  - id: "tech-leads"
+    name: "Technical Leads"
+    description: "All team technical leads"
+    memberIds:
+      - "swe-architect"
+      - "frontend-lead"
+      - "ops-lead"
+
+  - id: "reviewers"
+    name: "Code Reviewers"
+    description: "Agents authorized to review and approve code"
+    memberIds:
+      - "swe-architect"
+      - "swe-backend"
+      - "frontend-lead"
+
+  - id: "on-call"
+    name: "On-Call Rotation"
+    description: "Agents in current on-call rotation"
+    memberIds:
+      - "swe-backend"
+      - "ops-sre"
+
+# Agents
+agents:
+  - id: "main"
+    name: "Demerzel"
+    openclawAgentId: "agent:main:main"
+    description: "Primary orchestration agent"
+    canDelegate: true
+    active: true
+    capabilities:
+      tags: ["orchestration", "delegation", "ops"]
+      concurrency: 5
+      model: "anthropic-api/claude-sonnet-4-5"
+      provider: "anthropic"
+    comms:
+      preferred: "send"
+      sessionKey: "agent:main:main"
+      fallbacks: ["send", "spawn", "cli"]
+    policies:
+      memory:
+        scope: ["org", "shared", "projects"]
+        tiers: ["hot", "warm"]
+        readOnly: false
+      communication:
+        allowedChannels: ["internal", "slack", "pagerduty"]
+        requiresApproval: false
+      tasking:
+        maxConcurrent: 5
+        allowSelfAssign: true
+        requiresReview: false
+
+  - id: "cto"
+    name: "CTO Agent"
+    openclawAgentId: "agent:cto:main"
+    description: "Technical leadership and architecture oversight"
+    canDelegate: true
+    active: true
+    capabilities:
+      tags: ["architecture", "strategy", "leadership"]
+      concurrency: 3
+      model: "anthropic-api/claude-opus-4-5"
+    policies:
+      memory:
+        scope: ["org", "shared", "projects", "strategy"]
+        tiers: ["hot", "warm"]
+
+  - id: "swe-architect"
+    name: "Software Architect"
+    openclawAgentId: "agent:swe-architect:main"
+    description: "Architecture and design decisions"
+    canDelegate: true
+    active: true
+    capabilities:
+      tags: ["architecture", "design", "backend", "frontend"]
+      concurrency: 3
+      model: "openai-api/gpt-5.2-codex"
+      provider: "openai"
+    comms:
+      preferred: "spawn"
+      sessionKey: "agent:swe-architect:main"
+    policies:
+      memory:
+        scope: ["org/engineering", "org/backend-team", "shared/docs"]
+        tiers: ["hot", "warm"]
+      tasking:
+        maxConcurrent: 3
+        allowSelfAssign: true
+        requiresReview: true
+
+  - id: "swe-backend"
+    name: "Backend Engineer"
+    openclawAgentId: "agent:swe-backend:main"
+    description: "Server-side implementation"
+    canDelegate: false
+    active: true
+    capabilities:
+      tags: ["backend", "api", "database"]
+      concurrency: 2
+      model: "anthropic-api/claude-sonnet-4-5"
+    policies:
+      memory:
+        scope: ["org/backend-team", "shared/docs"]
+        tiers: ["hot"]
+      tasking:
+        maxConcurrent: 2
+        allowSelfAssign: false
+        requiresReview: true
+
+  - id: "frontend-lead"
+    name: "Frontend Lead"
+    openclawAgentId: "agent:frontend-lead:main"
+    description: "Frontend team leadership"
+    canDelegate: true
+    active: true
+    capabilities:
+      tags: ["frontend", "ui", "ux"]
+      concurrency: 2
+      model: "anthropic-api/claude-sonnet-4-5"
+    policies:
+      memory:
+        scope: ["org/frontend-team", "shared/design"]
+        tiers: ["hot", "warm"]
+
+  - id: "ops-lead"
+    name: "Operations Lead"
+    openclawAgentId: "agent:ops-lead:main"
+    description: "Operations team leadership"
+    canDelegate: true
+    active: true
+    capabilities:
+      tags: ["ops", "infrastructure", "monitoring"]
+      concurrency: 2
+
+  - id: "ops-sre"
+    name: "SRE Agent"
+    openclawAgentId: "agent:ops-sre:main"
+    description: "Site reliability engineering"
+    canDelegate: false
+    active: true
+    capabilities:
+      tags: ["ops", "sre", "monitoring", "incident-response"]
+      concurrency: 3
+    policies:
+      memory:
+        scope: ["org/ops", "shared/runbooks"]
+        tiers: ["hot"]
+
+# Memberships (agent-to-orgUnit relationships)
+memberships:
+  - agentId: "cto"
+    orgUnitId: "engineering"
+    role: "chief-technology-officer"
+    primary: true
+
+  - agentId: "swe-architect"
+    orgUnitId: "backend-team"
+    role: "tech-lead"
+    primary: true
+
+  - agentId: "swe-architect"
+    orgUnitId: "frontend-team"
+    role: "advisor"
+    primary: false
+
+  - agentId: "swe-backend"
+    orgUnitId: "backend-team"
+    role: "engineer"
+    primary: true
+
+  - agentId: "frontend-lead"
+    orgUnitId: "frontend-team"
+    role: "tech-lead"
+    primary: true
+
+  - agentId: "ops-lead"
+    orgUnitId: "ops"
+    role: "team-lead"
+    primary: true
+
+  - agentId: "ops-sre"
+    orgUnitId: "ops"
+    role: "sre"
+    primary: true
+
+# Relationships (agent-to-agent connections)
+relationships:
+  # Escalation paths (upward)
+  - fromAgentId: "swe-backend"
+    toAgentId: "swe-architect"
+    type: "escalates_to"
+    active: true
+
+  - fromAgentId: "swe-architect"
+    toAgentId: "cto"
+    type: "escalates_to"
+    active: true
+
+  - fromAgentId: "frontend-lead"
+    toAgentId: "cto"
+    type: "escalates_to"
+    active: true
+
+  - fromAgentId: "ops-sre"
+    toAgentId: "ops-lead"
+    type: "escalates_to"
+    active: true
+
+  - fromAgentId: "ops-lead"
+    toAgentId: "cto"
+    type: "escalates_to"
+    active: true
+
+  - fromAgentId: "cto"
+    toAgentId: "main"
+    type: "escalates_to"
+    active: true
+
+  # Delegation paths (downward)
+  - fromAgentId: "swe-architect"
+    toAgentId: "swe-backend"
+    type: "delegates_to"
+    active: true
+
+  # Consultation relationships (horizontal)
+  - fromAgentId: "swe-backend"
+    toAgentId: "frontend-lead"
+    type: "consults_with"
+    active: true
+
+  - fromAgentId: "frontend-lead"
+    toAgentId: "swe-backend"
+    type: "consults_with"
+    active: true
+
+  - fromAgentId: "ops-sre"
+    toAgentId: "swe-backend"
+    type: "consults_with"
+    active: true
+
+  # Reporting relationships
+  - fromAgentId: "swe-backend"
+    toAgentId: "swe-architect"
+    type: "reports_to"
+    active: true
+
+  - fromAgentId: "swe-architect"
+    toAgentId: "cto"
+    type: "reports_to"
+    active: true
+
+  - fromAgentId: "frontend-lead"
+    toAgentId: "cto"
+    type: "reports_to"
+    active: true
+
+  - fromAgentId: "ops-sre"
+    toAgentId: "ops-lead"
+    type: "reports_to"
+    active: true
+
+  - fromAgentId: "ops-lead"
+    toAgentId: "cto"
+    type: "reports_to"
+    active: true
+
+# Default policies (applied to agents without explicit policies)
+defaults:
+  policies:
+    memory:
+      scope: ["shared"]
+      tiers: ["hot"]
+      readOnly: false
+    communication:
+      allowedChannels: ["internal"]
+      requiresApproval: false
+      restrictedAgents: []
+    tasking:
+      maxConcurrent: 1
+      allowSelfAssign: false
+      requiresReview: true
+      allowedPriorities: ["low", "medium", "high", "critical"]
+
+# Legacy routing rules (use relationships for P1.1+)
+routing:
+  - matchTags: ["architecture"]
+    targetAgent: "swe-architect"
+    weight: 10
+
+  - matchTags: ["backend"]
+    targetAgent: "swe-backend"
+    weight: 20
+
+  - matchTags: ["frontend"]
+    targetAgent: "frontend-lead"
+    weight: 20
+
+  - matchTags: ["ops", "infrastructure"]
+    targetAgent: "ops-lead"
+    weight: 30
+
+  - matchTags: ["incident", "urgent"]
+    targetAgent: "ops-sre"
+    weight: 5
+
+# Metadata
+metadata:
+  version: "1.0.0"
+  lastUpdated: "2026-02-06"
+  maintainer: "swe-architect"
+  notes: "Golden example demonstrating Phase 1 org chart features"

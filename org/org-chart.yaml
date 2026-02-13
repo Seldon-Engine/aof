@@ -1,0 +1,221 @@
+schemaVersion: 1
+template: "openclaw-full"
+
+memoryPools:
+  hot:
+    path: "Resources/OpenClaw/_Core"
+    description: "Canonical operator context (always indexed)"
+  warm:
+    - id: runbooks
+      path: "Resources/OpenClaw/Runbooks"
+      description: "Runbooks and operational playbooks"
+      roles: [main, openclaw-custodian, swe-*]
+    - id: ops
+      path: "Resources/OpenClaw/Ops"
+      description: "Operational knowledge and procedures"
+      roles: [main, openclaw-custodian]
+    - id: architecture
+      path: "Resources/OpenClaw/Architecture"
+      description: "Architecture decision records and diagrams"
+      roles: [main, openclaw-custodian, swe-*]
+    - id: policies
+      path: "Resources/OpenClaw/Policies"
+      description: "Governance and safety policies"
+      roles: [main, openclaw-custodian]
+    - id: agents-shared
+      path: "Resources/OpenClaw/Agents/_Shared"
+      description: "Shared agent specifications"
+      roles: [main]
+    - id: swe-suite
+      path: "Resources/OpenClaw/Agents/swe-suite"
+      description: "SWE suite docs"
+      roles: [swe-*]
+    - id: personal-admin
+      path: "Resources/OpenClaw/Agents/personal-admin"
+      description: "Personal admin playbooks"
+      roles: [personal-admin]
+    - id: personal-admin-templates
+      path: "Resources/OpenClaw/Templates/Personal-Admin"
+      description: "Personal admin templates"
+      roles: [personal-admin]
+  cold:
+    - Logs
+    - Approvals
+    - _archived
+
+teams:
+  - id: ops
+    name: "Operations"
+    description: "Platform operations and reliability"
+    lead: "main"
+  - id: swe
+    name: "Software Engineering"
+    description: "Build and maintain AOF + OpenClaw extensions"
+    lead: "swe-architect"
+  - id: admin
+    name: "Personal Admin"
+    description: "Personal administration and email management"
+    lead: "personal-admin"
+
+agents:
+  - id: main
+    name: "Demerzel"
+    description: "Strategic AI partner — coordination and orchestration"
+    team: ops
+    canDelegate: true
+    active: true
+    capabilities:
+      tags: ["coordination", "delegation", "ops", "matrix"]
+      concurrency: 3
+      model: "anthropic/claude-opus-4-6"
+      provider: "anthropic"
+    comms:
+      preferred: "send"
+      fallbacks: ["cli"]
+
+  - id: openclaw-custodian
+    name: "OpenClaw Custodian"
+    description: "Gateway health, config management, platform maintenance"
+    team: ops
+    reportsTo: "main"
+    active: true
+    capabilities:
+      tags: ["gateway", "config", "health", "cron"]
+      concurrency: 1
+      model: "anthropic-api/claude-sonnet-4-5"
+      provider: "anthropic-api"
+    comms:
+      preferred: "send"
+      sessionKey: "agent:openclaw-custodian:main"
+
+  - id: personal-admin
+    name: "Personal Admin"
+    description: "Email, scheduling, personal task management"
+    team: admin
+    reportsTo: "main"
+    active: true
+    capabilities:
+      tags: ["email", "gmail", "scheduling", "phone"]
+      concurrency: 1
+      model: "anthropic-api/claude-sonnet-4-5"
+      provider: "anthropic-api"
+    comms:
+      preferred: "send"
+      sessionKey: "agent:personal-admin:main"
+
+  - id: swe-architect
+    name: "SWE Architect"
+    description: "System design, technical decisions, orchestration"
+    team: swe
+    reportsTo: "main"
+    canDelegate: true
+    active: true
+    capabilities:
+      tags: ["architecture", "design", "review", "delegation"]
+      concurrency: 2
+      model: "openai-api/gpt-5.2-codex"
+      provider: "openai-api"
+    comms:
+      preferred: "send"
+      sessionKey: "agent:swe-architect:main"
+
+  - id: swe-pm
+    name: "SWE PM"
+    description: "Product management, requirements, user stories"
+    team: swe
+    reportsTo: "swe-architect"
+    active: true
+    capabilities:
+      tags: ["requirements", "user-stories", "planning"]
+      concurrency: 1
+      model: "anthropic-api/claude-sonnet-4-5"
+      provider: "anthropic-api"
+
+  - id: swe-backend
+    name: "SWE Backend"
+    description: "Backend implementation, APIs, data layer"
+    team: swe
+    reportsTo: "swe-architect"
+    active: true
+    capabilities:
+      tags: ["backend", "api", "typescript", "node"]
+      concurrency: 1
+      model: "anthropic-api/claude-sonnet-4-5"
+      provider: "anthropic-api"
+
+  - id: swe-frontend
+    name: "SWE Frontend"
+    description: "Frontend implementation, UI, UX"
+    team: swe
+    reportsTo: "swe-architect"
+    active: true
+    capabilities:
+      tags: ["frontend", "ui", "css", "react"]
+      concurrency: 1
+      model: "anthropic-api/claude-sonnet-4-5"
+      provider: "anthropic-api"
+
+  - id: swe-qa
+    name: "SWE QA"
+    description: "Quality assurance, testing, BDD"
+    team: swe
+    reportsTo: "swe-architect"
+    active: true
+    capabilities:
+      tags: ["testing", "qa", "bdd", "gherkin"]
+      concurrency: 1
+      model: "anthropic-api/claude-sonnet-4-5"
+      provider: "anthropic-api"
+
+  - id: swe-security
+    name: "SWE Security"
+    description: "Security review, threat modeling, hardening"
+    team: swe
+    reportsTo: "swe-architect"
+    active: true
+    capabilities:
+      tags: ["security", "audit", "threat-model"]
+      concurrency: 1
+      model: "anthropic-api/claude-sonnet-4-5"
+      provider: "anthropic-api"
+
+  - id: swe-devops
+    name: "SWE DevOps"
+    description: "CI/CD, deployment, infrastructure"
+    team: swe
+    reportsTo: "swe-architect"
+    active: true
+    capabilities:
+      tags: ["devops", "ci-cd", "docker", "deployment"]
+      concurrency: 1
+      model: "anthropic-api/claude-sonnet-4-5"
+      provider: "anthropic-api"
+
+  - id: swe-tech-writer
+    name: "SWE Tech Writer"
+    description: "Documentation, API docs, runbooks"
+    team: swe
+    reportsTo: "swe-architect"
+    active: true
+    capabilities:
+      tags: ["docs", "api-docs", "runbooks", "changelog"]
+      concurrency: 1
+      model: "anthropic-api/claude-sonnet-4-5"
+      provider: "anthropic-api"
+
+routing:
+  - matchTags: ["engineering", "aof", "backend"]
+    targetTeam: "swe"
+    weight: 10
+  - matchTags: ["ops", "gateway", "cron"]
+    targetAgent: "openclaw-custodian"
+    weight: 10
+  - matchTags: ["email", "gmail", "phone"]
+    targetAgent: "personal-admin"
+    weight: 10
+  - matchTags: ["security", "audit"]
+    targetAgent: "swe-security"
+    weight: 20
+  - matchTags: ["docs", "documentation"]
+    targetAgent: "swe-tech-writer"
+    weight: 20

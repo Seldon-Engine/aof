@@ -1,0 +1,151 @@
+schemaVersion: 1
+template: openclaw-full
+
+teams:
+  - id: ops
+    name: Operations
+    lead: main
+  - id: swe-suite
+    name: Software Engineering
+    lead: swe-architect
+  - id: admin
+    name: Personal Administration
+    lead: personal-admin
+
+agents:
+  - id: main
+    name: Demerzel
+    description: Strategic AI partner — orchestration, coordination, escalation
+    canDelegate: true
+    capabilities:
+      tags: [orchestration, ops, coordination, delegation]
+      concurrency: 3
+      model: anthropic/claude-opus-4-6
+      provider: anthropic
+    comms:
+      preferred: send
+      sessionKey: "agent:main:main"
+
+  - id: openclaw-custodian
+    name: OpenClaw Custodian
+    description: Platform health, config management, cron monitoring
+    team: ops
+    reportsTo: main
+    capabilities:
+      tags: [ops, config, health, cron, platform]
+      model: anthropic-api/claude-sonnet-4-5
+      provider: anthropic-api
+
+  - id: personal-admin
+    name: Personal Admin
+    description: Email drafting, support cases, personal task management
+    team: admin
+    reportsTo: main
+    capabilities:
+      tags: [email, support, personal, admin]
+      model: anthropic-api/claude-sonnet-4-5
+      provider: anthropic-api
+
+  - id: swe-architect
+    name: SWE Architect
+    description: Architecture, system design, technical decisions, specialist orchestration
+    team: swe-suite
+    reportsTo: main
+    canDelegate: true
+    capabilities:
+      tags: [architecture, design, orchestration, code-review]
+      concurrency: 2
+      model: openai-api/gpt-5.2-codex
+      provider: openai-api
+
+  - id: swe-pm
+    name: SWE Product Manager
+    description: Requirements, user stories, acceptance criteria, roadmaps
+    team: swe-suite
+    reportsTo: swe-architect
+    capabilities:
+      tags: [requirements, stories, planning, bdd]
+      model: anthropic-api/claude-sonnet-4-5
+
+  - id: swe-backend
+    name: SWE Backend
+    description: Backend implementation, APIs, databases, services
+    team: swe-suite
+    reportsTo: swe-architect
+    capabilities:
+      tags: [backend, api, database, node, typescript]
+      model: anthropic-api/claude-sonnet-4-5
+
+  - id: swe-frontend
+    name: SWE Frontend
+    description: Frontend implementation, UI, UX integration
+    team: swe-suite
+    reportsTo: swe-architect
+    capabilities:
+      tags: [frontend, ui, react, css, html]
+      model: anthropic-api/claude-sonnet-4-5
+
+  - id: swe-qa
+    name: SWE QA
+    description: Test strategy, automated testing, quality assurance
+    team: swe-suite
+    reportsTo: swe-architect
+    capabilities:
+      tags: [qa, testing, automation, gherkin, bdd]
+      model: anthropic-api/claude-sonnet-4-5
+
+  - id: swe-security
+    name: SWE Security
+    description: Security audits, threat modeling, vulnerability assessment
+    team: swe-suite
+    reportsTo: swe-architect
+    capabilities:
+      tags: [security, audit, owasp, threat-model]
+      model: anthropic-api/claude-sonnet-4-5
+
+  - id: swe-devops
+    name: SWE DevOps
+    description: CI/CD, deployment, infrastructure automation
+    team: swe-suite
+    reportsTo: swe-architect
+    capabilities:
+      tags: [devops, cicd, docker, deployment]
+      model: anthropic-api/claude-sonnet-4-5
+
+  - id: swe-tech-writer
+    name: SWE Tech Writer
+    description: Documentation, API docs, runbooks, changelogs
+    team: swe-suite
+    reportsTo: swe-architect
+    capabilities:
+      tags: [docs, documentation, api-docs, runbooks]
+      model: anthropic-api/claude-sonnet-4-5
+
+routing:
+  - matchTags: [architecture, design]
+    targetAgent: swe-architect
+    weight: 10
+  - matchTags: [backend, api, database]
+    targetAgent: swe-backend
+    weight: 20
+  - matchTags: [frontend, ui]
+    targetAgent: swe-frontend
+    weight: 20
+  - matchTags: [testing, qa, bdd]
+    targetAgent: swe-qa
+    weight: 20
+  - matchTags: [security, audit]
+    targetAgent: swe-security
+    weight: 20
+  - matchTags: [devops, cicd, docker]
+    targetAgent: swe-devops
+    weight: 20
+  - matchTags: [docs, documentation]
+    targetAgent: swe-tech-writer
+    weight: 20
+  - matchTags: [ops, config, health]
+    targetAgent: openclaw-custodian
+    weight: 30
+  - matchTags: [email, support, personal]
+    targetAgent: personal-admin
+    weight: 30

@@ -1,0 +1,21 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Runtime data (tasks, events) - tracked separately
+# tasks/ and events/ contain runtime state, include sample tasks only
+events/*.jsonl
+tasks/pending/*.md
+tasks/assigned/*.md
+tasks/in-progress/*.md
+tasks/blocked/*.md
+tasks/review/*.md
+tasks/done/*.md
+tasks/failed/*.md
+tasks/cancelled/*.md
+
+# Keep the directories
+!tasks/*/.gitkeep
+
+# OS
+.DS_Store

@@ -1,0 +1,27 @@
+schemaVersion: 1
+template: "minimal"
+
+teams:
+  - id: "main"
+    name: "Main Team"
+    description: "Primary operating team"
+
+agents:
+  - id: "main"
+    name: "Main Agent"
+    description: "Primary orchestration agent"
+    team: "main"
+    canDelegate: false
+    active: true
+    capabilities:
+      tags: ["orchestration", "coordination"]
+      concurrency: 1
+    comms:
+      preferred: "cli"
+      fallbacks: ["cli"]
+
+routing: []
+
+metadata:
+  template: "minimal"
+  description: "Single agent setup for getting started with AOF"

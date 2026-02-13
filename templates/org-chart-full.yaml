@@ -1,0 +1,68 @@
+schemaVersion: 1
+template: "full"
+
+teams:
+  - id: "ops"
+    name: "Operations"
+    description: "Operations and coordination"
+    lead: "main"
+  
+  - id: "execution"
+    name: "Execution"
+    description: "Task execution team"
+    lead: "executor"
+
+agents:
+  - id: "main"
+    name: "Main Agent"
+    description: "Strategic coordinator and orchestrator"
+    team: "ops"
+    canDelegate: true
+    active: true
+    capabilities:
+      tags: ["orchestration", "delegation", "coordination"]
+      concurrency: 3
+    comms:
+      preferred: "send"
+      fallbacks: ["send", "cli"]
+  
+  - id: "executor"
+    name: "Executor Agent"
+    description: "Task execution specialist"
+    team: "execution"
+    reportsTo: "main"
+    canDelegate: false
+    active: true
+    capabilities:
+      tags: ["execution", "implementation"]
+      concurrency: 2
+    comms:
+      preferred: "cli"
+      fallbacks: ["cli"]
+  
+  - id: "reviewer"
+    name: "Reviewer Agent"
+    description: "Quality assurance and review"
+    team: "execution"
+    reportsTo: "main"
+    canDelegate: false
+    active: true
+    capabilities:
+      tags: ["review", "qa", "validation"]
+      concurrency: 1
+    comms:
+      preferred: "cli"
+      fallbacks: ["cli"]
+
+routing:
+  - matchTags: ["execution", "implementation"]
+    targetAgent: "executor"
+    weight: 10
+  
+  - matchTags: ["review", "qa"]
+    targetAgent: "reviewer"
+    weight: 10
+
+metadata:
+  template: "full"
+  description: "Multi-agent team with delegation and role-based routing"

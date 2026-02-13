@@ -1,0 +1,17 @@
+version: '1.0'
+
+agents:
+  test-agent-1:
+    role: test-executor
+  test-agent-2:
+    role: test-executor
+  test-agent-3:
+    role: test-executor
+
+roles:
+  test-executor:
+    description: Test agent for E2E tests
+    capabilities:
+      - task-execution
+      - status-reporting
+    maxConcurrentTasks: 1

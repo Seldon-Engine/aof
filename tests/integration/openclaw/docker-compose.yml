@@ -1,0 +1,22 @@
+services:
+  openclaw-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aof-openclaw-test:local
+    ports:
+      - "19003:19003"
+    environment:
+      OPENCLAW_PROFILE: "aof-container"
+      OPENCLAW_PORT: "19003"
+      OPENCLAW_TOKEN: "test-token-12345"
+      OPENCLAW_ENABLE_MOCK_PROVIDER: "true"
+      AOF_POLL_INTERVAL_MS: "1000"
+      AOF_DEFAULT_LEASE_TTL_MS: "30000"
+      AOF_DRY_RUN: "false"
+    volumes:
+      - ../../../:/workspace:ro
+      - openclaw-home:/opt/openclaw
+
+volumes:
+  openclaw-home:

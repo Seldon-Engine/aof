@@ -1,0 +1,37 @@
+{
+  "id": "aof",
+  "name": "AOF — Agentic Ops Fabric",
+  "version": "0.1.0",
+  "description": "Deterministic task orchestration layer for multi-agent systems. Provides filesystem-first kanban, context-aware dispatch, org chart governance, and real-time views.",
+  "main": "plugin.js",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "dataDir": {
+        "type": "string",
+        "description": "AOF state directory (default: ~/.openclaw/aof)"
+      },
+      "pollIntervalMs": {
+        "type": "number",
+        "description": "Scheduler poll interval in milliseconds (default: 30000)"
+      },
+      "defaultLeaseTtlMs": {
+        "type": "number",
+        "description": "Default task lease TTL in milliseconds (default: 300000)"
+      },
+      "dryRun": {
+        "type": "boolean",
+        "description": "If true, scheduler observes but doesn't dispatch (default: true)"
+      },
+      "gatewayUrl": {
+        "type": "string",
+        "description": "OpenClaw gateway URL for HTTP dispatch (e.g. http://127.0.0.1:18789)"
+      },
+      "gatewayToken": {
+        "type": "string",
+        "description": "OpenClaw gateway authentication token"
+      }
+    }
+  }
+}
