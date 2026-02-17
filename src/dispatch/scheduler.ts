@@ -8,7 +8,7 @@
 import { FilesystemTaskStore, serializeTask } from "../store/task-store.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import { EventLogger } from "../events/logger.js";
-import { acquireLease, expireLeases, renewLease, releaseLease } from "../store/lease.js";
+import { acquireLease, expireLeases, releaseLease } from "../store/lease.js";
 import { checkStaleHeartbeats, markRunArtifactExpired, readRunResult } from "../recovery/run-artifacts.js";
 import { resolveCompletionTransitions } from "../protocol/completion-utils.js";
 import { SLAChecker } from "./sla-checker.js";
@@ -27,6 +27,7 @@ import { buildGateContext } from "./gate-context-builder.js";
 import { evaluateMurmurTriggers } from "./murmur-integration.js";
 import { loadOrgChart } from "../org/loader.js";
 import { checkThrottle, updateThrottleState, resetThrottleState as resetThrottleStateInternal } from "./throttle.js";
+import { isLeaseActive, startLeaseRenewal, stopLeaseRenewal, cleanupLeaseRenewals } from "./lease-manager.js";
 
 export interface SchedulerConfig {
   /** Root data directory. */
@@ -79,15 +80,6 @@ export interface PollResult {
   };
 }
 
-function isLeaseActive(lease?: Task["frontmatter"]["lease"]): boolean {
-  if (!lease) return false;
-  const expiresAt = new Date(lease.expiresAt).getTime();
-  return expiresAt > Date.now();
-}
-
-const LEASE_RENEWAL_MAX = 20;
-const leaseRenewalTimers = new Map<string, NodeJS.Timeout>();
-
 /**
  * Effective concurrency limit — auto-detected from OpenClaw platform limit.
  * Starts null, set to min(platformLimit, config.maxConcurrentDispatches) when detected.
@@ -97,55 +89,6 @@ let effectiveConcurrencyLimit: number | null = null;
 /** Reset throttle state (for testing). */
 export function resetThrottleState(): void {
   resetThrottleStateInternal();
-}
-
-function leaseRenewalKey(store: ITaskStore, taskId: string): string {
-  return `${store.projectId}:${taskId}`;
-}
-
-function stopLeaseRenewal(store: ITaskStore, taskId: string): void {
-  const key = leaseRenewalKey(store, taskId);
-  const timer = leaseRenewalTimers.get(key);
-  if (!timer) return;
-  clearInterval(timer);
-  leaseRenewalTimers.delete(key);
-}
-
-function startLeaseRenewal(store: ITaskStore, taskId: string, agentId: string, leaseTtlMs: number): void {
-  const key = leaseRenewalKey(store, taskId);
-  if (leaseRenewalTimers.has(key)) return;
-
-  const intervalMs = Math.max(1, Math.floor(leaseTtlMs / 2));
-  const timer = setInterval(() => {
-    void renewLease(store, taskId, agentId, {
-      ttlMs: leaseTtlMs,
-      maxRenewals: LEASE_RENEWAL_MAX,
-    }).catch(() => {
-      stopLeaseRenewal(store, taskId);
-    });
-  }, intervalMs);
-
-  timer.unref?.();
-  leaseRenewalTimers.set(key, timer);
-}
-
-function cleanupLeaseRenewals(store: ITaskStore, tasks: Task[]): void {
-  const active = new Set<string>();
-  for (const task of tasks) {
-    if (task.frontmatter.status !== "in-progress") continue;
-    const lease = task.frontmatter.lease;
-    if (!lease || !lease.agent) continue;
-    if (!isLeaseActive(lease)) continue;
-    active.add(leaseRenewalKey(store, task.frontmatter.id));
-  }
-
-  const prefix = `${store.projectId}:`;
-  for (const key of leaseRenewalTimers.keys()) {
-    if (!key.startsWith(prefix)) continue;
-    if (active.has(key)) continue;
-    const taskId = key.slice(prefix.length);
-    stopLeaseRenewal(store, taskId);
-  }
 }
 
 /**
