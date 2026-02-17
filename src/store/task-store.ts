@@ -854,6 +854,14 @@ export class FilesystemTaskStore implements ITaskStore {
       throw new Error(`Blocker task not found: ${blockerId}`);
     }
 
+    // Reject modifications to tasks in terminal states
+    const terminalStates: TaskStatus[] = ["done", "cancelled"];
+    if (terminalStates.includes(task.frontmatter.status)) {
+      throw new Error(
+        `Cannot modify dependencies for task ${taskId}: task is in terminal state '${task.frontmatter.status}'`,
+      );
+    }
+
     // Reject self-dependency
     if (taskId === blockerId) {
       throw new Error(`Task cannot depend on itself: ${taskId}`);
@@ -895,6 +903,14 @@ export class FilesystemTaskStore implements ITaskStore {
     const task = await this.get(taskId);
     if (!task) {
       throw new Error(`Task not found: ${taskId}`);
+    }
+
+    // Reject modifications to tasks in terminal states
+    const terminalStates: TaskStatus[] = ["done", "cancelled"];
+    if (terminalStates.includes(task.frontmatter.status)) {
+      throw new Error(
+        `Cannot modify dependencies for task ${taskId}: task is in terminal state '${task.frontmatter.status}'`,
+      );
     }
 
     // Check if dependency exists

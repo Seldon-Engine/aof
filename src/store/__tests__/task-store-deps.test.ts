@@ -144,6 +144,41 @@ describe("TaskStore dependency management", () => {
       expect(result.frontmatter.dependsOn).toHaveLength(1);
       expect(result.frontmatter.dependsOn).toContain(taskB.frontmatter.id);
     });
+
+    it("rejects adding dependency to task in terminal state (done)", async () => {
+      const taskA = await store.create({ title: "Task A", createdBy: "test" });
+      const taskB = await store.create({ title: "Task B", createdBy: "test" });
+
+      // Transition taskA to done
+      await store.transition(taskA.frontmatter.id, "ready");
+      await store.transition(taskA.frontmatter.id, "in-progress");
+      await store.transition(taskA.frontmatter.id, "review");
+      await store.transition(taskA.frontmatter.id, "done");
+
+      // Try to add dependency to terminal task
+      await expect(
+        store.addDep(taskA.frontmatter.id, taskB.frontmatter.id)
+      ).rejects.toThrow("Cannot modify dependencies for task");
+      await expect(
+        store.addDep(taskA.frontmatter.id, taskB.frontmatter.id)
+      ).rejects.toThrow("terminal state 'done'");
+    });
+
+    it("rejects adding dependency to task in terminal state (cancelled)", async () => {
+      const taskA = await store.create({ title: "Task A", createdBy: "test" });
+      const taskB = await store.create({ title: "Task B", createdBy: "test" });
+
+      // Cancel taskA
+      await store.cancel(taskA.frontmatter.id);
+
+      // Try to add dependency to cancelled task
+      await expect(
+        store.addDep(taskA.frontmatter.id, taskB.frontmatter.id)
+      ).rejects.toThrow("Cannot modify dependencies for task");
+      await expect(
+        store.addDep(taskA.frontmatter.id, taskB.frontmatter.id)
+      ).rejects.toThrow("terminal state 'cancelled'");
+    });
   });
 
   describe("removeDep", () => {
@@ -223,6 +258,47 @@ describe("TaskStore dependency management", () => {
       const result = await store.removeDep(taskA.frontmatter.id, taskB.frontmatter.id);
       
       expect(result.frontmatter.dependsOn).toHaveLength(0);
+    });
+
+    it("rejects removing dependency from task in terminal state (done)", async () => {
+      const taskA = await store.create({ title: "Task A", createdBy: "test" });
+      const taskB = await store.create({ title: "Task B", createdBy: "test" });
+
+      // Add dependency first
+      await store.addDep(taskA.frontmatter.id, taskB.frontmatter.id);
+
+      // Transition taskA to done
+      await store.transition(taskA.frontmatter.id, "ready");
+      await store.transition(taskA.frontmatter.id, "in-progress");
+      await store.transition(taskA.frontmatter.id, "review");
+      await store.transition(taskA.frontmatter.id, "done");
+
+      // Try to remove dependency from terminal task
+      await expect(
+        store.removeDep(taskA.frontmatter.id, taskB.frontmatter.id)
+      ).rejects.toThrow("Cannot modify dependencies for task");
+      await expect(
+        store.removeDep(taskA.frontmatter.id, taskB.frontmatter.id)
+      ).rejects.toThrow("terminal state 'done'");
+    });
+
+    it("rejects removing dependency from task in terminal state (cancelled)", async () => {
+      const taskA = await store.create({ title: "Task A", createdBy: "test" });
+      const taskB = await store.create({ title: "Task B", createdBy: "test" });
+
+      // Add dependency first
+      await store.addDep(taskA.frontmatter.id, taskB.frontmatter.id);
+
+      // Cancel taskA
+      await store.cancel(taskA.frontmatter.id);
+
+      // Try to remove dependency from cancelled task
+      await expect(
+        store.removeDep(taskA.frontmatter.id, taskB.frontmatter.id)
+      ).rejects.toThrow("Cannot modify dependencies for task");
+      await expect(
+        store.removeDep(taskA.frontmatter.id, taskB.frontmatter.id)
+      ).rejects.toThrow("terminal state 'cancelled'");
     });
   });
 });
