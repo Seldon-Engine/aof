@@ -49,51 +49,41 @@ export function extractTaskSections(body: string): {
   guidance?: string;
 } {
   const lines = body.split("\n");
-  let state: "none" | "instructions" | "guidance" | "other" = "none";
-  const instructionLines: string[] = [];
-  const guidanceLines: string[] = [];
-  let instructionsFound = false;
-  let guidanceFound = false;
-
-  for (const line of lines) {
-    const trimmed = line.trim().toLowerCase();
-
-    if (trimmed.startsWith("## instructions")) {
-      state = "instructions";
-      instructionsFound = true;
-      continue;
-    }
-
-    if (trimmed.startsWith("## guidance")) {
-      state = "guidance";
-      guidanceFound = true;
-      continue;
-    }
-
-    if (trimmed.startsWith("##")) {
-      state = "other";
-      continue;
-    }
-
-    if (state === "instructions") {
-      instructionLines.push(line);
-    } else if (state === "guidance") {
-      guidanceLines.push(line);
+  const result: { instructions?: string; guidance?: string } = {};
+  
+  // Find section headers (case-insensitive)
+  const sectionRegex = /^##\s+(.+?)\s*$/i;
+  const sections: Array<{ name: string; startLine: number }> = [];
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const match = line?.match(sectionRegex);
+    if (match) {
+      sections.push({ name: match[1]!.toLowerCase(), startLine: i });
     }
   }
-
-  return {
-    instructions: instructionsFound ? instructionLines.join("\n").trim() : undefined,
-    guidance: guidanceFound ? guidanceLines.join("\n").trim() : undefined,
-  };
+  
+  // Extract content for each section
+  for (let i = 0; i < sections.length; i++) {
+    const section = sections[i]!;
+    const nextSection = sections[i + 1];
+    const endLine = nextSection ? nextSection.startLine : lines.length;
+    
+    const contentLines = lines.slice(section.startLine + 1, endLine);
+    const content = contentLines.join("\n").trim();
+    
+    // Store content even if empty (to distinguish from missing section)
+    if (section.name === "instructions") {
+      result.instructions = content;
+    } else if (section.name === "guidance") {
+      result.guidance = content;
+    }
+  }
+  
+  return result;
 }
 
-/**
- * Compute content hash for dependency tracking.
- * Hash excludes frontmatter metadata (focuses on task body and instructions).
- */
+/** Compute SHA-256 content hash for a task body. */
 export function contentHash(body: string): string {
-  const sections = extractTaskSections(body);
-  const normalized = [sections.instructions ?? "", sections.guidance ?? ""].join("\n").trim();
-  return createHash("sha256").update(normalized).digest("hex").slice(0, 16);
+  return createHash("sha256").update(body).digest("hex").slice(0, 16);
 }
