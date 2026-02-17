@@ -12,7 +12,7 @@ import { EventLogger } from "../events/logger.js";
 import type { SchedulerConfig, SchedulerAction } from "./scheduler.js";
 import { join } from "node:path";
 import writeFileAtomic from "write-file-atomic";
-import { executeAssignAction } from "./task-dispatcher.js";
+import { executeAssignAction } from "./assign-executor.js";
 import { markRunArtifactExpired, readRunResult } from "../recovery/run-artifacts.js";
 import { resolveCompletionTransitions } from "../protocol/completion-utils.js";
 
