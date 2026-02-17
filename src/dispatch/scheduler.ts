@@ -29,8 +29,9 @@ import { loadOrgChart } from "../org/loader.js";
 import { checkThrottle, updateThrottleState, resetThrottleState as resetThrottleStateInternal } from "./throttle.js";
 import { isLeaseActive, startLeaseRenewal, stopLeaseRenewal, cleanupLeaseRenewals } from "./lease-manager.js";
 import { escalateGateTimeout, checkGateTimeouts } from "./escalation.js";
-import { executeAssignAction, buildDispatchActions } from "./task-dispatcher.js";
+import { buildDispatchActions } from "./task-dispatcher.js";
 import { checkPromotionEligibility } from "./promotion.js";
+import { executeActions } from "./action-executor.js";
 
 export interface SchedulerConfig {
   /** Root data directory. */
@@ -368,264 +369,24 @@ export async function poll(
       });
     }
   }
-
   // 6. Execute actions (only in active mode)
-  let actionsExecuted = 0;
-  let actionsFailed = 0;
-  let leasesExpired = 0;  // BUG-AUDIT-004: Track lease expiry count
-  let tasksRequeued = 0;  // BUG-AUDIT-004: Track requeue count
-  let tasksPromoted = 0;  // TASK-2026-02-14: Track promotion count
+  const effectiveConcurrencyLimitRef = { value: effectiveConcurrencyLimit };
+  const executionStats = await executeActions(
+    actions,
+    allTasks,
+    store,
+    logger,
+    config,
+    effectiveConcurrencyLimitRef,
+    metrics
+  );
   
-  if (!config.dryRun) {
-    for (const action of actions) {
-      try {
-        let executed = false;
-        let failed = false;
-        switch (action.type) {
-          case "expire_lease":
-            // BUG-AUDIT-001/002: Handle lease expiry for both in-progress and blocked tasks
-            const expiringTask = await store.get(action.taskId);
-            if (expiringTask) {
-              // Clear the lease first
-              expiringTask.frontmatter.lease = undefined;
-              const serialized = serializeTask(expiringTask);
-              const taskPath = expiringTask.path ?? join(store.tasksDir, expiringTask.frontmatter.status, `${expiringTask.frontmatter.id}.md`);
-              await writeFileAtomic(taskPath, serialized);
-              
-              // BUG-AUDIT-002: For blocked tasks, check dependencies before requeueing
-              if (expiringTask.frontmatter.status === "blocked") {
-                const deps = expiringTask.frontmatter.dependsOn ?? [];
-                const allDepsResolved = deps.length === 0 || deps.every(depId => {
-                  const dep = allTasks.find(t => t.frontmatter.id === depId);
-                  return dep?.frontmatter.status === "done";
-                });
-                
-                if (allDepsResolved) {
-                  // Dependencies satisfied - can requeue to ready
-                  await store.transition(action.taskId, "ready", { 
-                    reason: "lease_expired_requeue" 
-                  });
-                  
-                  try {
-                    await logger.logTransition(action.taskId, "blocked", "ready", "scheduler", 
-                      `Lease expired and dependencies satisfied - requeued`);
-                  } catch {
-                    // Logging errors should not crash the scheduler
-                  }
-                } else {
-                  // Dependencies not satisfied - just log lease expiry, stay blocked
-                  console.warn(`[AOF] Lease expired on blocked task ${action.taskId} but dependencies not satisfied - staying blocked`);
-                }
-              } else {
-                // In-progress task - transition back to ready
-                await store.transition(action.taskId, "ready", { reason: "lease_expired" });
-              }
-              
-              // BUG-AUDIT-003: Mark run artifacts as expired
-              try {
-                await markRunArtifactExpired(store, action.taskId, action.reason ?? "Lease expired");
-              } catch {
-                // Non-critical failure if no run artifacts exist
-              }
-              
-              // BUG-AUDIT-004: Emit lease.expired event with telemetry
-              try {
-                await logger.logLease("lease.expired", action.taskId, action.agent ?? "unknown");
-              } catch {
-                // Logging errors should not crash the scheduler
-              }
-              
-              // BUG-AUDIT-004: Increment telemetry counters
-              leasesExpired++;
-              if (expiringTask.frontmatter.status === "ready") {
-                tasksRequeued++;  // Successfully requeued to ready
-              }
-            }
-            // BUG-002 fix: Don't count non-dispatch actions in actionsExecuted
-            // executed remains false
-            break;
-          case "stale_heartbeat":
-            // TASK-2026-02-10-061: Consult run_result.json for deterministic recovery
-            const staleTask = await store.get(action.taskId);
-            if (!staleTask) {
-              console.warn(`[AOF] Stale heartbeat: task ${action.taskId} not found, skipping`);
-              break;
-            }
-
-            const runResult = await readRunResult(store, action.taskId);
-            const fromStatus = staleTask.frontmatter.status;
-
-            if (!runResult) {
-              // No run result → reclaim to ready, mark artifact expired
-              await store.transition(action.taskId, "ready", { reason: "stale_heartbeat_reclaim" });
-              await markRunArtifactExpired(store, action.taskId, "stale_heartbeat");
-              
-              try {
-                await logger.logTransition(action.taskId, fromStatus, "ready", "scheduler", 
-                  `Stale heartbeat - no run_result - reclaimed to ready`);
-              } catch {
-                // Logging errors should not crash the scheduler
-              }
-            } else {
-              // Run result exists → apply outcome-driven transitions
-              const transitions = resolveCompletionTransitions(staleTask, runResult.outcome);
-              
-              for (const targetStatus of transitions) {
-                await store.transition(action.taskId, targetStatus, { 
-                  reason: `stale_heartbeat_${runResult.outcome}` 
-                });
-                
-                try {
-                  await logger.logTransition(action.taskId, fromStatus, targetStatus, "scheduler",
-                    `Stale heartbeat - outcome ${runResult.outcome} - transition to ${targetStatus}`);
-                } catch {
-                  // Logging errors should not crash the scheduler
-                }
-              }
-            }
-            // BUG-002 fix: Don't count non-dispatch actions in actionsExecuted
-            // executed remains false
-            break;
-          case "requeue":
-            // BUG-002: Update metadata before transition
-            const requeuedTask = await store.get(action.taskId);
-            if (requeuedTask) {
-              requeuedTask.frontmatter.metadata = {
-                ...requeuedTask.frontmatter.metadata,
-                lastRequeuedAt: new Date().toISOString(),
-                requeueReason: action.reason,
-                // Keep retry count to track cumulative attempts
-              };
-              
-              // Write updated task with metadata before transition
-              const serialized = serializeTask(requeuedTask);
-              const taskPath = requeuedTask.path ?? join(store.tasksDir, requeuedTask.frontmatter.status, `${requeuedTask.frontmatter.id}.md`);
-              await writeFileAtomic(taskPath, serialized);
-            }
-            
-            await store.transition(action.taskId, "ready", { reason: action.reason });
-            
-            try {
-              await logger.logTransition(action.taskId, "blocked", "ready", "scheduler", action.reason);
-            } catch {
-              // Logging errors should not crash the scheduler
-            }
-            // BUG-002 fix: Don't count non-dispatch actions in actionsExecuted
-            // executed remains false
-            break;
-          case "block":
-            await store.transition(action.taskId, "blocked", { reason: action.reason });
-            try {
-              await logger.logTransition(
-                action.taskId,
-                action.fromStatus ?? "unknown",
-                "blocked",
-                "scheduler",
-                action.reason,
-              );
-            } catch {
-              // Logging errors should not crash the scheduler
-            }
-            // BUG-002 fix: Don't count non-dispatch actions in actionsExecuted
-            // executed remains false
-            break;
-          case "assign": {
-            // AOF-8s8: Extracted to task-dispatcher.ts
-            const effectiveConcurrencyLimitRef = { value: effectiveConcurrencyLimit };
-            const result = await executeAssignAction(
-              action,
-              store,
-              logger,
-              config,
-              allTasks,
-              effectiveConcurrencyLimitRef
-            );
-            executed = result.executed;
-            failed = result.failed;
-            effectiveConcurrencyLimit = effectiveConcurrencyLimitRef.value;
-            break;
-          }
-          case "promote": {
-            const { taskId, fromStatus, toStatus } = action;
-            await store.transition(taskId, toStatus as TaskStatus, {
-              agent: "aof-scheduler",
-              reason: action.reason,
-            });
-            
-            try {
-              await logger.logTransition(
-                taskId,
-                fromStatus ?? "backlog",
-                toStatus ?? "ready",
-                "scheduler",
-                action.reason
-              );
-            } catch {
-              // Logging errors should not crash the scheduler
-            }
-            
-            tasksPromoted++;
-            
-            // executed remains false - this is a status transition, not a dispatch
-            break;
-          }
-          case "alert":
-            // BUG-TELEMETRY-002: Use console.error for gateway log visibility
-            // Alert actions are logged but not executed (Phase 1+: need comms adapter)
-            console.error(`[AOF] ALERT: Task ${action.taskId} (${action.taskTitle}) needs routing assignment`);
-            console.error(`[AOF] ALERT:   Reason: ${action.reason}`);
-            console.error(`[AOF] ALERT:   Action: Manually assign via aof_dispatch --agent <agent-id> or update task routing`);
-            break;
-          case "sla_violation":
-            // AOF-ae6: SLA violation detected
-            // Log to events.jsonl
-            try {
-              await logger.log("sla.violation", "scheduler", {
-                taskId: action.taskId,
-                payload: {
-                  duration: action.duration,
-                  limit: action.limit,
-                  agent: action.agent,
-                  timestamp: Date.now(),
-                },
-              });
-            } catch {
-              // Logging errors should not crash the scheduler
-            }
-
-            // Emit alert if not rate-limited
-            if (action.reason?.includes("alert will be sent")) {
-              slaChecker.recordAlert(action.taskId);
-              
-              const durationHrs = ((action.duration ?? 0) / 3600000).toFixed(1);
-              const limitHrs = ((action.limit ?? 0) / 3600000).toFixed(1);
-              
-              console.error(`[AOF] SLA VIOLATION: Task ${action.taskId} (${action.taskTitle})`);
-              console.error(`[AOF] SLA VIOLATION:   Duration: ${durationHrs}h (limit: ${limitHrs}h)`);
-              console.error(`[AOF] SLA VIOLATION:   Agent: ${action.agent ?? "unassigned"}`);
-              console.error(`[AOF] SLA VIOLATION:   Action: Check if agent is stuck or task needs SLA override`);
-            }
-            break;
-        }
-        if (executed) {
-          actionsExecuted++;
-        }
-        if (failed) {
-          actionsFailed++;
-        }
-      } catch (err) {
-        // Outer exception handler (for non-assign action failures)
-        try {
-          await logger.logDispatch("dispatch.error", "scheduler", action.taskId, {
-            error: (err as Error).message,
-          });
-        } catch {
-          // Logging errors should not crash the scheduler
-        }
-        actionsFailed++;
-      }
-    }
-  }
+  const actionsExecuted = executionStats.actionsExecuted;
+  const actionsFailed = executionStats.actionsFailed;
+  const leasesExpired = executionStats.leasesExpired;
+  const tasksRequeued = executionStats.tasksRequeued;
+  const tasksPromoted = executionStats.tasksPromoted;
+  effectiveConcurrencyLimit = executionStats.updatedConcurrencyLimit;
 
   // 7. Recalculate stats after actions (reflect post-execution state)
   if (!config.dryRun && actionsExecuted > 0) {
