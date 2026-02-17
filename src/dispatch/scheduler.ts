@@ -44,6 +44,10 @@ export interface SchedulerConfig {
   slaChecker?: SLAChecker;
   /** Maximum concurrent in-progress tasks across all agents (default: 3). */
   maxConcurrentDispatches?: number;
+  /** Minimum interval between dispatches in milliseconds (default: 5000). */
+  minDispatchIntervalMs?: number;
+  /** Maximum dispatches per poll cycle (default: 2). */
+  maxDispatchesPerPoll?: number;
 }
 
 export interface SchedulerAction {
@@ -88,6 +92,29 @@ const leaseRenewalTimers = new Map<string, NodeJS.Timeout>();
  * Starts null, set to min(platformLimit, config.maxConcurrentDispatches) when detected.
  */
 let effectiveConcurrencyLimit: number | null = null;
+
+/**
+ * Throttle state tracking for scheduler dispatch control.
+ * Prevents resource exhaustion by rate-limiting task dispatches.
+ */
+interface ThrottleState {
+  /** Timestamp of last dispatch (global). */
+  lastDispatchAt: number;
+  /** Timestamp of last dispatch per team. */
+  lastDispatchByTeam: Map<string, number>;
+}
+
+/** Global throttle state (persists across poll cycles). */
+const throttleState: ThrottleState = {
+  lastDispatchAt: 0,
+  lastDispatchByTeam: new Map(),
+};
+
+/** Reset throttle state (for testing). */
+export function resetThrottleState(): void {
+  throttleState.lastDispatchAt = 0;
+  throttleState.lastDispatchByTeam.clear();
+}
 
 function leaseRenewalKey(store: ITaskStore, taskId: string): string {
   return `${store.projectId}:${taskId}`;
@@ -613,6 +640,45 @@ export async function poll(
   const currentInProgress = stats.inProgress;
   let pendingDispatches = 0;
   
+  // AOF-adf: Load org chart for per-team throttling
+  let orgChart: Awaited<ReturnType<typeof loadOrgChart>> | null = null;
+  try {
+    const orgChartPath = join(store.projectRoot, "org-chart.yaml");
+    const result = await loadOrgChart(orgChartPath);
+    if (result.success) {
+      orgChart = result.chart;
+    }
+  } catch (err) {
+    // Org chart is optional - continue without per-team overrides
+  }
+  
+  // AOF-adf: Build team configuration map
+  const teamConfigMap = new Map<string, { maxConcurrent?: number; minIntervalMs?: number }>();
+  if (orgChart?.chart) {
+    for (const team of orgChart.chart.teams) {
+      if (team.dispatch) {
+        teamConfigMap.set(team.id, {
+          maxConcurrent: team.dispatch.maxConcurrent,
+          minIntervalMs: team.dispatch.minIntervalMs,
+        });
+      }
+    }
+  }
+  
+  // AOF-adf: Track in-progress tasks by team
+  const inProgressByTeam = new Map<string, number>();
+  for (const task of inProgressTasks) {
+    const team = task.frontmatter.routing.team;
+    if (team) {
+      inProgressByTeam.set(team, (inProgressByTeam.get(team) ?? 0) + 1);
+    }
+  }
+  
+  // AOF-adf: Throttle config with defaults (conservative - opt-in)
+  const minDispatchIntervalMs = config.minDispatchIntervalMs ?? 0; // 0 = disabled
+  const maxDispatchesPerPoll = config.maxDispatchesPerPoll ?? 10; // 10 = effectively disabled
+  let dispatchesThisPoll = 0;
+  
   // Log concurrency status
   console.info(
     `[AOF] Concurrency limit: ${currentInProgress}/${maxDispatches} in-progress` +
@@ -670,13 +736,63 @@ export async function poll(
       continue;
     }
     
-    // Concurrency cap: skip if at capacity
+    // AOF-adf: Throttle checks
+    const routing = task.frontmatter.routing;
+    const team = routing.team;
+    const now = Date.now();
+    
+    // Check 1: Global concurrency cap
     if (currentInProgress + pendingDispatches >= maxDispatches) {
-      console.info(`[AOF] Concurrency cap: skipping ${task.frontmatter.id} (${currentInProgress} in-progress + ${pendingDispatches} pending >= ${maxDispatches})`);
+      console.info(`[AOF] Dispatch throttled: ${task.frontmatter.id} (global concurrency ${currentInProgress + pendingDispatches}/${maxDispatches})`);
       continue;
     }
     
-    const routing = task.frontmatter.routing;
+    // Check 2: Per-team concurrency cap (if team override exists)
+    if (team && teamConfigMap.has(team)) {
+      const teamConfig = teamConfigMap.get(team)!;
+      const teamMaxConcurrent = teamConfig.maxConcurrent;
+      if (teamMaxConcurrent !== undefined) {
+        const teamInProgress = inProgressByTeam.get(team) ?? 0;
+        if (teamInProgress >= teamMaxConcurrent) {
+          console.info(`[AOF] Dispatch throttled: ${task.frontmatter.id} (team ${team} concurrency ${teamInProgress}/${teamMaxConcurrent})`);
+          continue;
+        }
+      }
+    }
+    
+    // Check 3: Global minimum dispatch interval (across polls, not within a single poll)
+    // Only enforce if minDispatchIntervalMs > 0 (explicitly enabled)
+    if (minDispatchIntervalMs > 0) {
+      const timeSinceLastDispatch = now - throttleState.lastDispatchAt;
+      if (throttleState.lastDispatchAt > 0 && timeSinceLastDispatch < minDispatchIntervalMs) {
+        const waitTimeMs = minDispatchIntervalMs - timeSinceLastDispatch;
+        console.info(`[AOF] Dispatch throttled: ${task.frontmatter.id} (global interval ${Math.round(timeSinceLastDispatch)}ms < ${minDispatchIntervalMs}ms, wait ${Math.round(waitTimeMs)}ms)`);
+        // Throttle ALL remaining tasks in this poll if interval not elapsed
+        break;
+      }
+    }
+    
+    // Check 4: Per-team minimum dispatch interval (if team override exists)
+    if (team && teamConfigMap.has(team)) {
+      const teamConfig = teamConfigMap.get(team)!;
+      const teamMinIntervalMs = teamConfig.minIntervalMs;
+      if (teamMinIntervalMs !== undefined) {
+        const teamLastDispatch = throttleState.lastDispatchByTeam.get(team) ?? 0;
+        const teamTimeSinceLastDispatch = now - teamLastDispatch;
+        if (teamLastDispatch > 0 && teamTimeSinceLastDispatch < teamMinIntervalMs) {
+          const waitTimeMs = teamMinIntervalMs - teamTimeSinceLastDispatch;
+          console.info(`[AOF] Dispatch throttled: ${task.frontmatter.id} (team ${team} interval ${Math.round(teamTimeSinceLastDispatch)}ms < ${teamMinIntervalMs}ms, wait ${Math.round(waitTimeMs)}ms)`);
+          continue; // Skip this task, but allow other teams
+        }
+      }
+    }
+    
+    // Check 5: Max dispatches per poll cycle
+    if (dispatchesThisPoll >= maxDispatchesPerPoll) {
+      console.info(`[AOF] Dispatch throttled: ${task.frontmatter.id} (poll cycle limit ${dispatchesThisPoll}/${maxDispatchesPerPoll})`);
+      continue;
+    }
+    
     const targetAgent = routing.agent ?? routing.role ?? routing.team;
 
     if (targetAgent) {
@@ -688,6 +804,12 @@ export async function poll(
         reason: `Pending task with routing target: ${targetAgent}`,
       });
       pendingDispatches++;
+      dispatchesThisPoll++; // AOF-adf: Track dispatches this poll cycle
+      
+      // AOF-adf: Reserve team concurrency slot for this planned dispatch
+      if (team && !config.dryRun) {
+        inProgressByTeam.set(team, (inProgressByTeam.get(team) ?? 0) + 1);
+      }
     } else if (routing.tags && routing.tags.length > 0) {
       // GAP-004 fix: Task has tags but no explicit agent/role/team
       // Log error and create alert action (tags-only routing not supported)
@@ -1077,6 +1199,17 @@ export async function poll(
 
                   startLeaseRenewal(store, action.taskId, action.agent!, config.defaultLeaseTtlMs);
                   executed = true;
+                  
+                  // AOF-adf: Update throttle state after successful dispatch
+                  const dispatchedTask = await store.get(action.taskId);
+                  if (dispatchedTask) {
+                    const dispatchTime = Date.now();
+                    throttleState.lastDispatchAt = dispatchTime;
+                    const dispatchTeam = dispatchedTask.frontmatter.routing.team;
+                    if (dispatchTeam) {
+                      throttleState.lastDispatchByTeam.set(dispatchTeam, dispatchTime);
+                    }
+                  }
                 } else {
                   // Check if this is a platform concurrency limit error
                   if (result.platformLimit !== undefined) {

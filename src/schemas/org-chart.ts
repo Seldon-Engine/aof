@@ -240,6 +240,15 @@ export const MurmurConfig = z.object({
 });
 export type MurmurConfig = z.infer<typeof MurmurConfig>;
 
+/** Per-team dispatch throttling configuration (overrides global defaults). */
+export const TeamDispatchConfig = z.object({
+  /** Maximum concurrent dispatches for this team (overrides global). */
+  maxConcurrent: z.number().int().positive().optional(),
+  /** Minimum interval between dispatches in milliseconds (overrides global). */
+  minIntervalMs: z.number().int().nonnegative().optional(),
+});
+export type TeamDispatchConfig = z.infer<typeof TeamDispatchConfig>;
+
 /** Team definition. */
 export const OrgTeam = z.object({
   id: z.string().min(1),
@@ -253,6 +262,8 @@ export const OrgTeam = z.object({
   technicalLead: z.string().optional(),
   /** Murmur orchestration configuration (optional). */
   murmur: MurmurConfig.optional(),
+  /** Per-team dispatch throttling configuration (optional). */
+  dispatch: TeamDispatchConfig.optional(),
 });
 export type OrgTeam = z.infer<typeof OrgTeam>;
 

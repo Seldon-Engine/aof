@@ -17,6 +17,12 @@ export const DispatcherConfig = z.object({
   maxLeaseRenewals: z.number().int().nonnegative().default(3),
   /** Enable dry-run mode (log decisions, don't dispatch). */
   dryRun: z.boolean().default(false),
+  /** Maximum concurrent dispatches globally (default: 3). */
+  maxConcurrentDispatches: z.number().int().positive().default(3),
+  /** Minimum interval between dispatches in milliseconds (default: 0 = disabled). */
+  minDispatchIntervalMs: z.number().int().nonnegative().default(0),
+  /** Maximum dispatches per poll cycle (default: 10 = effectively disabled). */
+  maxDispatchesPerPoll: z.number().int().positive().default(10),
 });
 export type DispatcherConfig = z.infer<typeof DispatcherConfig>;
 
