@@ -28,7 +28,7 @@ import { evaluateMurmurTriggers } from "./murmur-integration.js";
 import { loadOrgChart } from "../org/loader.js";
 import { checkThrottle, updateThrottleState, resetThrottleState as resetThrottleStateInternal } from "./throttle.js";
 import { isLeaseActive, startLeaseRenewal, stopLeaseRenewal, cleanupLeaseRenewals } from "./lease-manager.js";
-import { escalateGateTimeout } from "./escalation.js";
+import { escalateGateTimeout, checkGateTimeouts } from "./escalation.js";
 import { executeAssignAction, buildDispatchActions } from "./task-dispatcher.js";
 import { checkPromotionEligibility } from "./promotion.js";
 
@@ -94,97 +94,6 @@ export function resetThrottleState(): void {
   resetThrottleStateInternal();
 }
 
-/**
- * Load project manifest from project.yaml file.
- * 
- * @param store - Task store
- * @param projectId - Project identifier
- * @returns Project manifest or null if not found
- */
-async function loadProjectManifest(
-  store: ITaskStore,
-  projectId: string
-): Promise<ProjectManifest | null> {
-  try {
-    const projectPath = join(store.projectRoot, "projects", projectId, "project.yaml");
-    const content = await readFile(projectPath, "utf-8");
-    const manifest = parseYaml(content) as ProjectManifest;
-    return manifest;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Check for tasks exceeding gate timeouts and escalate.
- * 
- * @param store - Task store
- * @param logger - Event logger
- * @param config - Scheduler config
- * @param metrics - Optional metrics instance
- * @returns Array of scheduler actions (alerts for timeouts)
- */
-async function checkGateTimeouts(
-  store: ITaskStore,
-  logger: EventLogger,
-  config: SchedulerConfig,
-  metrics?: import("../metrics/exporter.js").AOFMetrics
-): Promise<SchedulerAction[]> {
-  const actions: SchedulerAction[] = [];
-  const now = Date.now();
-  
-  // Scan all in-progress tasks
-  const tasks = await store.list({ status: "in-progress" });
-  
-  for (const task of tasks) {
-    // Skip tasks not in gate workflow
-    if (!task.frontmatter.gate) continue;
-    
-    // Load project workflow
-    const projectId = task.frontmatter.project;
-    if (!projectId) continue;
-    
-    const projectManifest = await loadProjectManifest(store, projectId);
-    if (!projectManifest?.workflow) continue;
-    
-    const workflow = projectManifest.workflow;
-    const currentGate = workflow.gates.find(g => g.id === task.frontmatter.gate?.current);
-    if (!currentGate) continue;
-    
-    // Check if gate has timeout configured
-    if (!currentGate.timeout) continue;
-    
-    // Parse timeout duration
-    const timeoutMs = parseDuration(currentGate.timeout);
-    if (!timeoutMs) {
-      console.warn(
-        `[AOF] Invalid timeout format for gate ${currentGate.id}: ${currentGate.timeout}`
-      );
-      continue;
-    }
-    
-    // Check if task has exceeded timeout
-    const entered = new Date(task.frontmatter.gate.entered).getTime();
-    const elapsed = now - entered;
-    
-    if (elapsed > timeoutMs) {
-      // Timeout exceeded - escalate
-      const action = await escalateGateTimeout(
-        task,
-        currentGate,
-        workflow,
-        elapsed,
-        store,
-        logger,
-        config,
-        metrics
-      );
-      actions.push(action);
-    }
-  }
-  
-  return actions;
-}
 
 /**
  * Run one scheduler poll cycle.
