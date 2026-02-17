@@ -2,20 +2,25 @@ import type { ProtocolEnvelope as ProtocolEnvelopeType } from "../schemas/protoc
 import type { StatusUpdatePayload } from "../schemas/protocol.js";
 import type { HandoffRequestPayload, HandoffAckPayload } from "../schemas/protocol.js";
 import type { Task } from "../schemas/task.js";
-import { isValidTransition } from "../schemas/task.js";
 import type { TaskStatus } from "../schemas/task.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import { serializeTask } from "../store/task-store.js";
 import type { NotificationService } from "../events/notifier.js";
 import { readRunResult, writeRunResult } from "../recovery/run-artifacts.js";
-import type { RunResult } from "../schemas/run-result.js";
 import { writeHandoffArtifacts } from "../delegation/index.js";
-import { resolveCompletionTransitions } from "./completion-utils.js";
 import writeFileAtomic from "write-file-atomic";
 import type { TaskLockManager } from "./task-lock.js";
 import { InMemoryTaskLockManager } from "./task-lock.js";
 import { parseProtocolMessage, type ProtocolLogger } from "./parsers.js";
-import { buildCompletionReason, buildStatusReason, shouldAppendWorkLog, buildWorkLogEntry, appendSection } from "./formatters.js";
+import { buildStatusReason, shouldAppendWorkLog, buildWorkLogEntry, appendSection } from "./formatters.js";
+import {
+  resolveAuthorizedAgent,
+  checkAuthorization,
+  applyCompletionOutcome,
+  transitionTask,
+  logTransition,
+  notifyTransition,
+} from "./router-helpers.js";
 
 // Re-export for backward compatibility
 export { parseProtocolMessage } from "./parsers.js";
@@ -128,7 +133,7 @@ export class ProtocolRouter {
     }
 
     // Authorization check: only assigned agent can send completion reports
-    if (!(await this.checkAuthorization(envelope, task))) {
+    if (!(await checkAuthorization(envelope.fromAgent, envelope.taskId, task, this.logger))) {
       return;
     }
 
@@ -147,7 +152,7 @@ export class ProtocolRouter {
 
     await writeRunResult(store, envelope.taskId, runResult);
 
-    await this.applyCompletionOutcome(
+    await applyCompletionOutcome(
       task,
       {
         actor: envelope.fromAgent,
@@ -156,6 +161,8 @@ export class ProtocolRouter {
         blockers: envelope.payload.blockers,
       },
       store,
+      this.logger,
+      this.notifier,
     );
 
     await this.logger?.log("task.completed", envelope.fromAgent, {
@@ -193,7 +200,7 @@ export class ProtocolRouter {
     if (envelope.payload.status) {
       const targetStatus = envelope.payload.status;
       if (updatedTask.frontmatter.status !== targetStatus) {
-        const nextTask = await this.transitionTask(
+        const nextTask = await transitionTask(
           updatedTask,
           targetStatus,
           actor,
@@ -210,19 +217,21 @@ export class ProtocolRouter {
     }
 
     if (transitioned) {
-      await this.logTransition(
+      await logTransition(
         updatedTask.frontmatter.id,
         task.frontmatter.status,
         updatedTask.frontmatter.status,
         actor,
         reason,
+        this.logger,
       );
-      await this.notifyTransition(
+      await notifyTransition(
         updatedTask.frontmatter.id,
         task.frontmatter.status,
         updatedTask.frontmatter.status,
         actor,
         reason,
+        this.notifier,
       );
     }
   }
@@ -232,7 +241,7 @@ export class ProtocolRouter {
     for (const task of inProgress) {
       const runResult = await readRunResult(this.store, task.frontmatter.id);
       if (!runResult) continue;
-      await this.applyCompletionOutcome(
+      await applyCompletionOutcome(
         task,
         {
           actor: runResult.agentId,
@@ -241,6 +250,8 @@ export class ProtocolRouter {
           blockers: runResult.blockers,
         },
         this.store,
+        this.logger,
+        this.notifier,
       );
     }
   }
@@ -282,7 +293,7 @@ export class ProtocolRouter {
     }
 
     // Authorization check: only assigned agent can send handoff requests
-    if (!(await this.checkAuthorization(envelope, childTask))) {
+    if (!(await checkAuthorization(envelope.fromAgent, envelope.taskId, childTask, this.logger))) {
       return;
     }
 
@@ -360,7 +371,7 @@ export class ProtocolRouter {
     }
 
     // Authorization check: only assigned agent can send handoff acks
-    if (!(await this.checkAuthorization(envelope, childTask))) {
+    if (!(await checkAuthorization(envelope.fromAgent, envelope.taskId, childTask, this.logger))) {
       return;
     }
 
@@ -371,105 +382,28 @@ export class ProtocolRouter {
     } else {
       // handoff.rejected
       const reason = payload.reason ?? "handoff_rejected";
-      await this.transitionTask(childTask, "blocked", envelope.fromAgent, reason, store);
-      await this.logTransition(
+      await transitionTask(childTask, "blocked", envelope.fromAgent, reason, store);
+      await logTransition(
         childTask.frontmatter.id,
         childTask.frontmatter.status,
         "blocked",
         envelope.fromAgent,
         reason,
+        this.logger,
       );
-      await this.notifyTransition(
+      await notifyTransition(
         childTask.frontmatter.id,
         childTask.frontmatter.status,
         "blocked",
         envelope.fromAgent,
         reason,
+        this.notifier,
       );
       await this.logger?.log("delegation.rejected", envelope.fromAgent, {
         taskId: envelope.taskId,
         payload: { reason },
       });
     }
-  }
-
-  private resolveAuthorizedAgent(task: Task): string | undefined {
-    return task.frontmatter.lease?.agent ?? task.frontmatter.routing?.agent;
-  }
-
-  private async checkAuthorization(envelope: ProtocolEnvelopeType, task: Task): Promise<boolean> {
-    const authorizedAgent = this.resolveAuthorizedAgent(task);
-    if (!authorizedAgent) {
-      await this.logger?.log("protocol.message.rejected", "system", {
-        taskId: envelope.taskId,
-        payload: { reason: "unassigned_task", sender: envelope.fromAgent }
-      });
-      return false;
-    }
-    if (envelope.fromAgent !== authorizedAgent) {
-      await this.logger?.log("protocol.message.rejected", "system", {
-        taskId: envelope.taskId,
-        payload: { reason: "unauthorized_agent", expected: authorizedAgent, received: envelope.fromAgent }
-      });
-      return false;
-    }
-    return true;
-  }
-
-  private async applyCompletionOutcome(
-    task: Task,
-    opts: {
-      actor: string;
-      outcome: RunResult["outcome"];
-      notes?: string;
-      blockers?: string[];
-    },
-    store: ITaskStore,
-  ): Promise<void> {
-    const transitions = resolveCompletionTransitions(task, opts.outcome);
-    if (transitions.length === 0) return;
-
-    let current = task;
-    for (const nextStatus of transitions) {
-      if (current.frontmatter.status === nextStatus) continue;
-      if (!isValidTransition(current.frontmatter.status, nextStatus)) continue;
-      const previousStatus = current.frontmatter.status;
-      current = await this.transitionTask(
-        current,
-        nextStatus,
-        opts.actor,
-        buildCompletionReason(opts),
-        store,
-      );
-      if (current.frontmatter.status !== previousStatus) {
-        await this.logTransition(
-          current.frontmatter.id,
-          previousStatus,
-          current.frontmatter.status,
-          opts.actor,
-          buildCompletionReason(opts),
-        );
-        await this.notifyTransition(
-          current.frontmatter.id,
-          previousStatus,
-          current.frontmatter.status,
-          opts.actor,
-          buildCompletionReason(opts),
-        );
-      }
-    }
-  }
-
-  private async transitionTask(
-    task: Task,
-    status: TaskStatus,
-    actor: string,
-    reason: string | undefined,
-    store: ITaskStore,
-  ): Promise<Task> {
-    if (task.frontmatter.status === status) return task;
-    if (!isValidTransition(task.frontmatter.status, status)) return task;
-    return store.transition(task.frontmatter.id, status, { reason, agent: actor });
   }
 
   private async appendWorkLog(
@@ -481,26 +415,6 @@ export class ProtocolRouter {
     if (!entry) return task;
     const body = appendSection(task.body, "Work Log", [entry]);
     return store.updateBody(task.frontmatter.id, body);
-  }
-
-  private async logTransition(taskId: string, from: TaskStatus, to: TaskStatus, actor: string, reason?: string): Promise<void> {
-    await this.logger?.log("task.transitioned", actor, {
-      taskId,
-      payload: { from, to, reason },
-    });
-  }
-
-  private async notifyTransition(taskId: string, from: TaskStatus, to: TaskStatus, actor: string, reason?: string): Promise<void> {
-    if (!this.notifier) return;
-    if (to !== "review" && to !== "blocked" && to !== "done") return;
-    await this.notifier.notify({
-      eventId: Date.now(),
-      type: "task.transitioned",
-      timestamp: new Date().toISOString(),
-      actor,
-      taskId,
-      payload: { from, to, reason },
-    });
   }
 }
 
