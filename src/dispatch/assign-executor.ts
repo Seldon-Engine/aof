@@ -10,6 +10,7 @@ import type { EventLogger } from "../events/logger.js";
 import type { DispatchConfig, SchedulerAction } from "./task-dispatcher.js";
 import { acquireLease, releaseLease } from "../store/lease.js";
 import { isLeaseActive, startLeaseRenewal } from "./lease-manager.js";
+import { updateThrottleState } from "./throttle.js";
 import { serializeTask } from "../store/task-store.js";
 import { buildGateContext } from "./gate-context-builder.js";
 import { join, relative } from "node:path";
