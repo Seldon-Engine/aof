@@ -16,6 +16,7 @@ export interface MurmurState {
   completionsSinceLastReview: number; // tasks completed since last review
   failuresSinceLastReview: number; // tasks failed/dead-lettered since last review
   currentReviewTaskId: string | null; // if a murmur review is currently in-progress
+  reviewStartedAt: string | null; // ISO timestamp when current review started
   lastTriggeredBy: string | null; // which trigger kind fired last
 }
 
@@ -101,6 +102,7 @@ export class MurmurStateManager {
         completionsSinceLastReview: parsed.completionsSinceLastReview ?? 0,
         failuresSinceLastReview: parsed.failuresSinceLastReview ?? 0,
         currentReviewTaskId: parsed.currentReviewTaskId ?? null,
+        reviewStartedAt: parsed.reviewStartedAt ?? null,
         lastTriggeredBy: parsed.lastTriggeredBy ?? null,
       };
     } catch (error) {
@@ -170,8 +172,10 @@ export class MurmurStateManager {
     const release = await this.acquireLock(teamId);
     try {
       const state = await this.load(teamId);
+      const now = new Date().toISOString();
       state.currentReviewTaskId = taskId;
-      state.lastReviewAt = new Date().toISOString();
+      state.reviewStartedAt = now;
+      state.lastReviewAt = now;
       state.lastTriggeredBy = triggeredBy;
       state.completionsSinceLastReview = 0;
       state.failuresSinceLastReview = 0;
@@ -182,13 +186,14 @@ export class MurmurStateManager {
   }
 
   /**
-   * End a review for a team. Clears currentReviewTaskId.
+   * End a review for a team. Clears currentReviewTaskId and reviewStartedAt.
    */
   async endReview(teamId: string): Promise<void> {
     const release = await this.acquireLock(teamId);
     try {
       const state = await this.load(teamId);
       state.currentReviewTaskId = null;
+      state.reviewStartedAt = null;
       await this.save(teamId, state);
     } finally {
       release();
@@ -221,6 +226,7 @@ export class MurmurStateManager {
       completionsSinceLastReview: 0,
       failuresSinceLastReview: 0,
       currentReviewTaskId: null,
+      reviewStartedAt: null,
       lastTriggeredBy: null,
     };
   }

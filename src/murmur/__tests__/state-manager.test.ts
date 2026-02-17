@@ -33,6 +33,7 @@ describe("MurmurStateManager", () => {
         completionsSinceLastReview: 0,
         failuresSinceLastReview: 0,
         currentReviewTaskId: null,
+        reviewStartedAt: null,
         lastTriggeredBy: null,
       });
     });
@@ -45,6 +46,7 @@ describe("MurmurStateManager", () => {
         completionsSinceLastReview: 5,
         failuresSinceLastReview: 2,
         currentReviewTaskId: "TASK-123",
+        reviewStartedAt: "2026-02-17T10:00:00.000Z",
         lastTriggeredBy: "completionBatch",
       };
 
@@ -81,6 +83,7 @@ describe("MurmurStateManager", () => {
         completionsSinceLastReview: 0,
         failuresSinceLastReview: 0,
         currentReviewTaskId: null,
+        reviewStartedAt: null,
         lastTriggeredBy: null,
       });
 

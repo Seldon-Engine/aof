@@ -12,6 +12,7 @@ import type { OrgTeam } from "../schemas/org-chart.js";
 import { MurmurStateManager } from "../murmur/state-manager.js";
 import { evaluateTriggers } from "../murmur/trigger-evaluator.js";
 import { buildReviewContext } from "../murmur/context-builder.js";
+import { cleanupStaleReview } from "../murmur/cleanup.js";
 import { relative, join } from "node:path";
 import { acquireLease } from "../store/lease.js";
 
@@ -30,6 +31,8 @@ export interface MurmurIntegrationOptions {
   defaultLeaseTtlMs: number;
   /** Spawn timeout for review tasks. */
   spawnTimeoutMs?: number;
+  /** Review timeout for stale review cleanup (default: 30 minutes). */
+  reviewTimeoutMs?: number;
   /** Maximum concurrent in-progress tasks (for concurrency check). */
   maxConcurrentDispatches: number;
   /** Current in-progress task count. */
@@ -62,6 +65,7 @@ export async function evaluateMurmurTriggers(
     dryRun,
     defaultLeaseTtlMs,
     spawnTimeoutMs = 30_000,
+    reviewTimeoutMs = 30 * 60 * 1000, // 30 minutes default
     maxConcurrentDispatches,
     currentInProgress,
   } = options;
@@ -108,6 +112,12 @@ export async function evaluateMurmurTriggers(
     try {
       // Load murmur state
       const state = await stateManager.load(team.id);
+
+      // Check for stale review and clean up if needed
+      await cleanupStaleReview(team.id, state, store, stateManager, logger, {
+        reviewTimeoutMs,
+        dryRun,
+      });
 
       // Get task stats for this team
       const teamTasks = tasksByTeam.get(team.id) ?? [];
