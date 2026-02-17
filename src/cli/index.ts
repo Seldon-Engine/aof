@@ -598,6 +598,35 @@ taskDep
     await taskDepRemove(store, taskId, blockerId);
   });
 
+task
+  .command("block <task-id>")
+  .description("Block a task with a reason")
+  .requiredOption("--reason <text>", "Reason for blocking the task")
+  .option("--project <id>", "Project ID", "_inbox")
+  .action(async (taskId: string, opts: { reason: string; project: string }) => {
+    const { createProjectStore } = await import("./project-utils.js");
+    const { taskBlock } = await import("./commands/task-block.js");
+    const root = program.opts()["root"] as string;
+    const { store } = await createProjectStore({ projectId: opts.project, vaultRoot: root });
+    await store.init();
+
+    await taskBlock(store, taskId, { reason: opts.reason });
+  });
+
+task
+  .command("unblock <task-id>")
+  .description("Unblock a task")
+  .option("--project <id>", "Project ID", "_inbox")
+  .action(async (taskId: string, opts: { project: string }) => {
+    const { createProjectStore } = await import("./project-utils.js");
+    const { taskUnblock } = await import("./commands/task-unblock.js");
+    const root = program.opts()["root"] as string;
+    const { store } = await createProjectStore({ projectId: opts.project, vaultRoot: root });
+    await store.init();
+
+    await taskUnblock(store, taskId);
+  });
+
 // --- org ---
 const org = program
   .command("org")
