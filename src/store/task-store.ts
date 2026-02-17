@@ -19,6 +19,7 @@ import { parseTaskFile, serializeTask, extractTaskSections, contentHash } from "
 import { hasCycle, addDependency, removeDependency } from "./task-deps.js";
 import { lintTasks } from "./task-validation.js";
 import { getTaskInputs as getInputs, getTaskOutputs as getOutputs, writeTaskOutput as writeOutput } from "./task-file-ops.js";
+import { blockTask, unblockTask, cancelTask } from "./task-lifecycle.js";
 
 const FRONTMATTER_FENCE = "---";
 
@@ -399,76 +400,15 @@ export class FilesystemTaskStore implements ITaskStore {
    * stores cancellation reason in metadata, and emits task.cancelled event.
    */
   async cancel(id: string, reason?: string): Promise<Task> {
-    const task = await this.get(id);
-    if (!task) {
-      throw new Error(`Task not found: ${id}`);
-    }
-
-    const currentStatus = task.frontmatter.status;
-
-    // Reject cancellation of already-terminal tasks
-    if (currentStatus === "done" || currentStatus === "cancelled") {
-      throw new Error(
-        `Cannot cancel task ${id}: already in terminal state '${currentStatus}'`,
-      );
-    }
-
-    // Store cancellation reason in metadata
-    if (reason) {
-      task.frontmatter.metadata = {
-        ...task.frontmatter.metadata,
-        cancellationReason: reason,
-      };
-    }
-
-    const now = new Date().toISOString();
-    task.frontmatter.status = "cancelled";
-    task.frontmatter.updatedAt = now;
-    task.frontmatter.lastTransitionAt = now;
-
-    // Clear any active lease
-    if (task.frontmatter.lease) {
-      task.frontmatter.lease = undefined;
-    }
-
-    const oldPath = task.path ?? this.taskPath(id, currentStatus);
-    const newPath = this.taskPath(id, "cancelled");
-
-    if (oldPath !== newPath) {
-      // Atomic transition: write to old location first, then rename
-      await writeFileAtomic(oldPath, serializeTask(task));
-      
-      // Atomic move to new location
-      await rename(oldPath, newPath);
-
-      // Move companion directories if present
-      const oldDir = this.taskDir(id, currentStatus);
-      const newDir = this.taskDir(id, "cancelled");
-      try {
-        await rename(oldDir, newDir);
-      } catch {
-        // Companion directory missing — ignore
-      }
-    } else {
-      // Same location, just update content atomically
-      await writeFileAtomic(newPath, serializeTask(task));
-    }
-
-    task.path = newPath;
-    
-    // Emit task.cancelled event
-    if (this.logger) {
-      await this.logger.log("task.cancelled", "system", {
-        taskId: id,
-        payload: { reason, from: currentStatus },
-      });
-    }
-
-    if (this.hooks?.afterTransition) {
-      await this.hooks.afterTransition(task, currentStatus);
-    }
-
-    return task;
+    return cancelTask(
+      id,
+      reason,
+      this.get.bind(this),
+      this.taskPath.bind(this),
+      this.taskDir.bind(this),
+      this.logger,
+      this.hooks,
+    );
   }
 
   /** Update task body content (recalculates content hash). */
@@ -659,43 +599,14 @@ export class FilesystemTaskStore implements ITaskStore {
    * Can only block tasks from non-terminal states.
    */
   async block(id: string, reason: string): Promise<Task> {
-    const task = await this.get(id);
-    if (!task) {
-      throw new Error(`Task not found: ${id}`);
-    }
-
-    const currentStatus = task.frontmatter.status;
-
-    // Cannot block if already blocked
-    if (currentStatus === "blocked") {
-      throw new Error(`Task ${id} is already blocked`);
-    }
-
-    // Terminal states cannot be blocked (done, cancelled, deadletter)
-    const terminalStates: TaskStatus[] = ["done", "cancelled", "deadletter"];
-    if (terminalStates.includes(currentStatus)) {
-      throw new Error(`Cannot block task ${id} in terminal state: ${currentStatus}`);
-    }
-
-    // Store block reason in metadata
-    task.frontmatter.metadata.blockReason = reason;
-
-    // First update the metadata, then transition
-    const filePath = task.path ?? this.taskPath(id, currentStatus);
-    await writeFileAtomic(filePath, serializeTask(task));
-
-    // Transition to blocked state
-    const blockedTask = await this.transition(id, "blocked");
-
-    // Emit task.blocked event
-    if (this.logger) {
-      await this.logger.log("task.blocked", "system", {
-        taskId: id,
-        payload: { reason },
-      });
-    }
-
-    return blockedTask;
+    return blockTask(
+      id,
+      reason,
+      this.get.bind(this),
+      this.transition.bind(this),
+      this.taskPath.bind(this),
+      this.logger,
+    );
   }
 
   /**
@@ -704,36 +615,12 @@ export class FilesystemTaskStore implements ITaskStore {
    * Can only unblock tasks currently in blocked state.
    */
   async unblock(id: string): Promise<Task> {
-    const task = await this.get(id);
-    if (!task) {
-      throw new Error(`Task not found: ${id}`);
-    }
-
-    const currentStatus = task.frontmatter.status;
-
-    // Can only unblock tasks that are currently blocked
-    if (currentStatus !== "blocked") {
-      throw new Error(`Cannot unblock task ${id} that is not blocked (current status: ${currentStatus})`);
-    }
-
-    // Clear block reason from metadata
-    delete task.frontmatter.metadata.blockReason;
-
-    // First update the metadata, then transition
-    const filePath = task.path ?? this.taskPath(id, currentStatus);
-    await writeFileAtomic(filePath, serializeTask(task));
-
-    // Transition to ready state
-    const readyTask = await this.transition(id, "ready");
-
-    // Emit task.unblocked event
-    if (this.logger) {
-      await this.logger.log("task.unblocked", "system", {
-        taskId: id,
-        payload: {},
-      });
-    }
-
-    return readyTask;
+    return unblockTask(
+      id,
+      this.get.bind(this),
+      this.transition.bind(this),
+      this.taskPath.bind(this),
+      this.logger,
+    );
   }
 }
