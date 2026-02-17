@@ -81,6 +81,14 @@ export interface ITaskStore {
   ): Promise<Task>;
 
   /**
+   * Cancel a task.
+   * Transitions to "cancelled" status, clears any active lease,
+   * stores cancellation reason in metadata, and emits task.cancelled event.
+   * Can be called from any non-terminal state (backlog, ready, in-progress, blocked, review).
+   */
+  cancel(id: string, reason?: string): Promise<Task>;
+
+  /**
    * Update task body content.
    * Recalculates content hash and updates timestamp.
    */

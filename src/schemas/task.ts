@@ -21,6 +21,7 @@ export const TaskStatus = z.enum([
   "blocked",      // Waiting on external dependency
   "review",       // Work complete, awaiting review
   "done",         // Successfully completed
+  "cancelled",    // Cancelled by user or system
   "deadletter",   // Failed dispatch 3 times, requires manual intervention
 ]);
 export type TaskStatus = z.infer<typeof TaskStatus>;
@@ -134,12 +135,13 @@ export type Task = z.infer<typeof Task>;
  * Key = current status, Value = allowed next statuses.
  */
 export const VALID_TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
-  "backlog":     ["ready", "blocked"],
-  "ready":       ["in-progress", "blocked", "deadletter"],
-  "in-progress": ["review", "ready", "blocked"],
-  "blocked":     ["ready"],
-  "review":      ["done", "in-progress", "blocked"],
+  "backlog":     ["ready", "blocked", "cancelled"],
+  "ready":       ["in-progress", "blocked", "deadletter", "cancelled"],
+  "in-progress": ["review", "ready", "blocked", "cancelled"],
+  "blocked":     ["ready", "cancelled"],
+  "review":      ["done", "in-progress", "blocked", "cancelled"],
   "done":        [],
+  "cancelled":   [],
   "deadletter":  ["ready"],
 } as const;
 

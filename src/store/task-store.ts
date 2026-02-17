@@ -28,6 +28,7 @@ const STATUS_DIRS: readonly TaskStatus[] = [
   "blocked",
   "review",
   "done",
+  "cancelled",
   "deadletter",
 ] as const;
 
@@ -463,6 +464,84 @@ export class FilesystemTaskStore implements ITaskStore {
     if (this.hooks?.afterTransition) {
       await this.hooks.afterTransition(task, currentStatus);
     }
+    return task;
+  }
+
+  /**
+   * Cancel a task.
+   * Transitions to "cancelled" status, clears any active lease,
+   * stores cancellation reason in metadata, and emits task.cancelled event.
+   */
+  async cancel(id: string, reason?: string): Promise<Task> {
+    const task = await this.get(id);
+    if (!task) {
+      throw new Error(`Task not found: ${id}`);
+    }
+
+    const currentStatus = task.frontmatter.status;
+
+    // Reject cancellation of already-terminal tasks
+    if (currentStatus === "done" || currentStatus === "cancelled") {
+      throw new Error(
+        `Cannot cancel task ${id}: already in terminal state '${currentStatus}'`,
+      );
+    }
+
+    // Store cancellation reason in metadata
+    if (reason) {
+      task.frontmatter.metadata = {
+        ...task.frontmatter.metadata,
+        cancellationReason: reason,
+      };
+    }
+
+    const now = new Date().toISOString();
+    task.frontmatter.status = "cancelled";
+    task.frontmatter.updatedAt = now;
+    task.frontmatter.lastTransitionAt = now;
+
+    // Clear any active lease
+    if (task.frontmatter.lease) {
+      task.frontmatter.lease = undefined;
+    }
+
+    const oldPath = task.path ?? this.taskPath(id, currentStatus);
+    const newPath = this.taskPath(id, "cancelled");
+
+    if (oldPath !== newPath) {
+      // Atomic transition: write to old location first, then rename
+      await writeFileAtomic(oldPath, serializeTask(task));
+      
+      // Atomic move to new location
+      await rename(oldPath, newPath);
+
+      // Move companion directories if present
+      const oldDir = this.taskDir(id, currentStatus);
+      const newDir = this.taskDir(id, "cancelled");
+      try {
+        await rename(oldDir, newDir);
+      } catch {
+        // Companion directory missing — ignore
+      }
+    } else {
+      // Same location, just update content atomically
+      await writeFileAtomic(newPath, serializeTask(task));
+    }
+
+    task.path = newPath;
+    
+    // Emit task.cancelled event
+    if (this.logger) {
+      await this.logger.log("task.cancelled", "system", {
+        taskId: id,
+        payload: { reason, from: currentStatus },
+      });
+    }
+
+    if (this.hooks?.afterTransition) {
+      await this.hooks.afterTransition(task, currentStatus);
+    }
+
     return task;
   }
 
