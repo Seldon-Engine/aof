@@ -19,3 +19,15 @@ tasks/cancelled/*.md
 
 # OS
 .DS_Store
+
+# Agent workspace artifacts (not source code)
+.beads/
+.learnings/
+mailbox/
+reports/
+
+# Agent work receipts / one-off status docs
+WORK-SESSION.md
+DEPLOY-TRACKER.md
+swe-process/
+tasks/backlog/*.md
