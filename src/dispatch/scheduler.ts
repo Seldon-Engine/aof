@@ -32,6 +32,7 @@ import { escalateGateTimeout, checkGateTimeouts } from "./escalation.js";
 import { buildDispatchActions } from "./task-dispatcher.js";
 import { checkPromotionEligibility } from "./promotion.js";
 import { executeActions } from "./action-executor.js";
+import { buildTaskStats, buildChildrenMap, checkExpiredLeases, buildResourceOccupancyMap } from "./scheduler-helpers.js";
 
 export interface SchedulerConfig {
   /** Root data directory. */
@@ -115,68 +116,16 @@ export async function poll(
   const allTasks = await store.list();
   cleanupLeaseRenewals(store, allTasks);
 
-  const childrenByParent = new Map<string, Task[]>();
-  for (const task of allTasks) {
-    const parentId = task.frontmatter.parentId;
-    if (!parentId) continue;
-    const list = childrenByParent.get(parentId) ?? [];
-    list.push(task);
-    childrenByParent.set(parentId, list);
-  }
-
-  // 2. Build stats
-  const stats = {
-    total: allTasks.length,
-    backlog: 0,
-    ready: 0,
-    inProgress: 0,
-    blocked: 0,
-    review: 0,
-    done: 0,
-  };
-
-  for (const task of allTasks) {
-    const s = task.frontmatter.status;
-    if (s === "backlog") stats.backlog++;
-    else if (s === "ready") stats.ready++;
-    else if (s === "in-progress") stats.inProgress++;
-    else if (s === "blocked") stats.blocked++;
-    else if (s === "review") stats.review++;
-    else if (s === "done") stats.done++;
-  }
+  const childrenByParent = buildChildrenMap(allTasks);
+  const stats = buildTaskStats(allTasks);
 
   // 3. Check for expired leases (BUG-AUDIT-001: check both in-progress AND blocked)
-  const inProgressTasks = allTasks.filter(t => t.frontmatter.status === "in-progress");
-  const blockedTasks = allTasks.filter(t => t.frontmatter.status === "blocked");
-  const tasksWithPotentialLeases = [...inProgressTasks, ...blockedTasks];
-
-  for (const task of tasksWithPotentialLeases) {
-    const lease = task.frontmatter.lease;
-    if (!lease) continue;
-
-    const expiresAt = new Date(lease.expiresAt).getTime();
-    if (expiresAt <= Date.now()) {
-      const expiredDuration = Date.now() - expiresAt;
-      actions.push({
-        type: "expire_lease",
-        taskId: task.frontmatter.id,
-        taskTitle: task.frontmatter.title,
-        agent: lease.agent,
-        reason: `Lease expired at ${lease.expiresAt} (held by ${lease.agent}, expired ${Math.round(expiredDuration / 1000)}s ago)`,
-        fromStatus: task.frontmatter.status,
-      });
-    }
-  }
+  const expiredLeaseActions = checkExpiredLeases(allTasks);
+  actions.push(...expiredLeaseActions);
 
   // 3.5. Build resource occupancy map (TASK-054: resource serialization)
-  // Track which resources are currently occupied by in-progress tasks
-  const occupiedResources = new Map<string, string>(); // resource -> taskId
-  for (const task of inProgressTasks) {
-    const resource = task.frontmatter.resource;
-    if (resource) {
-      occupiedResources.set(resource, task.frontmatter.id);
-    }
-  }
+  const occupiedResources = buildResourceOccupancyMap(allTasks);
+  const inProgressTasks = allTasks.filter(t => t.frontmatter.status === "in-progress");
 
   // 3.6. Check for stale heartbeats (P2.3 resume protocol)
   const heartbeatTtl = config.heartbeatTtlMs ?? 300_000; // 5min default
