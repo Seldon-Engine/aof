@@ -183,6 +183,158 @@ Every AOF task frontmatter must include:
 
 ---
 
+## Murmur Orchestration Configuration
+
+**Murmur** is AOF's team-scoped orchestration trigger system. It automatically creates and dispatches review tasks to orchestrator agents based on configurable trigger conditions.
+
+### What Murmur Does
+
+Murmur monitors team task queues and statistics, evaluates trigger conditions, and spawns orchestration review tasks when conditions are met. This enables periodic team health checks, sprint retrospectives, and queue management without manual intervention.
+
+### Enabling Murmur for a Team
+
+Configure murmur in `org-chart.yaml` under team definitions:
+
+```yaml
+teams:
+  - id: swe-team
+    name: "Software Engineering Team"
+    orchestrator: swe-pm  # Required: agent ID for review tasks
+    murmur:
+      triggers:
+        - kind: queueEmpty
+        - kind: completionBatch
+          threshold: 10
+        - kind: interval
+          intervalMs: 86400000  # 24 hours
+      context:
+        - vision
+        - roadmap
+        - taskSummary
+```
+
+**Required fields:**
+- `team.orchestrator` — Agent ID that will receive review tasks (typically a PM or lead)
+- `team.murmur.triggers` — Array of trigger conditions (at least one required)
+
+**Optional fields:**
+- `team.murmur.context` — Context sections to inject into review tasks (e.g., `vision`, `roadmap`, `taskSummary`)
+
+### Trigger Types
+
+Murmur evaluates triggers in order; the first trigger that fires wins (short-circuit evaluation). A review will never fire if one is already in progress (idempotency guard).
+
+#### 1. `queueEmpty`
+
+Fires when **both** ready and in-progress queues are empty.
+
+```yaml
+triggers:
+  - kind: queueEmpty
+```
+
+**Use case:** End-of-sprint retrospectives, idle capacity allocation.
+
+#### 2. `completionBatch`
+
+Fires when the team completes a threshold number of tasks since the last review.
+
+```yaml
+triggers:
+  - kind: completionBatch
+    threshold: 10  # Required: number of completions
+```
+
+**Use case:** Regular progress check-ins, velocity tracking.
+
+#### 3. `interval`
+
+Fires after a fixed time interval since the last review.
+
+```yaml
+triggers:
+  - kind: interval
+    intervalMs: 86400000  # Required: interval in milliseconds (24 hours)
+```
+
+**Use case:** Daily standups, weekly sprint planning.
+
+**Note:** If no review has ever occurred, fires immediately.
+
+#### 4. `failureBatch`
+
+Fires when the team accumulates a threshold number of failed/dead-lettered tasks since the last review.
+
+```yaml
+triggers:
+  - kind: failureBatch
+    threshold: 3  # Required: number of failures
+```
+
+**Use case:** Incident response, quality degradation alerts.
+
+### Murmur State Directory
+
+Murmur persists per-team state in `.murmur/<team-id>.json` at the project root. These files track:
+
+- `lastReviewAt` — ISO timestamp of last murmur review
+- `completionsSinceLastReview` — Task completion counter
+- `failuresSinceLastReview` — Task failure counter
+- `currentReviewTaskId` — Review task ID if one is in progress (idempotency guard)
+- `reviewStartedAt` — ISO timestamp when current review started
+- `lastTriggeredBy` — Which trigger kind fired last
+
+**State files are automatically created** when the scheduler runs. Do not manually edit these files.
+
+**Backup considerations:** Include `.murmur/` in project backups if you need to preserve trigger history across environment migrations.
+
+### Review Timeout and Stale Cleanup
+
+**Default review timeout:** 30 minutes (configurable via scheduler options)
+
+If a review task remains in progress for longer than `reviewTimeoutMs`, murmur's cleanup logic:
+
+1. Logs a stale review warning
+2. Clears `currentReviewTaskId` from state (allows new reviews to fire)
+3. Does **not** cancel or transition the stale task (manual intervention required)
+
+**Timeout is wall-clock time**, not CPU time. A paused or blocked orchestrator session will trigger stale cleanup.
+
+**Manual recovery:** If a review task is truly stuck, transition it to `blocked` or `done` manually:
+
+```bash
+bd trans <task-id> blocked "Orchestrator unresponsive"
+```
+
+### Integration with Scheduler
+
+Murmur evaluation runs **after** the normal dispatch cycle. The scheduler:
+
+1. Dispatches ready tasks to agents (normal cycle)
+2. Evaluates murmur triggers for teams with `murmur` config
+3. Creates and dispatches review tasks if triggers fire
+4. Respects global concurrency limits (won't dispatch reviews if at max capacity)
+
+### Troubleshooting
+
+**Review tasks not firing:**
+- Check `team.orchestrator` is set and agent exists in `agents` list
+- Verify `team.murmur.triggers` is non-empty and valid
+- Check scheduler logs for `[AOF] Murmur:` messages
+- Inspect `.murmur/<team-id>.json` for `currentReviewTaskId` (blocks new reviews)
+
+**Review tasks stuck in progress:**
+- Check orchestrator agent session is active (`openclaw sessions list`)
+- Verify review timeout hasn't been exceeded (default 30 minutes)
+- Manually transition stale review tasks to `blocked` if needed
+
+**Trigger not firing when expected:**
+- Murmur evaluates triggers in order; first match wins
+- Check state counters in `.murmur/<team-id>.json`
+- Verify threshold values match your expectations
+
+---
+
 ## Critical: Plugin configSchema (OpenClaw 2026.2.15+)
 
 OpenClaw validates plugin config against `openclaw.configSchema` in `package.json`. **Missing schema = validation error on restart.**
