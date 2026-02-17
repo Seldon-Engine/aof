@@ -9,6 +9,9 @@ import { MatrixNotifier } from "./matrix-notifier.js";
 import { OpenClawExecutor } from "./openclaw-executor.js";
 import { aofDispatch, aofStatusReport, aofTaskComplete, aofTaskUpdate } from "../tools/aof-tools.js";
 import { createMetricsHandler, createStatusHandler } from "../gateway/handlers.js";
+import { loadOrgChart } from "../org/loader.js";
+import { PermissionAwareTaskStore } from "../permissions/task-permissions.js";
+import type { OrgChart } from "../schemas/org-chart.js";
 import type { OpenClawApi } from "./types.js";
 
 export interface AOFPluginOptions {
@@ -26,6 +29,7 @@ export interface AOFPluginOptions {
   messageTool?: {
     send(target: string, message: string): Promise<void>;
   };
+  orgChartPath?: string;
 }
 
 const SERVICE_NAME = "aof-scheduler";
@@ -34,6 +38,40 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
   const store = opts.store ?? new FilesystemTaskStore(opts.dataDir);
   const logger = opts.logger ?? new EventLogger(join(opts.dataDir, "events"));
   const metrics = opts.metrics ?? new AOFMetrics();
+  
+  // Load org chart for permission enforcement (if provided)
+  // This will be loaded asynchronously, but we'll handle the undefined case gracefully
+  let orgChartPromise: Promise<OrgChart | undefined> | undefined;
+  if (opts.orgChartPath) {
+    orgChartPromise = loadOrgChart(opts.orgChartPath)
+      .then(result => {
+        if (result.success && result.chart) {
+          return result.chart;
+        } else {
+          console.warn("Failed to load org chart for permission enforcement:", result.errors);
+          return undefined;
+        }
+      })
+      .catch(err => {
+        console.warn("Failed to load org chart:", err);
+        return undefined;
+      });
+  }
+  
+  /**
+   * Get a permission-aware store for the given actor.
+   * If org chart is not loaded, returns the original store (no permission checks).
+   */
+  const getStoreForActor = async (actor?: string): Promise<ITaskStore> => {
+    if (!orgChartPromise || !actor || actor === "unknown") {
+      return store;
+    }
+    const orgChart = await orgChartPromise;
+    if (!orgChart) {
+      return store;
+    }
+    return new PermissionAwareTaskStore(store, orgChart, actor);
+  };
 
   // Wire up notification service if message tool provided
   let notifier: NotificationService | undefined;
@@ -126,7 +164,9 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
       required: ["title", "brief"],
     },
     execute: async (_id: string, params: Record<string, unknown>) => {
-      const result = await aofDispatch({ store, logger }, params as any);
+      const actor = (params as any).actor;
+      const permissionStore = await getStoreForActor(actor);
+      const result = await aofDispatch({ store: permissionStore, logger }, params as any);
       return wrapResult(result);
     },
   });
@@ -146,7 +186,9 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
       required: ["taskId"],
     },
     execute: async (_id: string, params: Record<string, unknown>) => {
-      const result = await aofTaskUpdate({ store, logger }, params as any);
+      const actor = (params as any).actor;
+      const permissionStore = await getStoreForActor(actor);
+      const result = await aofTaskUpdate({ store: permissionStore, logger }, params as any);
       return wrapResult(result);
     },
   });
@@ -159,11 +201,14 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
       properties: {
         agent: { type: "string", description: "Filter by agent ID" },
         status: { type: "string", description: "Filter by status" },
+        actor: { type: "string", description: "Agent requesting the report" },
       },
       required: [],
     },
     execute: async (_id: string, params: Record<string, unknown>) => {
-      const result = await aofStatusReport({ store, logger }, params as any);
+      const actor = (params as any).actor;
+      const permissionStore = await getStoreForActor(actor);
+      const result = await aofStatusReport({ store: permissionStore, logger }, params as any);
       return wrapResult(result);
     },
   });
@@ -261,7 +306,9 @@ Blocked (can't proceed):
       required: ["taskId"],
     },
     execute: async (_id: string, params: Record<string, unknown>) => {
-      const result = await aofTaskComplete({ store, logger }, params as any);
+      const actor = (params as any).actor;
+      const permissionStore = await getStoreForActor(actor);
+      const result = await aofTaskComplete({ store: permissionStore, logger }, params as any);
       return wrapResult(result);
     },
   });
