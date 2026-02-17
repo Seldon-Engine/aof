@@ -23,6 +23,8 @@ export const EventType = z.enum([
   "task.completed",
   "task.failed",
   "task.cancelled",
+  "task.blocked",
+  "task.unblocked",
   "task.validation.failed",
   "task.deadletter",
   "task.resurrected",

@@ -157,4 +157,18 @@ export interface ITaskStore {
    * Returns the updated task.
    */
   removeDep(taskId: string, blockerId: string): Promise<Task>;
+
+  /**
+   * Block a task with a reason.
+   * Transitions task to blocked state and stores the block reason.
+   * Can only block tasks from non-terminal states.
+   */
+  block(id: string, reason: string): Promise<Task>;
+
+  /**
+   * Unblock a task.
+   * Transitions task from blocked to ready and clears the block reason.
+   * Can only unblock tasks currently in blocked state.
+   */
+  unblock(id: string): Promise<Task>;
 }

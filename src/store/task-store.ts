@@ -921,4 +921,83 @@ export class FilesystemTaskStore implements ITaskStore {
 
     return task;
   }
+
+  /**
+   * Block a task with a reason.
+   * Transitions task to blocked state and stores the block reason.
+   * Can only block tasks from non-terminal states.
+   */
+  async block(id: string, reason: string): Promise<Task> {
+    const task = await this.get(id);
+    if (!task) {
+      throw new Error(`Task not found: ${id}`);
+    }
+
+    const currentStatus = task.frontmatter.status;
+
+    // Terminal states are those with no valid transitions out (done, deadletter)
+    const terminalStates: TaskStatus[] = ["done", "deadletter"];
+    if (terminalStates.includes(currentStatus)) {
+      throw new Error(`Cannot block task ${id} in terminal state: ${currentStatus}`);
+    }
+
+    // Store block reason in metadata
+    task.frontmatter.metadata.blockReason = reason;
+
+    // First update the metadata, then transition
+    const filePath = task.path ?? this.taskPath(id, currentStatus);
+    await writeFileAtomic(filePath, serializeTask(task));
+
+    // Transition to blocked state
+    const blockedTask = await this.transition(id, "blocked");
+
+    // Emit task.blocked event
+    if (this.logger) {
+      await this.logger.log("task.blocked", "system", {
+        taskId: id,
+        payload: { reason },
+      });
+    }
+
+    return blockedTask;
+  }
+
+  /**
+   * Unblock a task.
+   * Transitions task from blocked to ready and clears the block reason.
+   * Can only unblock tasks currently in blocked state.
+   */
+  async unblock(id: string): Promise<Task> {
+    const task = await this.get(id);
+    if (!task) {
+      throw new Error(`Task not found: ${id}`);
+    }
+
+    const currentStatus = task.frontmatter.status;
+
+    // Can only unblock tasks that are currently blocked
+    if (currentStatus !== "blocked") {
+      throw new Error(`Cannot unblock task ${id} that is not blocked (current status: ${currentStatus})`);
+    }
+
+    // Clear block reason from metadata
+    delete task.frontmatter.metadata.blockReason;
+
+    // First update the metadata, then transition
+    const filePath = task.path ?? this.taskPath(id, currentStatus);
+    await writeFileAtomic(filePath, serializeTask(task));
+
+    // Transition to ready state
+    const readyTask = await this.transition(id, "ready");
+
+    // Emit task.unblocked event
+    if (this.logger) {
+      await this.logger.log("task.unblocked", "system", {
+        taskId: id,
+        payload: {},
+      });
+    }
+
+    return readyTask;
+  }
 }
