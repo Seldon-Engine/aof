@@ -18,6 +18,7 @@ import type { ITaskStore } from "./interfaces.js";
 import { parseTaskFile, serializeTask, extractTaskSections, contentHash } from "./task-parser.js";
 import { hasCycle, addDependency, removeDependency } from "./task-deps.js";
 import { lintTasks } from "./task-validation.js";
+import { getTaskInputs as getInputs, getTaskOutputs as getOutputs, writeTaskOutput as writeOutput } from "./task-file-ops.js";
 
 const FRONTMATTER_FENCE = "---";
 
@@ -597,18 +598,7 @@ export class FilesystemTaskStore implements ITaskStore {
    * Returns empty array if task or directory doesn't exist.
    */
   async getTaskInputs(id: string): Promise<string[]> {
-    const task = await this.get(id);
-    if (!task) {
-      throw new Error(`Task not found: ${id}`);
-    }
-
-    const inputsDir = join(this.taskDir(id, task.frontmatter.status), "inputs");
-    try {
-      const entries = await readdir(inputsDir);
-      return entries.filter(entry => entry !== "." && entry !== "..");
-    } catch {
-      return [];
-    }
+    return getInputs(id, this.get.bind(this), this.taskDir.bind(this));
   }
 
   /**
@@ -616,18 +606,7 @@ export class FilesystemTaskStore implements ITaskStore {
    * Returns empty array if task or directory doesn't exist.
    */
   async getTaskOutputs(id: string): Promise<string[]> {
-    const task = await this.get(id);
-    if (!task) {
-      throw new Error(`Task not found: ${id}`);
-    }
-
-    const outputsDir = join(this.taskDir(id, task.frontmatter.status), "outputs");
-    try {
-      const entries = await readdir(outputsDir);
-      return entries.filter(entry => entry !== "." && entry !== "..");
-    } catch {
-      return [];
-    }
+    return getOutputs(id, this.get.bind(this), this.taskDir.bind(this));
   }
 
   /**
@@ -635,16 +614,7 @@ export class FilesystemTaskStore implements ITaskStore {
    * Creates the outputs directory if it doesn't exist.
    */
   async writeTaskOutput(id: string, filename: string, content: string): Promise<void> {
-    const task = await this.get(id);
-    if (!task) {
-      throw new Error(`Task not found: ${id}`);
-    }
-
-    const outputsDir = join(this.taskDir(id, task.frontmatter.status), "outputs");
-    await mkdir(outputsDir, { recursive: true });
-    
-    const filePath = join(outputsDir, filename);
-    await writeFileAtomic(filePath, content);
+    return writeOutput(id, filename, content, this.get.bind(this), this.taskDir.bind(this));
   }
 
   /**
