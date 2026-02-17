@@ -12,3 +12,6 @@ export type { TriggerResult, TaskStats } from "./trigger-evaluator.js";
 
 export { buildReviewContext } from "./context-builder.js";
 export type { ContextBuilderOptions } from "./context-builder.js";
+
+export { cleanupStaleReview } from "./cleanup.js";
+export type { CleanupOptions, CleanupResult } from "./cleanup.js";
