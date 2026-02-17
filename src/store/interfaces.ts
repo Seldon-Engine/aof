@@ -87,6 +87,27 @@ export interface ITaskStore {
   updateBody(id: string, body: string): Promise<Task>;
 
   /**
+   * Update task metadata fields.
+   * Supports: title, description (body), priority, routing (assignee, team, tags).
+   * Validates that task is not in terminal state (done).
+   * Emits task.updated event and updates timestamp.
+   */
+  update(
+    id: string,
+    patch: {
+      title?: string;
+      description?: string;
+      priority?: string;
+      routing?: {
+        role?: string;
+        team?: string;
+        agent?: string;
+        tags?: string[];
+      };
+    },
+  ): Promise<Task>;
+
+  /**
    * Delete a task file.
    * Use sparingly — prefer transitioning to appropriate status.
    */

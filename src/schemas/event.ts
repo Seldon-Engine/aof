@@ -17,6 +17,7 @@ import { TaskId } from "./task.js";
 export const EventType = z.enum([
   // Task lifecycle
   "task.created",
+  "task.updated",
   "task.transitioned",
   "task.assigned",
   "task.completed",
