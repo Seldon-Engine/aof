@@ -6,3 +6,6 @@
 
 export { MurmurStateManager } from "./state-manager.js";
 export type { MurmurState, MurmurStateManagerOptions } from "./state-manager.js";
+
+export { evaluateTriggers } from "./trigger-evaluator.js";
+export type { TriggerResult, TaskStats } from "./trigger-evaluator.js";
