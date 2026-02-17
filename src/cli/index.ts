@@ -31,6 +31,7 @@ import { registerDaemonCommands } from "./commands/daemon.js";
 import { registerTaskCommands } from "./commands/task.js";
 import { registerMemoryCommands } from "./commands/memory.js";
 import { registerProjectCommands } from "./commands/project.js";
+import { registerOrgCommands } from "./commands/org.js";
 
 const AOF_ROOT = process.env["AOF_ROOT"] ?? resolve(homedir(), "Projects", "AOF");
 
@@ -166,81 +167,8 @@ scheduler
 registerTaskCommands(program);
 
 // --- org ---
-const org = program
-  .command("org")
-  .description("Org chart management");
+registerOrgCommands(program);
 
-org
-  .command("validate [path]")
-  .description("Validate org chart schema")
-  .action(async (path?: string) => {
-    const root = program.opts()["root"] as string;
-    await validateOrgChart(path ?? join(root, "org", "org-chart.yaml"));
-  });
-
-org
-  .command("show [path]")
-  .description("Display org chart")
-  .action(async (path?: string) => {
-    const root = program.opts()["root"] as string;
-    await showOrgChart(path ?? join(root, "org", "org-chart.yaml"));
-  });
-
-org
-  .command("lint [path]")
-  .description("Lint org chart (referential integrity)")
-  .action(async (path?: string) => {
-    const root = program.opts()["root"] as string;
-    const orgPath = path ?? join(root, "org", "org-chart.yaml");
-    console.log(`Linting org chart at ${orgPath}...\n`);
-
-    const result = await loadOrgChart(orgPath);
-    if (!result.success) {
-      console.error("❌ Schema validation failed:");
-      for (const err of result.errors ?? []) {
-        console.error(`  ${err.path}: ${err.message}`);
-      }
-      process.exitCode = 1;
-      return;
-    }
-
-    const issues = lintOrgChart(result.chart!);
-    if (issues.length === 0) {
-      console.log(`✅ Org chart valid: ${result.chart!.agents.length} agents, ${result.chart!.teams.length} teams — 0 issues`);
-      return;
-    }
-
-    for (const issue of issues) {
-      const icon = issue.severity === "error" ? "✗" : "⚠";
-      console.log(`  ${icon} [${issue.rule}] ${issue.message}`);
-    }
-
-    const errors = issues.filter(i => i.severity === "error");
-    const warnings = issues.filter(i => i.severity === "warning");
-    console.log(`\n${errors.length} errors, ${warnings.length} warnings`);
-    if (errors.length > 0) process.exitCode = 1;
-  });
-
-org
-  .command("drift [path]")
-  .description("Detect drift between org chart and OpenClaw agents")
-  .option("--source <type>", "Source for OpenClaw agents: fixture or live", "fixture")
-  .option("--fixture <path>", "Path to fixture JSON file (when --source=fixture)")
-  .action(async (path?: string, opts?: { source: string; fixture?: string }) => {
-    const root = program.opts()["root"] as string;
-    const orgPath = path ?? join(root, "org", "org-chart.yaml");
-    const source = (opts?.source ?? "fixture") as "fixture" | "live";
-    
-    let fixturePath: string | undefined;
-    if (source === "fixture") {
-      fixturePath = opts?.fixture ?? join(root, "tests", "fixtures", "openclaw-agents.json");
-    }
-
-    console.log(`Checking drift: ${orgPath}`);
-    console.log(`Source: ${source}${fixturePath ? ` (${fixturePath})` : ""}\n`);
-
-    await driftCheck(orgPath, source, fixturePath);
-  });
 
 // --- runbook ---
 const runbook = program
