@@ -59,8 +59,8 @@ const SEARCH_SQL = `
   FROM vec_chunks
   JOIN chunks ON chunks.id = vec_chunks.chunk_id
   WHERE vec_chunks.embedding MATCH ?
+    AND k = CAST(? AS INTEGER)
   ORDER BY vec_chunks.distance
-  LIMIT ?
 `;
 
 export type VectorChunkInput = {
@@ -178,7 +178,10 @@ export class VectorStore {
       );
 
       const chunkId = Number(result.lastInsertRowid);
-      this.insertVectorStmt.run(chunkId, new Float32Array(input.embedding));
+      this.insertVectorStmt.run(
+        toVecChunkId(chunkId),
+        new Float32Array(input.embedding)
+      );
 
       return chunkId;
     });
@@ -205,13 +208,16 @@ export class VectorStore {
     }
 
     if (update.embedding) {
-      this.updateVectorStmt.run(new Float32Array(update.embedding), id);
+      this.updateVectorStmt.run(
+        new Float32Array(update.embedding),
+        toVecChunkId(id)
+      );
     }
   }
 
   deleteChunk(id: number): void {
     const remove = this.db.transaction(() => {
-      this.deleteVectorStmt.run(id);
+      this.deleteVectorStmt.run(toVecChunkId(id));
       this.deleteChunkStmt.run(id);
     });
 
@@ -229,9 +235,14 @@ export class VectorStore {
   }
 
   search(embedding: number[], limit: number): VectorSearchResult[] {
+    if (!Number.isFinite(limit) || limit <= 0) {
+      return [];
+    }
+
+    const k = Math.floor(limit);
     const rows = this.searchStmt.all(
       new Float32Array(embedding),
-      limit
+      k
     ) as VectorSearchRow[];
 
     return rows.map((row) => ({
@@ -240,6 +251,14 @@ export class VectorStore {
     }));
   }
 }
+
+const toVecChunkId = (value: number): bigint => {
+  if (!Number.isFinite(value) || !Number.isInteger(value)) {
+    throw new Error(`Invalid vec_chunks id: ${value}`);
+  }
+
+  return BigInt(value);
+};
 
 function buildChunkUpdate(update: VectorChunkUpdate): {
   sql: string;
