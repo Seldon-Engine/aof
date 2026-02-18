@@ -2,15 +2,22 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
-import matter from "gray-matter";
 import type Database from "better-sqlite3";
 
 import type { OpenClawToolDefinition, ToolResult } from "../../openclaw/types.js";
 import type { EmbeddingProvider } from "../embeddings/provider.js";
 import { chunkMarkdown } from "../chunking/chunker.js";
-import { computeFileHash, updateFileRecord } from "../chunking/hash.js";
+import { computeFileHash } from "../chunking/hash.js";
 import type { FtsStore } from "../store/fts-store.js";
 import type { VectorStore } from "../store/vector-store.js";
+import { indexMemoryChunks } from "./indexing.js";
+import {
+  buildOutputContent,
+  normalizeContent,
+  normalizeString,
+  parseContent,
+  resolveMetadata,
+} from "./metadata.js";
 
 type MemoryStoreParams = {
   content: string;
@@ -31,75 +38,12 @@ type MemoryStoreToolOptions = {
   defaultTier?: string;
 };
 
-type NormalizedMetadata = {
-  pool?: string;
-  tier?: string;
-  tags?: string[];
-  importance?: number;
-};
-
+// metadata helpers imported from metadata.ts
 const buildResult = (text: string): ToolResult => ({
   content: [{ type: "text", text }],
 });
 
-const normalizeString = (value: unknown): string | undefined =>
-  typeof value === "string" && value.trim() ? value.trim() : undefined;
-
-const normalizeContent = (value: unknown): string | undefined =>
-  typeof value === "string" ? value : undefined;
-
-const normalizeTags = (value: unknown): string[] | undefined => {
-  if (Array.isArray(value)) {
-    const tags = value.filter((tag) => typeof tag === "string" && tag.trim());
-    return tags.length > 0 ? tags.map((tag) => tag.trim()) : undefined;
-  }
-
-  if (typeof value === "string" && value.trim()) {
-    return [value.trim()];
-  }
-
-  return undefined;
-};
-
-const normalizeNumber = (value: unknown): number | undefined => {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return undefined;
-  }
-
-  return value;
-};
-
-const resolveMetadata = (
-  params: MemoryStoreParams,
-  frontmatter: Record<string, unknown>,
-  defaultTier?: string,
-  defaultPool?: string,
-): NormalizedMetadata => {
-  const tier = normalizeString(params.tier) ?? normalizeString(frontmatter.tier) ?? defaultTier;
-  const pool = normalizeString(params.pool) ?? normalizeString(frontmatter.pool) ?? defaultPool;
-  const tags = normalizeTags(params.tags) ?? normalizeTags(frontmatter.tags);
-  const importance = normalizeNumber(params.importance) ?? normalizeNumber(frontmatter.importance);
-
-  return { tier, pool, tags, importance };
-};
-
-const buildOutputContent = (
-  bodyContent: string,
-  frontmatter: Record<string, unknown>,
-  metadata: NormalizedMetadata,
-): { body: string; frontmatter: Record<string, unknown> } => {
-  const merged = { ...frontmatter } as Record<string, unknown>;
-
-  if (metadata.tier) merged.tier = metadata.tier;
-  if (metadata.pool) merged.pool = metadata.pool;
-  if (metadata.tags) merged.tags = metadata.tags;
-  if (metadata.importance !== undefined) merged.importance = metadata.importance;
-
-  return {
-    body: matter.stringify(bodyContent, merged),
-    frontmatter: merged,
-  };
-};
+// helpers moved to metadata.ts
 
 const resolvePoolPath = (
   pool: string | undefined,
@@ -145,55 +89,7 @@ const resolveFilePath = (
   return path.join(poolPath, generateFileName());
 };
 
-const indexChunks = async (
-  options: MemoryStoreToolOptions,
-  filePath: string,
-  chunks: ReturnType<typeof chunkMarkdown>,
-  metadata: NormalizedMetadata,
-  hash: string,
-): Promise<void> => {
-  options.vectorStore.deleteChunksByFile(filePath);
-  options.ftsStore.deleteChunksByFile(filePath);
-
-  const embeddings = await options.embeddingProvider.embed(
-    chunks.map((chunk) => chunk.content),
-  );
-
-  if (embeddings.length !== chunks.length) {
-    throw new Error(
-      `Embedding count mismatch (expected ${chunks.length}, got ${embeddings.length})`,
-    );
-  }
-
-  chunks.forEach((chunk, index) => {
-    const chunkId = options.vectorStore.insertChunk({
-      filePath,
-      chunkIndex: index,
-      content: chunk.content,
-      embedding: embeddings[index] ?? [],
-      tier: metadata.tier,
-      pool: metadata.pool,
-      importance: metadata.importance ?? null,
-      tags: metadata.tags ?? null,
-    });
-
-    options.ftsStore.insertChunk({
-      chunkId,
-      content: chunk.content,
-      filePath,
-      tags: metadata.tags ?? null,
-    });
-  });
-
-  updateFileRecord(
-    options.db,
-    filePath,
-    hash,
-    chunks.length,
-    metadata.tier,
-    metadata.pool,
-  );
-};
+// indexing handled in indexing.ts
 
 export const createMemoryStoreTool = (
   options: MemoryStoreToolOptions,
@@ -239,12 +135,11 @@ export const createMemoryStoreTool = (
       }
 
       const parsedParams = params as MemoryStoreParams;
-      const parsed = matter(content);
+      const parsed = parseContent(content);
       const metadata = resolveMetadata(
         parsedParams,
         parsed.data as Record<string, unknown>,
-        options.defaultTier,
-        options.defaultPool,
+        { defaultTier: options.defaultTier, defaultPool: options.defaultPool },
       );
       const poolPath = resolvePoolPath(metadata.pool, options.poolPaths);
       const filePath = resolveFilePath(parsedParams, poolPath);
@@ -264,7 +159,7 @@ export const createMemoryStoreTool = (
       await ensureDirectory(filePath);
       await writeFile(filePath, output.body, "utf-8");
 
-      await indexChunks(options, filePath, chunks, metadata, hash);
+      await indexMemoryChunks(options, filePath, chunks, metadata, hash);
 
       return buildResult(`Stored memory at ${filePath} (chunks: ${chunks.length}).`);
     },
