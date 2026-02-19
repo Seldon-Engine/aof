@@ -13,7 +13,6 @@ import { checkStaleHeartbeats, markRunArtifactExpired, readRunResult } from "../
 import { resolveCompletionTransitions } from "../protocol/completion-utils.js";
 import { SLAChecker } from "./sla-checker.js";
 import { join, relative } from "node:path";
-import { readFileSync } from "node:fs";
 import { readFile, access } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import writeFileAtomic from "write-file-atomic";
@@ -155,45 +154,46 @@ export async function poll(
   }
 
   // 3.7. TASK-055: Build dependency graph and check for circular dependencies
+  // AOF-cq1: O(n + e) — single-pass DFS with O(1) map lookup instead of O(n²) per-node restarts
   const circularDeps = new Set<string>();
-  
-  function detectCircularDeps(taskId: string, visited: Set<string>, stack: Set<string>): boolean {
+  const taskMap = new Map(allTasks.map(t => [t.frontmatter.id, t]));
+
+  // globalVisited: nodes whose entire subgraph has been explored — shared across all start nodes
+  // so each node is visited at most once across the whole loop.
+  const globalVisited = new Set<string>();
+
+  function detectCircularDeps(taskId: string, stack: Set<string>): void {
     if (stack.has(taskId)) {
-      // Found a cycle
-      const cycleStart = Array.from(stack).indexOf(taskId);
-      const cycle = Array.from(stack).slice(cycleStart).concat(taskId);
+      // Cycle detected — mark every member of the cycle
+      const stackArr = Array.from(stack);
+      const cycleStart = stackArr.indexOf(taskId);
+      const cycle = stackArr.slice(cycleStart).concat(taskId);
       console.error(`[AOF] Circular dependency detected: ${cycle.join(" → ")}`);
-      return true;
+      for (const id of cycle) circularDeps.add(id);
+      return;
     }
-    
-    if (visited.has(taskId)) {
-      return false; // Already checked this branch
+
+    if (globalVisited.has(taskId)) {
+      return; // Already fully explored — no cycle reachable from here
     }
-    
-    visited.add(taskId);
+
+    globalVisited.add(taskId);
     stack.add(taskId);
-    
-    const task = allTasks.find(t => t.frontmatter.id === taskId);
+
+    const task = taskMap.get(taskId); // O(1) lookup
     if (task) {
       for (const depId of task.frontmatter.dependsOn) {
-        if (detectCircularDeps(depId, visited, stack)) {
-          return true;
-        }
+        detectCircularDeps(depId, stack);
       }
     }
-    
+
     stack.delete(taskId);
-    return false;
   }
-  
-  // Check all tasks for circular dependencies
+
+  // Single-pass DFS — O(n + e) total across all tasks
   for (const task of allTasks) {
-    if (task.frontmatter.dependsOn.length > 0) {
-      const visited = new Set<string>();
-      const stack = new Set<string>();
-      if (detectCircularDeps(task.frontmatter.id, visited, stack)) {
-        circularDeps.add(task.frontmatter.id);
-      }
+    if (!globalVisited.has(task.frontmatter.id)) {
+      detectCircularDeps(task.frontmatter.id, new Set<string>());
     }
   }
 
@@ -202,7 +202,7 @@ export async function poll(
   let projectManifest: Record<string, unknown> = {};
   const projectYamlPath = join(config.dataDir, "project.yaml");
   try {
-    const projectYamlContent = readFileSync(projectYamlPath, "utf8");
+    const projectYamlContent = await readFile(projectYamlPath, "utf-8");
     projectManifest = parseYaml(projectYamlContent) ?? {};
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
