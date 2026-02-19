@@ -3,7 +3,8 @@
  * Registers memory V2 commands (generate, audit, aggregate, promote, curate).
  */
 
-import { join, homedir } from "node:path";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import type { Command } from "commander";
 import { generateMemoryConfigFile, auditMemoryConfigFile } from "../../commands/memory.js";
 import { loadOrgChart } from "../../org/index.js";

@@ -76,6 +76,6 @@ export function registerOrgCommands(program: Command): void {
       const orgPath = path ?? join(root, "org", "org-chart.yaml");
       const vaultRoot = opts?.vaultRoot ?? process.env["AOF_VAULT_ROOT"];
 
-      await driftCheck(orgPath, vaultRoot);
+      await driftCheck(orgPath, (vaultRoot ?? "live") as "fixture" | "live");
     });
 }

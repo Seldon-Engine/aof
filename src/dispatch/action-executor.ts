@@ -5,7 +5,7 @@
  * and tracks execution statistics.
  */
 
-import type { Task } from "../types.js";
+import type { Task } from "../schemas/task.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import { serializeTask } from "../store/task-store.js";
 import { EventLogger } from "../events/logger.js";

@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import type { SqliteDb } from "../types.js";
 import { load } from "sqlite-vec";
 
 const DEFAULT_EMBEDDING_DIMENSIONS = 1536;
@@ -37,19 +38,19 @@ const createVecTable = (dimensions: number) =>
 const CREATE_FTS_TABLE =
   "CREATE VIRTUAL TABLE IF NOT EXISTS fts_chunks USING fts5(content, file_path, tags);";
 
-const applySchema = (db: Database, dimensions: number) => {
+const applySchema = (db: SqliteDb, dimensions: number) => {
   db.exec(CREATE_FILES_TABLE);
   db.exec(CREATE_CHUNKS_TABLE);
   db.exec(createVecTable(dimensions));
   db.exec(CREATE_FTS_TABLE);
 };
 
-export function initMemoryDb(dbPath: string): Database;
-export function initMemoryDb(dbPath: string, dimensions: number): Database;
+export function initMemoryDb(dbPath: string): SqliteDb;
+export function initMemoryDb(dbPath: string, dimensions: number): SqliteDb;
 export function initMemoryDb(
   dbPath: string,
   dimensions: number = DEFAULT_EMBEDDING_DIMENSIONS,
-): Database {
+): SqliteDb {
   const db = new Database(dbPath);
   load(db);
   applySchema(db, dimensions);

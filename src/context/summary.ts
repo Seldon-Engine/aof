@@ -248,7 +248,7 @@ function parseSummaryMarkdown(markdown: string): SubAgentSummary {
 export async function writeSummary(
   taskId: string,
   summary: SubAgentSummary,
-  store: TaskStore
+  store: ITaskStore
 ): Promise<void> {
   const markdown = formatSummaryMarkdown(summary);
   await store.writeTaskOutput(taskId, "summary.md", markdown);
@@ -262,7 +262,7 @@ export async function writeSummary(
  */
 export async function readSummary(
   taskId: string,
-  store: TaskStore
+  store: ITaskStore
 ): Promise<SubAgentSummary | null> {
   const task = await store.get(taskId);
   if (!task) {

@@ -27,7 +27,7 @@ const updateHeadings = (current: string[], level: number, text: string) => {
     return [text];
   }
 
-  return [current[0], text];
+  return [current[0]!, text];
 };
 
 const finalizeParagraph = (
@@ -73,8 +73,8 @@ const parseParagraphs = (content: string): Paragraph[] => {
         currentHeadings,
       );
 
-      const level = headingMatch[1].length;
-      const headingText = headingMatch[2].trim();
+      const level = headingMatch[1]!.length;
+      const headingText = headingMatch[2]!.trim();
       currentHeadings = updateHeadings(currentHeadings, level, headingText);
 
       paragraphs.push({
@@ -127,9 +127,9 @@ const chunkSize = (paragraphs: Paragraph[]) =>
 
 const buildChunk = (paragraphs: Paragraph[]): Chunk => ({
   content: paragraphs.map((paragraph) => paragraph.content).join("\n\n"),
-  startLine: paragraphs[0].startLine,
-  endLine: paragraphs[paragraphs.length - 1].endLine,
-  headings: paragraphs[0].headings,
+  startLine: paragraphs[0]!.startLine,
+  endLine: paragraphs[paragraphs.length - 1]!.endLine,
+  headings: paragraphs[0]!.headings,
 });
 
 export const chunkMarkdown = (

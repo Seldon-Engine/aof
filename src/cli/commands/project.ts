@@ -3,7 +3,8 @@
  * Registers project lifecycle commands (init, create-project, integrate, eject, migrations).
  */
 
-import { join, homedir } from "node:path";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import type { Command } from "commander";
 import { init } from "../init.js";
 import { integrateWithOpenClaw, detectOpenClawConfig } from "../../packaging/integration.js";
@@ -249,7 +250,7 @@ export function registerProjectCommands(program: Command): void {
 
         console.log("✅ Migration complete!\n");
         console.log(`   Tasks migrated: ${result.tasksMigrated}`);
-        console.log(`   Projects created: ${result.projectsCreated.join(", ")}`);
+        console.log(`   Projects created: ${result.projectsCreated?.join(", ")}`);
         if (result.backupCreated) {
           console.log(`   Backup created: ${result.backupPath}`);
         }

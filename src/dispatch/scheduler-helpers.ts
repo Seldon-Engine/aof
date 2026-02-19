@@ -4,7 +4,7 @@
  * Extracted to keep scheduler.ts focused on orchestration.
  */
 
-import type { Task } from "../types.js";
+import type { Task } from "../schemas/task.js";
 import type { SchedulerAction } from "./scheduler.js";
 
 /**

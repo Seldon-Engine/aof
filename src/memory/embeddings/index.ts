@@ -1,3 +1,3 @@
-export type { EmbeddingProvider, EmbeddingProviderConfig } from "./provider";
-export { OpenAIEmbeddingProvider } from "./openai-provider";
-export type { OpenAIEmbeddingProviderOptions } from "./openai-provider";
+export type { EmbeddingProvider, EmbeddingProviderConfig } from "./provider.js";
+export { OpenAIEmbeddingProvider } from "./openai-provider.js";
+export type { OpenAIEmbeddingProviderOptions } from "./openai-provider.js";

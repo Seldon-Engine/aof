@@ -14,13 +14,13 @@ import type { ContextManifest } from "./assembler.js";
  * Load manifest from task's inputs/context-manifest.json.
  * 
  * @param taskId - Task identifier
- * @param store - TaskStore instance
+ * @param store - ITaskStore instance
  * @returns Parsed manifest or null if not found
  * @throws Error if manifest exists but is invalid
  */
 export async function loadManifest(
   taskId: string,
-  store: TaskStore
+  store: ITaskStore
 ): Promise<ContextManifest | null> {
   const task = await store.get(taskId);
   if (!task) {
@@ -59,12 +59,12 @@ export async function loadManifest(
  * 
  * @param taskId - Task identifier
  * @param manifest - Manifest to save
- * @param store - TaskStore instance
+ * @param store - ITaskStore instance
  */
 export async function saveManifest(
   taskId: string,
   manifest: ContextManifest,
-  store: TaskStore
+  store: ITaskStore
 ): Promise<void> {
   const task = await store.get(taskId);
   if (!task) {

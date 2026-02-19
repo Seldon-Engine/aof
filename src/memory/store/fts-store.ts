@@ -1,6 +1,6 @@
-import type Database from "better-sqlite3";
+import type { SqliteDb } from "../types.js";
 
-import { parseTags, serializeTags } from "./tag-serialization";
+import { parseTags, serializeTags } from "./tag-serialization.js";
 
 const INSERT_SQL =
   "INSERT INTO fts_chunks(rowid, content, file_path, tags) VALUES (?, ?, ?, ?)";
@@ -48,7 +48,7 @@ export class FtsStore {
   private readonly deleteByFileStmt;
   private readonly searchStmt;
 
-  constructor(private readonly db: Database) {
+  constructor(private readonly db: SqliteDb) {
     this.insertStmt = db.prepare(INSERT_SQL);
     this.deleteStmt = db.prepare(DELETE_SQL);
     this.deleteByFileStmt = db.prepare(DELETE_BY_FILE_SQL);

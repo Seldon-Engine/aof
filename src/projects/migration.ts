@@ -34,8 +34,11 @@ export interface MigrationOptions {
   dryRun?: boolean;
   /** Custom backup directory name (for testing). */
   backupDir?: string;
+  /** Create a full backup before migration. */
+  backup?: boolean;
   /** Custom timestamp for deterministic testing. */
   timestamp?: string;
+  /** Create a full backup before migration. */
 }
 
 export interface RollbackOptions {
@@ -43,6 +46,7 @@ export interface RollbackOptions {
   dryRun?: boolean;
   /** Explicit backup directory to restore from (defaults to latest tasks.backup-*). */
   backupDir?: string;
+  /** Create a full backup before migration. */
 }
 
 export interface MigrationResult {
@@ -52,6 +56,9 @@ export interface MigrationResult {
   updatedTaskCount: number;
   skippedTaskCount: number;
   warnings: string[];
+  tasksMigrated?: number;
+  projectsCreated?: string[];
+  backupCreated?: boolean;
 }
 
 export interface RollbackResult {

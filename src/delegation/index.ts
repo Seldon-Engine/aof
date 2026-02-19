@@ -3,7 +3,8 @@ import { join, relative, sep, dirname } from "node:path";
 import writeFileAtomic from "write-file-atomic";
 import { stringify as stringifyYaml } from "yaml";
 import type { Task } from "../schemas/task.js";
-import type { TaskStore, TaskStoreHooks } from "../store/task-store.js";
+import type { ITaskStore } from "../store/interfaces.js";
+import type { TaskStoreHooks } from "../store/task-store.js";
 import type { HandoffRequestPayload } from "../schemas/protocol.js";
 
 export interface DelegationSyncResult {
@@ -24,12 +25,12 @@ function resolveAssignedAgent(task: Task): string | undefined {
   return typeof assignee === "string" ? assignee : undefined;
 }
 
-function resolveTaskPath(task: Task, store: TaskStore): string {
+function resolveTaskPath(task: Task, store: ITaskStore): string {
   if (task.path) return task.path;
   return join(store.tasksDir, task.frontmatter.status, `${task.frontmatter.id}.md`);
 }
 
-function resolveTaskDir(task: Task, store: TaskStore): string {
+function resolveTaskDir(task: Task, store: ITaskStore): string {
   const taskPath = resolveTaskPath(task, store);
   return join(dirname(taskPath), task.frontmatter.id);
 }
@@ -158,7 +159,7 @@ export function renderHandoffMarkdown(payload: HandoffRequestPayload): string {
 }
 
 export async function writeHandoffArtifacts(
-  store: TaskStore,
+  store: ITaskStore,
   childTask: Task,
   payload: HandoffRequestPayload,
 ): Promise<void> {
@@ -174,7 +175,7 @@ export async function writeHandoffArtifacts(
 }
 
 export async function syncDelegationArtifacts(
-  store: TaskStore,
+  store: ITaskStore,
 ): Promise<DelegationSyncResult> {
   const tasks = await store.list();
   const tasksById = new Map(tasks.map(task => [task.frontmatter.id, task]));
@@ -236,7 +237,7 @@ export async function syncDelegationArtifacts(
   };
 }
 
-export function createDelegationHooks(getStore: () => TaskStore): TaskStoreHooks {
+export function createDelegationHooks(getStore: () => ITaskStore): TaskStoreHooks {
   return {
     afterTransition: async () => {
       await syncDelegationArtifacts(getStore());

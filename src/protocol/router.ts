@@ -7,6 +7,7 @@ import type { ITaskStore } from "../store/interfaces.js";
 import { serializeTask } from "../store/task-store.js";
 import type { NotificationService } from "../events/notifier.js";
 import { readRunResult, writeRunResult } from "../recovery/run-artifacts.js";
+import type { RunResult } from "../schemas/run-result.js";
 import { writeHandoffArtifacts } from "../delegation/index.js";
 import writeFileAtomic from "write-file-atomic";
 import type { TaskLockManager } from "./task-lock.js";
@@ -31,7 +32,7 @@ export interface ProtocolRouterDependencies {
   logger?: ProtocolLogger;
   notifier?: NotificationService;
   lockManager?: TaskLockManager;
-  projectStoreResolver?: (projectId: string) => TaskStore | undefined;
+  projectStoreResolver?: (projectId: string) => ITaskStore | undefined;
 }
 
 export class ProtocolRouter {
@@ -43,7 +44,7 @@ export class ProtocolRouter {
   private readonly store: ITaskStore;
   private readonly notifier?: NotificationService;
   private readonly lockManager: TaskLockManager;
-  private readonly projectStoreResolver?: (projectId: string) => TaskStore | undefined;
+  private readonly projectStoreResolver?: (projectId: string) => ITaskStore | undefined;
 
   constructor(deps: ProtocolRouterDependencies) {
     this.logger = deps.logger;
@@ -104,7 +105,7 @@ export class ProtocolRouter {
     await handler(envelope, store);
   }
 
-  private resolveProjectStore(projectId: string): TaskStore | undefined {
+  private resolveProjectStore(projectId: string): ITaskStore | undefined {
     if (this.projectStoreResolver) {
       return this.projectStoreResolver(projectId);
     }

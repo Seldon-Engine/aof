@@ -10,7 +10,7 @@
  * - Handle dispatch failures and retry logic
  */
 
-import type { Task } from "../schemas/task.js";
+import type { Task, TaskStatus } from "../schemas/task.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import type { EventLogger } from "../events/logger.js";
 import type { DispatchExecutor } from "./executor.js";
@@ -32,7 +32,7 @@ export interface DispatchConfig {
 }
 
 export interface SchedulerAction {
-  type: "expire_lease" | "assign" | "requeue" | "block" | "deadletter" | "alert" | "stale_heartbeat" | "sla_violation" | "promote";
+  type: "expire_lease" | "assign" | "requeue" | "block" | "deadletter" | "alert" | "stale_heartbeat" | "sla_violation" | "promote" | "murmur_create_task";
   taskId: string;
   taskTitle: string;
   agent?: string;
@@ -41,6 +41,9 @@ export interface SchedulerAction {
   toStatus?: TaskStatus;
   duration?: number;
   limit?: number;
+  sourceTaskId?: string;
+  murmurCandidateId?: string;
+  blockers?: string[];
 }
 
 export interface DispatchMetrics {

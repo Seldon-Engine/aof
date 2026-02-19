@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { SqliteDb } from "../types.js";
 
 import type { EmbeddingProvider } from "../embeddings/provider.js";
 import { chunkMarkdown } from "../chunking/chunker.js";
@@ -11,7 +11,7 @@ type MemoryIndexOptions = {
   embeddingProvider: EmbeddingProvider;
   vectorStore: VectorStore;
   ftsStore: FtsStore;
-  db: Database;
+  db: SqliteDb;
 };
 
 export type MemoryIndexMetadata = {
@@ -79,7 +79,7 @@ import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 
 export interface IndexSyncOptions {
-  db: Database;
+  db: SqliteDb;
   embeddingProvider: EmbeddingProvider;
   vectorStore: VectorStore;
   ftsStore: FtsStore;

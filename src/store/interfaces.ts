@@ -77,7 +77,7 @@ export interface ITaskStore {
   transition(
     id: string,
     newStatus: TaskStatus,
-    opts?: { reason?: string; agent?: string },
+    opts?: { reason?: string; agent?: string; blockers?: string[] },
   ): Promise<Task>;
 
   /**

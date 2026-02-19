@@ -4,7 +4,7 @@
  * Determines whether a task is eligible to move from backlog to ready state.
  */
 
-import type { Task } from "../types.js";
+import type { Task } from "../schemas/task.js";
 import { isLeaseActive } from "./lease-manager.js";
 
 /**

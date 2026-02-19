@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { SqliteDb } from "../types.js";
 
 import type { OpenClawToolDefinition, ToolResult } from "../../openclaw/types.js";
 import { parseTags } from "../store/tag-serialization.js";
@@ -11,7 +11,7 @@ type MemoryListParams = {
 };
 
 type MemoryListToolOptions = {
-  db: Database;
+  db: SqliteDb;
   defaultLimit?: number;
 };
 

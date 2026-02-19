@@ -242,7 +242,7 @@ function parseHandoffMarkdown(markdown: string): HandoffNote {
 export async function writeHandoff(
   taskId: string,
   note: HandoffNote,
-  store: TaskStore
+  store: ITaskStore
 ): Promise<void> {
   const markdown = formatHandoffMarkdown(note);
   await store.writeTaskOutput(taskId, "handoff.md", markdown);
@@ -256,7 +256,7 @@ export async function writeHandoff(
  */
 export async function readHandoff(
   taskId: string,
-  store: TaskStore
+  store: ITaskStore
 ): Promise<HandoffNote | null> {
   const task = await store.get(taskId);
   if (!task) {

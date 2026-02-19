@@ -166,7 +166,7 @@ export async function evaluateMurmurTriggers(
         // Log event
         try {
           await logger.log("murmur.trigger.skipped", "scheduler", {
-            taskId: null,
+            taskId: undefined,
             payload: {
               team: team.id,
               reason: "concurrency_limit",
@@ -349,7 +349,7 @@ export async function evaluateMurmurTriggers(
 
       try {
         await logger.log("murmur.evaluation.error", "scheduler", {
-          taskId: null,
+          taskId: undefined,
           payload: {
             team: team.id,
             error: (error as Error).message,

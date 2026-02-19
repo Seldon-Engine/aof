@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { EmbeddingProvider } from "./provider";
+import type { EmbeddingProvider } from "./provider.js";
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 
@@ -122,8 +122,8 @@ function normalizeBaseUrl(baseUrl: string): string {
   return `${trimmed}/v1`;
 }
 
-function buildHeaders(apiKey?: string): HeadersInit {
-  const headers: HeadersInit = {
+function buildHeaders(apiKey?: string): Record<string, string> {
+  const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
 

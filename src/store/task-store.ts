@@ -327,7 +327,7 @@ export class FilesystemTaskStore implements ITaskStore {
       this.get.bind(this),
       this.taskPath.bind(this),
       this.taskDir.bind(this),
-      this.logger,
+      this.logger as any,
       this.hooks,
     );
   }
@@ -371,7 +371,7 @@ export class FilesystemTaskStore implements ITaskStore {
       patch,
       this.get.bind(this),
       this.taskPath.bind(this),
-      this.logger,
+      this.logger as any,
     );
   }
 

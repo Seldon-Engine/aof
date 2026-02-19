@@ -1,20 +1,20 @@
-export { initMemoryDb } from "./schema";
-export { FtsStore } from "./fts-store";
-export { HybridSearchEngine } from "./hybrid-search";
-export { VectorStore } from "./vector-store";
+export { initMemoryDb } from "./schema.js";
+export { FtsStore } from "./fts-store.js";
+export { HybridSearchEngine } from "./hybrid-search.js";
+export { VectorStore } from "./vector-store.js";
 export type {
   FtsChunkInput,
   FtsSearchResult,
-} from "./fts-store";
+} from "./fts-store.js";
 export type {
   HybridSearchConfig,
   HybridSearchQuery,
   HybridSearchResult,
   MemoryTier,
-} from "./hybrid-search";
+} from "./hybrid-search.js";
 export type {
   VectorChunkInput,
   VectorChunkRecord,
   VectorChunkUpdate,
   VectorSearchResult,
-} from "./vector-store";
+} from "./vector-store.js";

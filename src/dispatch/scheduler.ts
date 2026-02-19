@@ -58,7 +58,7 @@ export interface SchedulerConfig {
 }
 
 export interface SchedulerAction {
-  type: "expire_lease" | "assign" | "requeue" | "block" | "deadletter" | "alert" | "stale_heartbeat" | "sla_violation" | "promote";
+  type: "expire_lease" | "assign" | "requeue" | "block" | "deadletter" | "alert" | "stale_heartbeat" | "sla_violation" | "promote" | "murmur_create_task";
   taskId: string;
   taskTitle: string;
   agent?: string;
@@ -67,6 +67,9 @@ export interface SchedulerAction {
   toStatus?: TaskStatus;  // For promote actions
   duration?: number;  // For SLA violations: actual duration
   limit?: number;     // For SLA violations: SLA limit
+  sourceTaskId?: string;
+  murmurCandidateId?: string;
+  blockers?: string[];
 }
 
 export interface PollResult {
@@ -370,6 +373,7 @@ export async function poll(
     if (stats.blocked >= blockedThreshold) {
       // Find oldest blocked task
       let oldestBlockedAge = 0;
+      const blockedTasks = allTasks.filter(t => t.frontmatter.status === "blocked");
       let oldestBlockedId = "";
       for (const task of blockedTasks) {
         const lastBlockedAt = task.frontmatter.metadata?.lastBlockedAt as string | undefined;
@@ -428,7 +432,7 @@ export async function poll(
         if (murmurResult.teamsEvaluated > 0) {
           try {
             await logger.log("murmur.poll", "scheduler", {
-              taskId: null,
+              taskId: undefined,
               payload: {
                 teamsEvaluated: murmurResult.teamsEvaluated,
                 reviewsTriggered: murmurResult.reviewsTriggered,
@@ -448,7 +452,7 @@ export async function poll(
     console.error(`[AOF] Murmur evaluation failed: ${(error as Error).message}`);
     try {
       await logger.log("murmur.evaluation.failed", "scheduler", {
-        taskId: null,
+        taskId: undefined,
         payload: {
           error: (error as Error).message,
         },

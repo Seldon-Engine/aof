@@ -1,6 +1,6 @@
 import { unlink } from "node:fs/promises";
 
-import type Database from "better-sqlite3";
+import type { SqliteDb } from "../types.js";
 
 import type { OpenClawToolDefinition, ToolResult } from "../../openclaw/types.js";
 import type { FtsStore } from "../store/fts-store.js";
@@ -13,7 +13,7 @@ type MemoryDeleteParams = {
 type MemoryDeleteToolOptions = {
   vectorStore: VectorStore;
   ftsStore: FtsStore;
-  db: Database;
+  db: SqliteDb;
 };
 
 const buildResult = (text: string): ToolResult => ({

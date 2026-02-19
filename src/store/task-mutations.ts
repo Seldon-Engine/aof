@@ -19,6 +19,7 @@ export interface UpdatePatch {
     role?: string;
     team?: string;
     agent?: string;
+  blockers?: string[];
     tags?: string[];
   };
 }
@@ -30,7 +31,7 @@ export interface UpdatePatch {
 export async function updateTask(
   id: string,
   patch: UpdatePatch,
-  getTask: (id: string) => Promise<Task | null>,
+  getTask: (id: string) => Promise<Task | null | undefined>,
   getTaskPath: (id: string, status: TaskStatus) => string,
   logger?: {
     log(event: string, actor: string, data: { taskId: string; payload: unknown }): Promise<void>;
@@ -66,7 +67,7 @@ export async function updateTask(
 
   if (patch.priority !== undefined) {
     changes.priority = { from: task.frontmatter.priority, to: patch.priority };
-    task.frontmatter.priority = patch.priority;
+    task.frontmatter.priority = patch.priority as typeof task.frontmatter.priority;
   }
 
   if (patch.routing !== undefined) {
@@ -109,6 +110,7 @@ export async function updateTask(
 export interface TransitionOpts {
   reason?: string;
   agent?: string;
+  blockers?: string[];
 }
 
 export interface TaskStoreHooks {
@@ -134,7 +136,7 @@ export async function transitionTask(
   id: string,
   newStatus: TaskStatus,
   opts: TransitionOpts | undefined,
-  getTask: (id: string) => Promise<Task | null>,
+  getTask: (id: string) => Promise<Task | null | undefined>,
   getTaskPath: (id: string, status: TaskStatus) => string,
   getTaskDir: (id: string, status: TaskStatus) => string,
   logger?: TaskLogger,

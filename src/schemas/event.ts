@@ -99,6 +99,23 @@ export const EventType = z.enum([
   // Actions
   "action.started",
   "action.completed",
+
+  // Murmur
+  "murmur.poll",
+  "murmur.evaluation.error",
+  "murmur.evaluation.failed",
+  "murmur.review.created",
+  "murmur.review.dispatched",
+  "murmur.review.dispatch_failed",
+  "murmur.review.dispatch_error",
+  "murmur.trigger.skipped",
+  "murmur.cleanup.stale",
+  "murmur_task_created",
+  "murmur_create_task",
+
+  // Scheduler alerts
+  "scheduler_alert",
+  "scheduler_action_failed",
 ]);
 export type EventType = z.infer<typeof EventType>;
 

@@ -1,6 +1,6 @@
-import type Database from "better-sqlite3";
+import type { SqliteDb } from "../types.js";
 
-import { parseTags, serializeTags } from "./tag-serialization";
+import { parseTags, serializeTags } from "./tag-serialization.js";
 
 const INSERT_CHUNK_SQL = `
   INSERT INTO chunks (
@@ -132,7 +132,7 @@ const CHUNK_UPDATE_COLUMNS: Record<
 };
 
 export class VectorStore {
-  private readonly db: Database;
+  private readonly db: SqliteDb;
 
   private readonly insertChunkStmt;
   private readonly insertVectorStmt;
@@ -144,7 +144,7 @@ export class VectorStore {
   private readonly getChunkStmt;
   private readonly searchStmt;
 
-  constructor(db: Database) {
+  constructor(db: SqliteDb) {
     this.db = db;
     this.insertChunkStmt = db.prepare(INSERT_CHUNK_SQL);
     this.insertVectorStmt = db.prepare(INSERT_VECTOR_SQL);
@@ -275,7 +275,7 @@ function buildChunkUpdate(update: VectorChunkUpdate): {
       }
 
       sets.push(`${CHUNK_UPDATE_COLUMNS[key]} = ?`);
-      params.push(key === "tags" ? serializeTags(value as string[] | null) : value ?? null);
+      params.push(key === "tags" ? serializeTags(value as string[] | null) : (value as string | number | null) ?? null);
     });
 
   return {

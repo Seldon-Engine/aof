@@ -2,7 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
-import type Database from "better-sqlite3";
+import type { SqliteDb } from "../types.js";
 
 import type { OpenClawToolDefinition, ToolResult } from "../../openclaw/types.js";
 import type { EmbeddingProvider } from "../embeddings/provider.js";
@@ -32,7 +32,7 @@ type MemoryStoreToolOptions = {
   embeddingProvider: EmbeddingProvider;
   vectorStore: VectorStore;
   ftsStore: FtsStore;
-  db: Database;
+  db: SqliteDb;
   poolPaths: Record<string, string>;
   defaultPool?: string;
   defaultTier?: string;

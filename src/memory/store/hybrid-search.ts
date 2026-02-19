@@ -1,7 +1,7 @@
-import type { FtsSearchResult } from "./fts-store";
-import type { VectorChunkRecord, VectorSearchResult } from "./vector-store";
-import { FtsStore } from "./fts-store";
-import { VectorStore } from "./vector-store";
+import type { FtsSearchResult } from "./fts-store.js";
+import type { VectorChunkRecord, VectorSearchResult } from "./vector-store.js";
+import { FtsStore } from "./fts-store.js";
+import { VectorStore } from "./vector-store.js";
 
 export type MemoryTier = "hot" | "warm" | "cold";
 
@@ -24,9 +24,9 @@ export type HybridSearchResult = {
   filePath: string;
   chunkIndex: number | null;
   content: string;
-  tier: string | null;
-  pool: string | null;
-  importance: number | null;
+  tier: string | null | undefined;
+  pool: string | null | undefined;
+  importance: number | null | undefined;
   tags: string[] | null;
   score: number;
   vectorScore: number;
@@ -40,9 +40,9 @@ type CombinedEntry = {
   filePath: string | null;
   chunkIndex: number | null;
   content: string | null;
-  tier: string | null;
-  pool: string | null;
-  importance: number | null;
+  tier: string | null | undefined;
+  pool: string | null | undefined;
+  importance: number | null | undefined;
   tags: string[] | null;
   vectorScore: number;
   bm25Score: number;

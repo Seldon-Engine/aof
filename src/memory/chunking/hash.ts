@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
 
-import type Database from "better-sqlite3";
+import type { SqliteDb } from "../types.js";
 
 export const computeFileHash = (content: string): string =>
   createHash("sha256").update(content).digest("hex");
 
 export const hasFileChanged = (
-  db: Database,
+  db: SqliteDb,
   filePath: string,
   currentHash: string,
 ): boolean => {
@@ -22,7 +22,7 @@ export const hasFileChanged = (
 };
 
 export const updateFileRecord = (
-  db: Database,
+  db: SqliteDb,
   filePath: string,
   hash: string,
   chunkCount: number,
