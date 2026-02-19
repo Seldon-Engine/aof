@@ -19,6 +19,11 @@ export interface AOFServiceConfig {
   vaultRoot?: string;
   /** Maximum concurrent in-progress tasks across all agents (default: 3). */
   maxConcurrentDispatches?: number;
+  /**
+   * When true, blocking a task cascades to its direct dependents in backlog/ready.
+   * Default: false. See SchedulerConfig.cascadeBlocks.
+   */
+  cascadeBlocks?: boolean;
 }
 
 export interface AOFServiceDependencies {
@@ -96,6 +101,7 @@ export class AOFService {
       logger: this.logger,
       notifier: this.notifier,
       projectStoreResolver,
+      cascadeBlocks: config.cascadeBlocks,
     });
     
     this.schedulerConfig = {
@@ -104,6 +110,7 @@ export class AOFService {
       defaultLeaseTtlMs: config.defaultLeaseTtlMs ?? 600_000,
       executor: deps.executor,
       maxConcurrentDispatches: config.maxConcurrentDispatches,
+      cascadeBlocks: config.cascadeBlocks,
     };
   }
 

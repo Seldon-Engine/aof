@@ -55,6 +55,11 @@ export interface SchedulerConfig {
   minDispatchIntervalMs?: number;
   /** Maximum dispatches per poll cycle (default: 2). */
   maxDispatchesPerPoll?: number;
+  /**
+   * When true, blocking a task cascades to its direct dependents in backlog/ready.
+   * Default: false (opt-in — cascade-blocking can be heavy-handed in multi-parent scenarios).
+   */
+  cascadeBlocks?: boolean;
 }
 
 export interface SchedulerAction {

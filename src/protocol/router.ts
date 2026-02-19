@@ -15,6 +15,7 @@ import type { TaskLockManager } from "./task-lock.js";
 import { InMemoryTaskLockManager } from "./task-lock.js";
 import { parseProtocolMessage, type ProtocolLogger } from "./parsers.js";
 import { buildStatusReason, shouldAppendWorkLog, buildWorkLogEntry, appendSection } from "./formatters.js";
+import { cascadeOnCompletion } from "../dispatch/dep-cascader.js";
 import {
   resolveAuthorizedAgent,
   checkAuthorization,
@@ -23,6 +24,7 @@ import {
   logTransition,
   notifyTransition,
 } from "./router-helpers.js";
+import { cascadeOnBlock, type CascadeLogger } from "../dispatch/dep-cascader.js";
 
 // Re-export for backward compatibility
 export { parseProtocolMessage } from "./parsers.js";
@@ -34,6 +36,11 @@ export interface ProtocolRouterDependencies {
   notifier?: NotificationService;
   lockManager?: TaskLockManager;
   projectStoreResolver?: (projectId: string) => ITaskStore | undefined;
+  /**
+   * When true, blocking a task via status.update cascades to direct dependents.
+   * Mirrors SchedulerConfig.cascadeBlocks. Default: false.
+   */
+  cascadeBlocks?: boolean;
 }
 
 export class ProtocolRouter {
@@ -46,6 +53,7 @@ export class ProtocolRouter {
   private readonly notifier?: NotificationService;
   private readonly lockManager: TaskLockManager;
   private readonly projectStoreResolver?: (projectId: string) => ITaskStore | undefined;
+  private readonly cascadeBlocks: boolean;
 
   constructor(deps: ProtocolRouterDependencies) {
     this.logger = deps.logger;
@@ -53,6 +61,7 @@ export class ProtocolRouter {
     this.notifier = deps.notifier;
     this.lockManager = deps.lockManager ?? new InMemoryTaskLockManager();
     this.projectStoreResolver = deps.projectStoreResolver;
+    this.cascadeBlocks = deps.cascadeBlocks ?? false;
     this.handlers = {
       "completion.report": (envelope, store) =>
         this.lockManager.withLock(envelope.taskId, () => this.handleCompletionReport(envelope, store)),
@@ -177,6 +186,14 @@ export class ProtocolRouter {
 
     await completeRunArtifact(store, envelope.taskId);
 
+    if (envelope.payload.outcome === "done" && this.logger) {
+      try {
+        await cascadeOnCompletion(envelope.taskId, store, this.logger);
+      } catch (err) {
+        console.error(`[AOF] cascadeOnCompletion failed for ${envelope.taskId}:`, err);
+      }
+    }
+
     await this.logger?.log("task.completed", envelope.fromAgent, {
       taskId: envelope.taskId,
       payload: { outcome: envelope.payload.outcome },
@@ -224,6 +241,15 @@ export class ProtocolRouter {
       }
     }
 
+    // Opt-in block cascade: when a task is blocked, propagate to direct dependents.
+    if (transitioned && updatedTask.frontmatter.status === "blocked" && this.cascadeBlocks) {
+      await cascadeOnBlock(
+        updatedTask.frontmatter.id,
+        store,
+        this.logger as unknown as CascadeLogger,
+      );
+    }
+
     if (!transitioned && shouldAppendWorkLog(envelope.payload)) {
       updatedTask = await this.appendWorkLog(updatedTask, envelope.payload, store);
     }
@@ -266,6 +292,13 @@ export class ProtocolRouter {
         this.notifier,
       );
       await completeRunArtifact(this.store, task.frontmatter.id);
+      if (runResult.outcome === "done" && this.logger) {
+        try {
+          await cascadeOnCompletion(task.frontmatter.id, this.store, this.logger);
+        } catch (err) {
+          console.error(`[AOF] cascadeOnCompletion failed for ${task.frontmatter.id}:`, err);
+        }
+      }
     }
   }
 
