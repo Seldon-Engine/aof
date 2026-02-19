@@ -86,6 +86,14 @@ export async function driftCheck(
   fixturePath?: string
 ): Promise<void> {
   try {
+    // Print header
+    const sourceLabel = source === "fixture"
+      ? `fixture${fixturePath ? ` (${fixturePath})` : ""}`
+      : "live";
+    console.log(`Checking drift`);
+    console.log(`Source: ${sourceLabel}`);
+    console.log();
+
     // Load org chart
     const content = await readFile(orgChartPath, "utf-8");
     const raw = parseYaml(content) as unknown;

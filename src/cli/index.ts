@@ -179,3 +179,8 @@ registerMemoryCommands(program);
 
 // --- system ---
 registerSystemCommands(program);
+
+program.parseAsync().catch((err: unknown) => {
+  console.error(err);
+  process.exitCode = 1;
+});

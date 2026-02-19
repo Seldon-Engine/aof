@@ -70,12 +70,18 @@ export function registerOrgCommands(program: Command): void {
   org
     .command("drift [path]")
     .description("Detect drift between org chart and actual state")
+    .option("--source <source>", "Source for agent list: fixture | live", "fixture")
+    .option("--fixture <path>", "Path to fixture JSON file (for --source=fixture)")
     .option("--vault-root <path>", "Vault root path")
-    .action(async (path?: string, opts?: { vaultRoot?: string }) => {
+    .action(async (path?: string, opts?: { source?: string; fixture?: string; vaultRoot?: string }) => {
       const root = program.opts()["root"] as string;
       const orgPath = path ?? join(root, "org", "org-chart.yaml");
-      const vaultRoot = opts?.vaultRoot ?? process.env["AOF_VAULT_ROOT"];
+      const source = (opts?.source ?? "fixture") as "fixture" | "live";
 
-      await driftCheck(orgPath, (vaultRoot ?? "live") as "fixture" | "live");
+      // Resolve fixture path: explicit flag, then default location
+      const defaultFixturePath = join(root, "tests", "fixtures", "openclaw-agents.json");
+      const fixturePath = opts?.fixture ?? (source === "fixture" ? defaultFixturePath : undefined);
+
+      await driftCheck(orgPath, source, fixturePath);
     });
 }
