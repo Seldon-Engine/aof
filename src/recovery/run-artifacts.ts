@@ -151,6 +151,31 @@ export async function markRunArtifactExpired(
 }
 
 /**
+ * Mark run artifact as completed (clean task finish).
+ * Sets run.json status to "completed" with a completion timestamp so crash
+ * recovery can distinguish "still running" from "finished cleanly."
+ */
+export async function completeRunArtifact(
+  store: ITaskStore,
+  taskId: string,
+): Promise<void> {
+  const existing = await readRunArtifact(store, taskId);
+  if (!existing) return; // No artifact to update
+
+  const taskDir = await resolveTaskDir(store, taskId);
+  if (!taskDir) return;
+
+  existing.status = "completed";
+  existing.metadata = {
+    ...existing.metadata,
+    completedAt: new Date().toISOString(),
+  };
+
+  const filePath = join(taskDir, "run.json");
+  await writeFileAtomic(filePath, JSON.stringify(existing, null, 2));
+}
+
+/**
  * Write or update heartbeat.
  */
 export async function writeHeartbeat(

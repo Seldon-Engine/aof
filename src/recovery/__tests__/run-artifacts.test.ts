@@ -8,6 +8,7 @@ import { acquireLease } from "../../store/lease.js";
 import {
   writeRunArtifact,
   readRunArtifact,
+  completeRunArtifact,
   writeHeartbeat,
   readHeartbeat,
   checkStaleHeartbeats,
@@ -205,6 +206,72 @@ describe("run artifacts", () => {
 
       const info = await getResumeInfo(store, task.frontmatter.id, 300_000);
       expect(info.status).toBe("completed");
+    });
+  });
+
+  describe("completeRunArtifact", () => {
+    it("transitions run.json status from running to completed", async () => {
+      const task = await store.create({
+        title: "Complete test",
+        createdBy: "main",
+        routing: { agent: "test-agent" },
+      });
+      await store.transition(task.frontmatter.id, "ready");
+      await acquireLease(store, task.frontmatter.id, "test-agent");
+      await writeRunArtifact(store, task.frontmatter.id, "test-agent");
+
+      const before = await readRunArtifact(store, task.frontmatter.id);
+      expect(before!.status).toBe("running");
+
+      await completeRunArtifact(store, task.frontmatter.id);
+
+      const after = await readRunArtifact(store, task.frontmatter.id);
+      expect(after!.status).toBe("completed");
+    });
+
+    it("sets completedAt in metadata", async () => {
+      const task = await store.create({
+        title: "Timestamp test",
+        createdBy: "main",
+        routing: { agent: "test-agent" },
+      });
+      await store.transition(task.frontmatter.id, "ready");
+      await acquireLease(store, task.frontmatter.id, "test-agent");
+      await writeRunArtifact(store, task.frontmatter.id, "test-agent");
+
+      const before = Date.now();
+      await completeRunArtifact(store, task.frontmatter.id);
+      const after = Date.now();
+
+      const run = await readRunArtifact(store, task.frontmatter.id);
+      expect(run!.metadata.completedAt).toBeDefined();
+      const completedAt = new Date(run!.metadata.completedAt as string).getTime();
+      expect(completedAt).toBeGreaterThanOrEqual(before);
+      expect(completedAt).toBeLessThanOrEqual(after);
+    });
+
+    it("is a no-op when no run.json exists", async () => {
+      const task = await store.create({ title: "No run", createdBy: "main" });
+      // Should not throw
+      await expect(completeRunArtifact(store, task.frontmatter.id)).resolves.toBeUndefined();
+    });
+
+    it("preserves existing metadata when completing", async () => {
+      const task = await store.create({
+        title: "Metadata preserve",
+        createdBy: "main",
+        routing: { agent: "test-agent" },
+      });
+      await store.transition(task.frontmatter.id, "ready");
+      await acquireLease(store, task.frontmatter.id, "test-agent");
+      await writeRunArtifact(store, task.frontmatter.id, "test-agent", { sessionId: "sess-42" });
+
+      await completeRunArtifact(store, task.frontmatter.id);
+
+      const run = await readRunArtifact(store, task.frontmatter.id);
+      expect(run!.status).toBe("completed");
+      expect(run!.metadata.sessionId).toBe("sess-42");
+      expect(run!.metadata.completedAt).toBeDefined();
     });
   });
 
