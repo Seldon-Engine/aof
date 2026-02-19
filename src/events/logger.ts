@@ -19,6 +19,12 @@ export class EventLogger {
   private readonly eventsDir: string;
   private readonly onEvent?: EventCallback;
   private eventCounter: number = 0;
+  private _lastEventAt: number = 0;
+
+  /** Timestamp (ms) of the most recent logged event. */
+  get lastEventAt(): number {
+    return this._lastEventAt;
+  }
 
   constructor(eventsDir: string, options?: EventLoggerOptions) {
     this.eventsDir = eventsDir;
@@ -35,6 +41,7 @@ export class EventLogger {
     },
   ): Promise<BaseEvent> {
     this.eventCounter += 1;
+    this._lastEventAt = Date.now();
 
     const event: BaseEvent = {
       eventId: this.eventCounter,

@@ -104,7 +104,7 @@ export async function startAofDaemon(opts: AOFDaemonOptions): Promise<AOFDaemonC
       const status = service.getStatus();
       return {
         lastPollAt: status.lastPollAt ? new Date(status.lastPollAt).getTime() : Date.now(),
-        lastEventAt: Date.now(), // TODO: track from EventLogger
+        lastEventAt: logger.lastEventAt || Date.now(),
         uptime: Date.now() - startTime,
       };
     };
