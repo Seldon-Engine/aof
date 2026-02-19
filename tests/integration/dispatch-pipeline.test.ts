@@ -382,13 +382,15 @@ describe("Dispatch pipeline integration", () => {
       const aCompleted = await store.get(taskA.frontmatter.id);
       expect(aCompleted!.frontmatter.status).toBe("done");
 
-      // --- Poll 3: B should now be promoted to ready ------------------------
+      // --- Poll 3: B should be promoted (cascade fires at completion time) ---
+      // With dep-cascader wired into the router, B is promoted to "ready"
+      // immediately when A completes. Poll 3 may dispatch B → "in-progress".
       executor.clear();
       resetThrottleState();
       await poll(store, logger, makeConfig());
 
       const bAfterPoll3 = await store.get(taskB.frontmatter.id);
-      expect(bAfterPoll3!.frontmatter.status).toBe("ready");
+      expect(["ready", "in-progress"]).toContain(bAfterPoll3!.frontmatter.status);
 
       // And B gets dispatched in the same or next poll
       // (depends on whether promotion + dispatch happen in the same cycle)

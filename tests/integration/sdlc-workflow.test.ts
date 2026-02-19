@@ -404,12 +404,16 @@ describe("SDLC Workflow Integration — lifecycle enforcement", () => {
 
       expect((await store.get(taskA.frontmatter.id))?.frontmatter.status).toBe("done");
 
-      // ── Poll after A completes: B must be promoted to ready ───────────────
+      // ── Poll after A completes: B promoted to ready (or already dispatched) ─
+      // Cascade fires immediately when A completes via router, so B is promoted
+      // to "ready" during router.route(). This poll may then dispatch B → "in-progress".
       executor.clear();
       resetThrottleState();
       await poll(store, logger, makeSchedulerConfig());
 
-      expect((await store.get(taskB.frontmatter.id))?.frontmatter.status).toBe("ready");
+      expect(["ready", "in-progress"]).toContain(
+        (await store.get(taskB.frontmatter.id))?.frontmatter.status,
+      );
 
       // ── B can be dispatched in the next poll ──────────────────────────────
       executor.clear();

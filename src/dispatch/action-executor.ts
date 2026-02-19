@@ -15,6 +15,7 @@ import writeFileAtomic from "write-file-atomic";
 import { executeAssignAction } from "./assign-executor.js";
 import { markRunArtifactExpired, readRunResult } from "../recovery/run-artifacts.js";
 import { resolveCompletionTransitions } from "../protocol/completion-utils.js";
+import { cascadeOnCompletion } from "./dep-cascader.js";
 
 export interface ActionExecutionStats {
   actionsExecuted: number;
@@ -149,6 +150,14 @@ export async function executeActions(
                     `Stale heartbeat - outcome ${runResult.outcome} - transition to ${targetStatus}`);
                 } catch {
                   // Logging errors should not crash the scheduler
+                }
+              }
+
+              if (runResult.outcome === "done") {
+                try {
+                  await cascadeOnCompletion(action.taskId, store, logger);
+                } catch (err) {
+                  console.error(`[AOF] cascadeOnCompletion failed for ${action.taskId}:`, err);
                 }
               }
             }

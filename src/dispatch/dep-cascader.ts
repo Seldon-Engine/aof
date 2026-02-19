@@ -8,7 +8,11 @@
  */
 
 import type { ITaskStore } from "../store/interfaces.js";
-import type { EventLogger } from "../events/logger.js";
+
+/** Minimal logger interface satisfied by both EventLogger and ProtocolLogger. */
+export interface CascadeLogger {
+  log(type: string, actor: string, opts?: { taskId?: string; payload?: Record<string, unknown> }): unknown;
+}
 
 export interface CascadeResult {
   /** Task IDs promoted from backlog/blocked → ready */
@@ -30,7 +34,7 @@ export interface CascadeResult {
 export async function cascadeOnCompletion(
   completedTaskId: string,
   store: ITaskStore,
-  logger: EventLogger,
+  logger: CascadeLogger,
 ): Promise<CascadeResult> {
   const result: CascadeResult = { promoted: [], blocked: [], skipped: [] };
 
@@ -89,7 +93,7 @@ export async function cascadeOnCompletion(
 export async function cascadeOnBlock(
   blockedTaskId: string,
   store: ITaskStore,
-  logger: EventLogger,
+  logger: CascadeLogger,
 ): Promise<CascadeResult> {
   const result: CascadeResult = { promoted: [], blocked: [], skipped: [] };
 
