@@ -259,3 +259,57 @@ describe("ProtocolRouter", () => {
     expect(spy).toHaveBeenCalledWith(envelope, store);
   });
 });
+
+describe("ProtocolRouter - AOF/1 prefix end-to-end", () => {
+  it("parses AOF/1 prefix message and routes to correct handler", async () => {
+    const logger = makeLogger();
+    const router = new ProtocolRouter({ store, logger });
+
+    // Create and transition task so status.update is valid
+    const task = await store.create({
+      title: "E2E Prefix Test Task",
+      createdBy: "system",
+      routing: { agent: baseEnvelope.fromAgent },
+    });
+    await store.transition(task.frontmatter.id, "ready");
+    await store.transition(task.frontmatter.id, "in-progress");
+
+    // Build raw AOF/1 prefix message (simulates incoming wire format)
+    const envelope = { ...baseEnvelope, taskId: task.frontmatter.id };
+    const rawMessage = `AOF/1 ${JSON.stringify(envelope)}`;
+
+    // Parse — simulates the ingestion layer before routing
+    const parsed = parseProtocolMessage(rawMessage, logger);
+    expect(parsed).not.toBeNull();
+    expect(parsed).toMatchObject({ type: "status.update", taskId: task.frontmatter.id });
+    expect(logger.log).not.toHaveBeenCalled();
+
+    // Route — verifies the parsed envelope reaches the correct handler
+    const spy = vi.spyOn(router, "handleStatusUpdate");
+    await router.route(parsed!);
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: task.frontmatter.id, type: "status.update" }),
+      store,
+    );
+    expect(logger.log).toHaveBeenCalledWith(
+      "protocol.message.received",
+      baseEnvelope.fromAgent,
+      expect.any(Object),
+    );
+  });
+
+  it("rejects AOF/1 message with invalid JSON", () => {
+    const logger = makeLogger();
+    const result = parseProtocolMessage("AOF/1 {bad json", logger);
+
+    expect(result).toBeNull();
+    expect(logger.log).toHaveBeenCalledWith(
+      "protocol.message.rejected",
+      "system",
+      expect.objectContaining({
+        payload: expect.objectContaining({ reason: "invalid_json" }),
+      }),
+    );
+  });
+});
