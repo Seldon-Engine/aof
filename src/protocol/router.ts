@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import type { ProtocolEnvelope as ProtocolEnvelopeType } from "../schemas/protocol.js";
 import type { StatusUpdatePayload } from "../schemas/protocol.js";
 import type { HandoffRequestPayload, HandoffAckPayload } from "../schemas/protocol.js";
@@ -6,7 +7,7 @@ import type { TaskStatus } from "../schemas/task.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import { serializeTask } from "../store/task-store.js";
 import type { NotificationService } from "../events/notifier.js";
-import { readRunResult, writeRunResult } from "../recovery/run-artifacts.js";
+import { readRunResult, writeRunResult, completeRunArtifact } from "../recovery/run-artifacts.js";
 import type { RunResult } from "../schemas/run-result.js";
 import { writeHandoffArtifacts } from "../delegation/index.js";
 import writeFileAtomic from "write-file-atomic";
@@ -138,6 +139,14 @@ export class ProtocolRouter {
       return;
     }
 
+    // Warn if referenced summary file does not exist
+    if (!existsSync(envelope.payload.summaryRef)) {
+      await this.logger?.log("protocol.message.warning", "system", {
+        taskId: envelope.taskId,
+        payload: { reason: "summary_file_not_found", summaryRef: envelope.payload.summaryRef },
+      });
+    }
+
     const runResult: RunResult = {
       taskId: envelope.taskId,
       agentId: envelope.fromAgent,
@@ -165,6 +174,8 @@ export class ProtocolRouter {
       this.logger,
       this.notifier,
     );
+
+    await completeRunArtifact(store, envelope.taskId);
 
     await this.logger?.log("task.completed", envelope.fromAgent, {
       taskId: envelope.taskId,
@@ -254,6 +265,7 @@ export class ProtocolRouter {
         this.logger,
         this.notifier,
       );
+      await completeRunArtifact(this.store, task.frontmatter.id);
     }
   }
 
@@ -326,6 +338,11 @@ export class ProtocolRouter {
     childTask.frontmatter.metadata = {
       ...childTask.frontmatter.metadata,
       delegationDepth: parentDepth + 1,
+    };
+    // Route child to receiving agent so handoff.ack authorization passes
+    childTask.frontmatter.routing = {
+      ...childTask.frontmatter.routing,
+      agent: payload.toAgent,
     };
     childTask.frontmatter.updatedAt = new Date().toISOString();
 

@@ -395,6 +395,87 @@ describe("ProtocolRouter - Handoff Protocol", () => {
     expect(rejectedLogs).toHaveLength(1);
   });
 
+  it("handoff.accepted from toAgent succeeds after handoff.request (auth not rejected)", async () => {
+    // Regression test for AOF-pr4 bug: handleHandoffRequest must set
+    // childTask.frontmatter.routing.agent = payload.toAgent so that when the
+    // receiving agent sends a handoff.accepted, checkAuthorization passes.
+    const logger = makeLogger();
+    const router = new ProtocolRouter({ store, logger });
+
+    const parent = await store.create({
+      title: "Parent Task",
+      createdBy: "architect",
+    });
+    await store.transition(parent.frontmatter.id, "ready");
+
+    const child = await store.create({
+      title: "Child Task",
+      createdBy: "architect",
+      parentId: parent.frontmatter.id,
+      routing: { agent: "architect" }, // initially routed to sender
+    });
+    await store.transition(child.frontmatter.id, "ready");
+
+    // Step 1: architect sends handoff.request to swe-backend
+    const requestEnvelope: ProtocolEnvelope = {
+      protocol: "aof",
+      version: 1,
+      projectId: "test-project",
+      type: "handoff.request",
+      taskId: child.frontmatter.id,
+      fromAgent: "architect",
+      toAgent: "swe-backend",
+      sentAt: "2026-02-10T12:00:00.000Z",
+      payload: {
+        taskId: child.frontmatter.id,
+        parentTaskId: parent.frontmatter.id,
+        fromAgent: "architect",
+        toAgent: "swe-backend",
+        acceptanceCriteria: ["Tests pass"],
+        expectedOutputs: ["Implementation"],
+        contextRefs: [],
+        constraints: [],
+        dueBy: "2026-02-11T12:00:00.000Z",
+      },
+    };
+    await router.route(requestEnvelope);
+
+    // Verify routing.agent was updated to toAgent
+    const childAfterRequest = await store.get(child.frontmatter.id);
+    expect(childAfterRequest?.frontmatter.routing?.agent).toBe("swe-backend");
+
+    // Step 2: swe-backend sends handoff.accepted — must NOT be rejected by auth
+    const ackEnvelope: ProtocolEnvelope = {
+      protocol: "aof",
+      version: 1,
+      projectId: "test-project",
+      type: "handoff.accepted",
+      taskId: child.frontmatter.id,
+      fromAgent: "swe-backend",
+      toAgent: "architect",
+      sentAt: "2026-02-10T12:01:00.000Z",
+      payload: {
+        taskId: child.frontmatter.id,
+        accepted: true,
+      },
+    };
+    await router.route(ackEnvelope);
+
+    // Auth must not have rejected the ack
+    const authRejected = logger.calls.filter(
+      c => c.type === "protocol.message.rejected" &&
+           (c.opts?.payload?.reason === "unauthorized_agent" ||
+            c.opts?.payload?.reason === "unassigned_task"),
+    );
+    expect(authRejected).toHaveLength(0);
+
+    // delegation.accepted must be logged for the receiving agent
+    const acceptedLogs = logger.calls.filter(c => c.type === "delegation.accepted");
+    expect(acceptedLogs).toHaveLength(1);
+    expect(acceptedLogs[0].actor).toBe("swe-backend");
+    expect(acceptedLogs[0].opts?.taskId).toBe(child.frontmatter.id);
+  });
+
   it("taskId mismatch (payload vs envelope) logs protocol.message.rejected", async () => {
     const logger = makeLogger();
     const router = new ProtocolRouter({ store, logger });
