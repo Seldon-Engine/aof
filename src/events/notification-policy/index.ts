@@ -8,7 +8,7 @@
  *   await engine.handleEvent(event);
  */
 
-export { NotificationPolicyEngine, renderTemplate } from "./engine.js";
+export { NotificationPolicyEngine, renderTemplate, findMatchingRule } from "./engine.js";
 export type { EngineOptions, EngineStats } from "./engine.js";
 
 export { DEFAULT_RULES, matchesEventType } from "./rules.js";
@@ -24,3 +24,8 @@ export type { StormBatcherOptions, QueuedNotification } from "./batcher.js";
 
 export { AudienceRouter } from "./audience.js";
 export type { AudienceChannelMap } from "./audience.js";
+
+export { loadNotificationRules } from "./loader.js";
+
+export { NotificationRulesWatcher } from "./watcher.js";
+export type { WatcherOptions } from "./watcher.js";

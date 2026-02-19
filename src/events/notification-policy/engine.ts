@@ -79,7 +79,7 @@ function matchesPayload(
  * Rules with payload conditions are naturally ordered before generic ones
  * in the DEFAULT_RULES array.
  */
-function findMatchingRule(
+export function findMatchingRule(
   rules: NotificationRule[],
   event: BaseEvent
 ): NotificationRule | undefined {
@@ -92,7 +92,7 @@ function findMatchingRule(
 
 export class NotificationPolicyEngine {
   private readonly adapter: NotificationAdapter;
-  private readonly rules: NotificationRule[];
+  private rules: NotificationRule[];
   private readonly deduper: DeduplicationStore;
   private readonly severity: SeverityResolver;
   private readonly enabled: boolean;
@@ -175,5 +175,21 @@ export class NotificationPolicyEngine {
     this.stats.suppressed = 0;
     this.stats.noMatch = 0;
     this.stats.errors = 0;
+  }
+
+  /**
+   * Replaces the active rule set (hot-reload).
+   * In-flight events complete with the old rules; subsequent events use the new set.
+   */
+  updateRules(rules: NotificationRule[]): void {
+    this.rules = rules;
+  }
+
+  /**
+   * Returns the current active rules (snapshot, not a live reference).
+   * Useful for dry-run CLI commands and tests.
+   */
+  getRules(): readonly NotificationRule[] {
+    return this.rules;
   }
 }
