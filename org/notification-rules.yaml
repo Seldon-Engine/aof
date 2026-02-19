@@ -1,0 +1,247 @@
+# AOF Notification Rules Configuration
+# Version: 1
+#
+# Rules are evaluated first-match-wins.
+# Payload matchers must appear BEFORE generic eventType rules for the same type.
+#
+# Template tokens: {taskId}, {actor}, {payload.field}, {payload.nested.field}
+#
+# Severity tiers:
+#   info     — routine lifecycle events (5-min dedupe)
+#   warn     — attention needed (5-min dedupe, 15-min for SLA)
+#   critical — urgent/unsuppressable (neverSuppress: true bypasses dedupe)
+
+version: 1
+
+defaults:
+  dedupeWindowMs: 300000        # 5 minutes
+  criticalNeverSuppressed: true
+
+rules:
+  # ── Task lifecycle — specific transitions (before generic) ────────────────
+
+  - match:
+      eventType: "task.transitioned"
+      payload:
+        to: "review"
+    severity: warn
+    audience: [team-lead, operator]
+    channel: "#aof-review"
+    template: "👀 {taskId} ready for review (by {actor})"
+    dedupeWindowMs: 0           # Always send — review needs immediate attention
+
+  - match:
+      eventType: "task.transitioned"
+      payload:
+        to: "blocked"
+    severity: warn
+    audience: [team-lead, operator]
+    channel: "#aof-alerts"
+    template: "🚧 {taskId} blocked: {payload.reason}"
+
+  - match:
+      eventType: "task.transitioned"
+      payload:
+        to: "done"
+    severity: info
+    audience: [agent, team-lead]
+    channel: "#aof-dispatch"
+    template: "✅ {actor} completed {taskId}"
+
+  - match:
+      eventType: "task.transitioned"
+      payload:
+        to: "in-progress"
+    severity: info
+    audience: [agent]
+    channel: "#aof-dispatch"
+    template: "▶️ {actor} started {taskId}"
+
+  - match:
+      eventType: "task.transitioned"
+    severity: info
+    audience: [agent]
+    channel: "#aof-dispatch"
+    template: "🔄 {taskId}: {payload.from} → {payload.to}"
+
+  # ── Task lifecycle — generic ──────────────────────────────────────────────
+
+  - match:
+      eventType: "task.created"
+    severity: info
+    audience: [agent]
+    channel: "#aof-dispatch"
+    template: "📬 Task {taskId} created: {payload.title}"
+
+  - match:
+      eventType: "task.blocked"
+    severity: warn
+    audience: [team-lead, operator]
+    channel: "#aof-alerts"
+    template: "🚧 {taskId} blocked: {payload.reason}"
+
+  - match:
+      eventType: "task.deadletter"
+    severity: critical
+    audience: [operator]
+    channel: "#aof-alerts"
+    template: "🪦 Task {taskId} moved to dead letter: {payload.reason}"
+    neverSuppress: true
+
+  - match:
+      eventType: "task.abandoned"
+    severity: critical
+    audience: [operator]
+    channel: "#aof-alerts"
+    template: "💀 Task {taskId} may be abandoned (check run.json)"
+    neverSuppress: true
+
+  - match:
+      eventType: "task.resurrected"
+    severity: info
+    audience: [team-lead]
+    channel: "#aof-dispatch"
+    template: "🔁 Task {taskId} resurrected"
+
+  - match:
+      eventType: "task.dep.added"
+    severity: info
+    audience: [agent]
+    channel: "#aof-dispatch"
+    template: "🔗 Dependency added to {taskId}: {payload.depId}"
+
+  - match:
+      eventType: "task.dep.removed"
+    severity: info
+    audience: [agent]
+    channel: "#aof-dispatch"
+    template: "✂️ Dependency removed from {taskId}: {payload.depId}"
+
+  # ── Lease management ─────────────────────────────────────────────────────
+
+  - match:
+      eventType: "lease.expired"
+    severity: warn
+    audience: [team-lead]
+    channel: "#aof-alerts"
+    template: "⏰ Lease expired on {taskId} (agent: {actor})"
+
+  # ── SLA ──────────────────────────────────────────────────────────────────
+
+  - match:
+      eventType: "sla.violation"
+    severity: warn
+    audience: [team-lead]
+    channel: "#aof-alerts"
+    template: "⚠️ SLA violation: {taskId} in-progress {payload.durationHrs}h (limit: {payload.limitHrs}h)"
+    dedupeWindowMs: 900000      # 15 min — matches SlaChecker rate limiter
+
+  # ── Gate events ──────────────────────────────────────────────────────────
+
+  - match:
+      eventType: "gate_timeout"
+    severity: warn
+    audience: [team-lead]
+    channel: "#aof-alerts"
+    template: "⏱️ Gate timeout: {taskId} ({payload.gate})"
+
+  - match:
+      eventType: "gate_timeout_escalation"
+    severity: critical
+    audience: [operator]
+    channel: "#aof-critical"
+    template: "🔴 Gate escalation: {taskId} escalated after {payload.elapsed}h"
+    neverSuppress: true
+
+  # ── System events ─────────────────────────────────────────────────────────
+
+  - match:
+      eventType: "system.drift-detected"
+    severity: warn
+    audience: [operator]
+    channel: "#aof-alerts"
+    template: "⚠️ Org chart drift: {payload.summary}"
+
+  - match:
+      eventType: "system.config-changed"
+    severity: info
+    audience: [operator]
+    channel: "#aof-alerts"
+    template: "🔧 Config changed: {payload.key}"
+
+  - match:
+      eventType: "system.shutdown"
+    severity: critical
+    audience: [operator]
+    channel: "#aof-critical"
+    template: "🔴 AOF system shutting down"
+    neverSuppress: true
+
+  - match:
+      eventType: "system.recovery"
+    severity: warn
+    audience: [operator]
+    channel: "#aof-alerts"
+    template: "🟢 Scheduler recovered"
+
+  - match:
+      eventType: "system.startup"
+    severity: info
+    audience: [operator]
+    channel: "#aof-alerts"
+    template: "🟢 AOF system started"
+
+  # ── Scheduler ─────────────────────────────────────────────────────────────
+
+  - match:
+      eventType: "scheduler_alert"
+    severity: warn
+    audience: [operator]
+    channel: "#aof-alerts"
+    template: "🔔 Scheduler alert: {payload.reason}"
+
+  # ── Concurrency ──────────────────────────────────────────────────────────
+
+  - match:
+      eventType: "concurrency.platformLimit"
+    severity: warn
+    audience: [operator]
+    channel: "#aof-alerts"
+    template: "🚦 Platform concurrency limit reached ({payload.current}/{payload.limit})"
+
+  # ── Murmur events ─────────────────────────────────────────────────────────
+
+  - match:
+      eventType: "murmur.review.dispatched"
+    severity: info
+    audience: [team-lead]
+    channel: "#aof-dispatch"
+    template: "🔍 Murmur review dispatched: {payload.taskTitle}"
+
+  - match:
+      eventType: "murmur.review.dispatch_failed"
+    severity: warn
+    audience: [operator]
+    channel: "#aof-alerts"
+    template: "⚠️ Murmur dispatch failed: {payload.error}"
+
+  - match:
+      eventType: "murmur.review.dispatch_error"
+    severity: warn
+    audience: [operator]
+    channel: "#aof-alerts"
+    template: "⚠️ Murmur dispatch error: {payload.error}"
+
+  - match:
+      eventType: "murmur.evaluation.error"
+    severity: warn
+    audience: [operator]
+    channel: "#aof-alerts"
+    template: "⚠️ Murmur evaluation error: {payload.error}"
+
+  - match:
+      eventType: "murmur.evaluation.failed"
+    severity: warn
+    audience: [operator]
+    channel: "#aof-alerts"
+    template: "⚠️ Murmur evaluation failed: {payload.error}"
