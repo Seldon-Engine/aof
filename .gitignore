@@ -1,34 +1,53 @@
+# Dependencies & build
 node_modules/
 dist/
 *.tsbuildinfo
 
-# Runtime data (tasks, events) - tracked separately
-# tasks/ and events/ contain runtime state, include sample tasks only
-events/*.jsonl
-tasks/pending/*.md
-tasks/assigned/*.md
-tasks/in-progress/*.md
-tasks/blocked/*.md
-tasks/review/*.md
-tasks/done/*.md
-tasks/failed/*.md
-tasks/cancelled/*.md
-
-# Keep the directories
-!tasks/*/.gitkeep
-
 # OS
 .DS_Store
 
-# Agent workspace artifacts (not source code)
-.beads/
-.learnings/
+# ──────────────────────────────────────────────
+# Runtime operational state (NEVER commit these)
+# ──────────────────────────────────────────────
+
+# Task kanban — runtime state, not source
+tasks/
+views/
+
+# Mailbox — per-agent inboxes, runtime only
 mailbox/
+
+# Event logs — runtime JSONL, not source
+events/
+
+# Internal reports and work receipts
 reports/
+
+# Internal project inboxes
+Projects/
+
+# Internal SWE process docs
+swe-process/
+
+# Org chart (live operational config — use templates/ for examples)
+org/
+
+# ──────────────────────────────────────────────
+# Tooling state (NEVER commit these)
+# ──────────────────────────────────────────────
+
+# Beads task tracker state
+.beads/
+
+# Agent learnings (ephemeral, per-agent)
+.learnings/
+
+# Serena LSP cache, logs, memories
+.serena/
+
+# One-off scripts
+convert_tasks.py
 
 # Agent work receipts / one-off status docs
 WORK-SESSION.md
 DEPLOY-TRACKER.md
-swe-process/
-tasks/backlog/*.md
-convert_tasks.py
