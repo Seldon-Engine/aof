@@ -48,7 +48,16 @@
     "test:integration:plugin": "./scripts/test-lock.sh run --config tests/integration/vitest.config.ts",
     "test:all": "npm run test && npm run test:e2e",
     "lint": "node dist/cli/index.js lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepare": "simple-git-hooks",
+    "release": "GITHUB_TOKEN=$(gh auth token) release-it",
+    "release:dry": "GITHUB_TOKEN=$(gh auth token) release-it --dry-run",
+    "release:patch": "GITHUB_TOKEN=$(gh auth token) release-it patch",
+    "release:minor": "GITHUB_TOKEN=$(gh auth token) release-it minor",
+    "release:major": "GITHUB_TOKEN=$(gh auth token) release-it major"
+  },
+  "simple-git-hooks": {
+    "commit-msg": "npx --no -- commitlint --edit $1"
   },
   "keywords": [
     "aof",
@@ -72,8 +81,13 @@
     "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@commitlint/cli": "^20.4.2",
+    "@commitlint/config-conventional": "^20.4.2",
+    "@release-it/conventional-changelog": "^10.0.5",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.0.0",
+    "release-it": "^19.2.4",
+    "simple-git-hooks": "^2.13.1",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   },

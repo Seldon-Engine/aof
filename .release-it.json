@@ -1,0 +1,45 @@
+{
+  "git": {
+    "commitMessage": "chore: release v${version}",
+    "tagName": "v${version}",
+    "tagAnnotation": "AOF v${version}",
+    "requireCleanWorkingDir": true,
+    "push": true,
+    "pushRepo": "origin"
+  },
+  "github": {
+    "release": true,
+    "releaseName": "v${version}",
+    "tokenRef": "GITHUB_TOKEN"
+  },
+  "npm": {
+    "publish": false
+  },
+  "plugins": {
+    "@release-it/conventional-changelog": {
+      "preset": {
+        "name": "conventionalcommits",
+        "types": [
+          { "type": "feat",     "section": "✨ Features" },
+          { "type": "fix",      "section": "🐛 Bug Fixes" },
+          { "type": "perf",     "section": "⚡ Performance" },
+          { "type": "refactor", "section": "♻️  Refactor" },
+          { "type": "test",     "section": "🧪 Tests" },
+          { "type": "docs",     "section": "📚 Documentation" },
+          { "type": "chore",    "section": "🔧 Chores", "hidden": true },
+          { "type": "ci",       "section": "🔄 CI/CD",  "hidden": true }
+        ]
+      },
+      "infile": false,
+      "gitRawCommitsOpts": {
+        "merges": null
+      }
+    }
+  },
+  "hooks": {
+    "before:init": [
+      "npm run typecheck",
+      "npm test"
+    ]
+  }
+}
