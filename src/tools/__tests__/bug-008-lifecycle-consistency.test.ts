@@ -260,11 +260,16 @@ describe("BUG-008: Lifecycle Consistency (in-progress guard)", () => {
     expect(task?.frontmatter.status).toBe("done");
   });
 
-  it("BUG-008: completion of already-done task is idempotent", async () => {
+  it("BUG-008: completion of already-done task is rejected (done-state lock, AC-3)", async () => {
+    // AC-3: Tasks with status 'done' are immutable via aofTaskComplete.
+    // Previously this was tested as "idempotent" (silently succeed on re-complete).
+    // The SDLC gate enforcement fix (AOF-6qi) changes this to strict immutability:
+    // re-completing a done task is an error, not a no-op.
+
     // 1. Create and complete task
     const dispatchResult = await aofDispatch(ctx, {
       title: "Test Task - Already Done",
-      brief: "Should be idempotent",
+      brief: "Should now be rejected if re-completed",
       agent: "test-agent",
     });
 
@@ -277,25 +282,18 @@ describe("BUG-008: Lifecycle Consistency (in-progress guard)", () => {
     let task = await store.get(taskId);
     expect(task?.frontmatter.status).toBe("done");
 
-    // 2. Try to complete again
-    await aofTaskComplete(ctx, {
-      taskId,
-      actor: "test-agent",
-      summary: "Redundant completion",
-    });
+    // 2. Attempting to complete a done task must throw (not silently succeed)
+    await expect(
+      aofTaskComplete(ctx, {
+        taskId,
+        actor: "test-agent",
+        summary: "Redundant completion",
+      })
+    ).rejects.toThrow(/is already done and cannot be re-transitioned/i);
 
-    // 3. Should still be done with no additional transitions
+    // 3. Task is still done (no state corruption)
     task = await store.get(taskId);
     expect(task?.frontmatter.status).toBe("done");
-
-    // Verify no extra done→done transitions
-    // Events captured via onEvent callback
-    const doneTransitions = capturedEvents.filter(
-      e => e.type === "task.transitioned" && 
-      e.taskId === taskId &&
-      (e.payload as any).from === "done"
-    );
-    expect(doneTransitions.length).toBe(0);
   });
 
   it("BUG-008: lifecycle events recorded for all manual completions", async () => {

@@ -37,6 +37,19 @@ export interface GateEvaluationInput {
   rejectionNotes?: string;
   /** Agent ID that processed this gate. */
   agent?: string;
+  /**
+   * Role of the calling agent (e.g., "swe-architect", "swe-qa").
+   *
+   * When provided, the engine validates this against the gate's required role
+   * and rejects the transition if they don't match. This is the primary
+   * enforcement mechanism preventing agents from approving gates outside
+   * their authority (e.g., a backend agent cannot approve code-review).
+   *
+   * When omitted, role enforcement is skipped (backwards compat for tests
+   * that pre-date strict enforcement). Production callers SHOULD always
+   * provide this field.
+   */
+  callerRole?: string;
 }
 
 /**
@@ -105,6 +118,33 @@ export function evaluateGateTransition(
   const currentGateConfig = workflow.gates[currentGateIndex];
   if (!currentGateConfig) {
     throw new Error(`Gate at index ${currentGateIndex} not found in workflow`);
+  }
+
+  // ── ENFORCEMENT GATE 1: Role authorization ──────────────────────────────────
+  // When callerRole is provided, validate it against the gate's required role.
+  // This prevents any agent from approving a gate they are not authorized for
+  // (e.g., a backend agent cannot approve code-review or qa).
+  if (input.callerRole !== undefined) {
+    if (currentGateConfig.role !== input.callerRole) {
+      throw new Error(
+        `Unauthorized gate transition: gate "${currentGate}" requires role ` +
+        `"${currentGateConfig.role}", but caller has role "${input.callerRole}". ` +
+        `Only the "${currentGateConfig.role}" role can process this gate.`
+      );
+    }
+  }
+
+  // ── ENFORCEMENT GATE 2: canReject constraint ─────────────────────────────────
+  // Gates with canReject: false cannot issue "needs_review" outcomes.
+  // This prevents implementation gates from sending tasks back (they are the
+  // starting point, not review points) and guards against accidental rejections.
+  if (outcome === "needs_review" && !currentGateConfig.canReject) {
+    throw new Error(
+      `Gate "${currentGate}" (role: "${currentGateConfig.role}") does not allow ` +
+      `rejections (canReject: false). Only review gates (canReject: true) can ` +
+      `issue "needs_review" outcomes. Use "complete" to advance or "blocked" ` +
+      `if an external dependency is preventing progress.`
+    );
   }
 
   const entered = task.frontmatter.gate?.entered ?? timestamp;

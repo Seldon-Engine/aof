@@ -127,6 +127,8 @@ async function applyGateTransition(
  * @param metrics - Optional metrics instance for Prometheus telemetry
  * @returns Gate transition result
  * @throws Error if task not found, no workflow, or invalid workflow
+ * @throws Error if callerRole does not match the gate's required role
+ * @throws Error if gate does not allow rejections (canReject: false)
  */
 export async function handleGateTransition(
   store: ITaskStore,
@@ -138,6 +140,11 @@ export async function handleGateTransition(
     blockers?: string[];
     rejectionNotes?: string;
     agent?: string;
+    /**
+     * Role of the calling agent. When provided, enforced against gate config.
+     * Production callers MUST supply this to get role-based gate enforcement.
+     */
+    callerRole?: string;
   },
   metrics?: AOFMetrics
 ): Promise<GateTransition> {
@@ -175,6 +182,7 @@ export async function handleGateTransition(
     blockers: context.blockers,
     rejectionNotes: context.rejectionNotes,
     agent: context.agent,
+    callerRole: context.callerRole,
   };
   
   const result = evaluateGateTransition(input);

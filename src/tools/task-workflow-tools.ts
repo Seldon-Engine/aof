@@ -106,6 +106,19 @@ export interface AOFTaskCompleteInput {
   outcome?: import("../schemas/gate.js").GateOutcome;
   blockers?: string[];
   rejectionNotes?: string;
+  /**
+   * Declared role of the calling agent (e.g., "swe-architect", "swe-qa").
+   *
+   * When provided, the runtime validates this against the gate's required role
+   * and rejects the transition if they don't match. This is the primary
+   * mechanism that prevents, for example, a backend agent from approving the
+   * code-review or qa gates.
+   *
+   * Production callers (agents in the SDLC pipeline) MUST supply this field.
+   * Omitting it allows the transition without role validation (backwards-compat
+   * only — do not rely on this in new code).
+   */
+  callerRole?: string;
 }
 
 export interface AOFTaskCompleteResult extends ToolResponseEnvelope {
@@ -169,37 +182,49 @@ export async function aofTaskComplete(
   const task = await resolveTask(ctx.store, input.taskId);
   let updatedTask = task;
 
-  // If task is in a gate workflow AND outcome provided, use gate transition handler
-  // Backward compatible: tasks not in gate workflows use legacy path below
-  if (task.frontmatter.gate && input.outcome) {
-    // Validate gate completion parameters before processing
+  // AC-3: Done-state lock — tasks already marked done cannot be re-completed.
+  // Resurrection goes through a dedicated admin pathway, not task completion.
+  if (task.frontmatter.status === "done") {
+    throw new Error(
+      `Task ${task.frontmatter.id} is already done and cannot be re-transitioned. ` +
+      `If you need to re-open this task, contact an administrator.`
+    );
+  }
+
+  // AC-2: Gate workflow tasks MUST use the gate path — no legacy bypass allowed.
+  // Previously, a gate task called without `outcome` would fall through to the
+  // legacy completion path and mark the task `done` without any gate validation.
+  // Now we gate the legacy path behind `!task.frontmatter.gate`.
+  if (task.frontmatter.gate) {
+    // Gate task: always validate and use gate transition handler
     await validateGateCompletion(ctx.store, task, input);
-    
+
     await handleGateTransition(
       ctx.store,
       ctx.logger,
       input.taskId,
-      input.outcome,
+      input.outcome!,  // validated above — will be defined
       {
         summary: input.summary ?? "Completed",
         blockers: input.blockers,
         rejectionNotes: input.rejectionNotes,
         agent: actor,
+        callerRole: input.callerRole,
       }
     );
-    
+
     // Reload task to get updated state
     const reloadedTask = await ctx.store.get(input.taskId);
     if (!reloadedTask) {
       throw new Error(`Task ${input.taskId} not found after gate transition`);
     }
-    
+
     const summary = `Task ${input.taskId} transitioned through gate workflow`;
     const envelope = compactResponse(summary, {
       taskId: input.taskId,
       status: reloadedTask.frontmatter.status,
     });
-    
+
     return {
       ...envelope,
       taskId: input.taskId,
@@ -207,7 +232,7 @@ export async function aofTaskComplete(
     };
   }
 
-  // Legacy completion path (no workflow)
+  // Legacy completion path (non-gate tasks only)
   if (input.summary) {
     const body = task.body ? `${task.body}\n\n## Completion Summary\n${input.summary}` : `## Completion Summary\n${input.summary}`;
     updatedTask = await ctx.store.updateBody(task.frontmatter.id, body);

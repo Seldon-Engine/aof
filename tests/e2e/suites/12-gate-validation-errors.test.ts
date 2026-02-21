@@ -149,22 +149,18 @@ workflow:
       const taskPath = join(TEST_DATA_DIR, "tasks", task.frontmatter.status, `${task.frontmatter.id}.md`);
       await writeFileAtomic(taskPath, serializeTask(task));
 
-      // NOTE: The current implementation does NOT enforce canReject=false at the
-      // validateGateCompletion or evaluateGateTransition level. When needs_review is
-      // submitted with valid blockers + rejectionNotes, the call succeeds and the task
-      // loops back to the first gate (origin rejection strategy). The canReject flag
-      // is stored in the workflow config but not used as a runtime gate.
-      const result = await aofTaskComplete(ctx, {
-        taskId: task.frontmatter.id,
-        actor: "test-agent",
-        summary: "Rejecting",
-        outcome: "needs_review",
-        blockers: ["Issue found"],
-        rejectionNotes: "Please fix",
-      });
-
-      // Task transitions back to first gate (ready-check → ready-check origin loop)
-      expect(result.taskId).toBe(task.frontmatter.id);
+      // canReject: false is now strictly enforced by the runtime.
+      // Attempting needs_review on a gate with canReject: false must throw.
+      await expect(
+        aofTaskComplete(ctx, {
+          taskId: task.frontmatter.id,
+          actor: "test-agent",
+          summary: "Rejecting",
+          outcome: "needs_review",
+          blockers: ["Issue found"],
+          rejectionNotes: "Please fix",
+        })
+      ).rejects.toThrow(/does not allow rejections.*canReject: false/i);
     });
   });
 
