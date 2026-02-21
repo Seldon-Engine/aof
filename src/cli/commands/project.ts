@@ -6,7 +6,6 @@
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { Command } from "commander";
-import { init } from "../init.js";
 import { integrateWithOpenClaw, detectOpenClawConfig } from "../../packaging/integration.js";
 import { ejectFromOpenClaw, detectOpenClawIntegration } from "../../packaging/ejector.js";
 import { migrateToProjects, rollbackMigration } from "../../projects/migration.js";
@@ -15,25 +14,6 @@ import { migrateToProjects, rollbackMigration } from "../../projects/migration.j
  * Register project commands with the CLI program.
  */
 export function registerProjectCommands(program: Command): void {
-  // --- init ---
-  program
-    .command("init")
-    .description("Initialize a new AOF installation")
-    .option("--dir <path>", "Installation directory")
-    .option("--template <name>", "Template name (minimal or full)", "minimal")
-    .option("-y, --yes", "Non-interactive mode (use defaults)", false)
-    .option("--skip-openclaw", "Skip OpenClaw integration check", false)
-    .option("--force", "Force overwrite existing installation", false)
-    .action(async (opts: { dir?: string; template?: string; yes: boolean; skipOpenclaw: boolean; force: boolean }) => {
-      await init({
-        dir: opts.dir,
-        template: opts.template as "minimal" | "full" | undefined,
-        yes: opts.yes,
-        skipOpenclaw: opts.skipOpenclaw,
-        force: opts.force,
-      });
-    });
-
   // --- create-project ---
   program
     .command("create-project <id>")

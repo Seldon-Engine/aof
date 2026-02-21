@@ -24,9 +24,7 @@ import { install, update, list } from "../packaging/installer.js";
 import { getChannel, setChannel, checkForUpdates, getVersionManifest } from "../packaging/channels.js";
 import { selfUpdate, rollbackUpdate } from "../packaging/updater.js";
 import { runMigrations } from "../packaging/migrations.js";
-import { init } from "./init.js";
-import { integrateWithOpenClaw, detectOpenClawConfig } from "../packaging/integration.js";
-import { ejectFromOpenClaw, detectOpenClawIntegration } from "../packaging/ejector.js";
+import { registerInitCommand } from "./commands/init.js";
 import { registerDaemonCommands } from "./commands/daemon.js";
 import { registerTaskCommands } from "./commands/task.js";
 import { registerMemoryCommands } from "./commands/memory.js";
@@ -43,6 +41,9 @@ const program = new Command()
   .description("Agentic Ops Fabric — deterministic orchestration for multi-agent systems")
   .option("--root <path>", "AOF root directory", AOF_ROOT);
 
+
+// --- init (integration wizard) ---
+registerInitCommand(program);
 
 // --- project commands ---
 registerProjectCommands(program);
