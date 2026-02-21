@@ -1,702 +1,354 @@
 ---
 name: aof
 description: >
-  Work with AOF (Agentic Ops Fabric) — deterministic multi-agent orchestration with filesystem-based
-  task management, org-chart governance, workflow gates, and structured inter-agent protocols.
-  Use when: creating/managing agent tasks, running the scheduler, setting up org charts,
-  coordinating multi-agent handoffs, monitoring system health, or configuring notifications.
-  Project lives at ~/Projects/AOF/. AOF CLI manages tasks.
-version: 1.0.0
+  Work with AOF (Agentic Ops Fabric) — deterministic multi-agent orchestration with
+  tool-based task management, org-chart governance, workflow gates, and structured
+  inter-agent protocols. Use when: creating/managing tasks, coordinating multi-agent
+  handoffs, checking system status, or completing assigned work.
+version: 2.0.0
 requires:
-  bins: [node, git]
-  optional: [aof]
+  bins: [node]
 ---
 
 # AOF — Agentic Ops Fabric
 
-Deterministic orchestration for multi-agent systems. Turns an agent swarm into a reliable,
-observable, restart-safe operating environment. No LLMs in the control plane.
+Deterministic orchestration for multi-agent systems. No LLMs in the control plane.
 
-## When to Use AOF
-
-| Scenario | AOF Feature |
-|----------|------------|
-| Coordinating work across multiple specialized agents | Org-chart routing + scheduler |
-| Enforcing multi-stage review workflows (code → review → QA → ship) | Workflow Gates |
-| Tracking tasks with dependencies and priorities | AOF task management |
-| Ensuring crashed agents can recover mid-task | Run artifacts + resume protocol |
-| Delegating subtasks to child agents with context | Handoff protocol |
-| Broadcasting status updates during long tasks | Status update protocol |
-| Getting notified when tasks complete, fail, or miss SLAs | Notification rules |
-| Detecting which agents are active vs. drifted | `aof org drift` |
-| Auditing task history and system events | JSONL event log |
+**Key distinction:** Agents interact with AOF through **plugin tools** (MCP). The CLI
+is for human operators doing setup, debugging, and maintenance only.
 
 ---
 
-## Quick Start
+## Agent Tools Reference
 
-```bash
-# Initialize AOF in a project
-cd ~/Projects/AOF
-./dist/cli/index.js init               # interactive
-./dist/cli/index.js init --yes         # defaults
+AOF exposes 5 tools via the OpenClaw plugin. These are your primary interface.
 
-# Or via the global aof alias (if installed)
-aof init
-```
+### `aof_dispatch` — Create & route a task
 
-### OpenClaw Plugin Mode
-
-Add to `~/.openclaw/openclaw.json`:
+Creates a task, promotes it to `ready`, and dispatches it to the assigned agent.
 
 ```json
 {
-  "plugins": {
-    "aof": {
-      "enabled": true,
-      "config": {
-        "dataDir": "~/.openclaw/aof",
-        "maxConcurrentDispatches": 3
-      }
-    }
-  }
+  "title": "Implement rate limiting middleware",
+  "brief": "Add token-bucket rate limiting to the API gateway. Config should live in org-chart, not hardcoded.",
+  "priority": "high",
+  "assignedAgent": "swe-backend",
+  "ownerTeam": "swe",
+  "checklist": [
+    "429 responses for >100 req/min per token",
+    "Config in org-chart",
+    "Tests ≥ 95% coverage"
+  ],
+  "inputs": ["outputs/api-spec.yaml"],
+  "actor": "main"
 }
 ```
 
-> **Gateway URL & Token:** AOF auto-detects these from the OpenClaw runtime context
-> (`api.config.gateway.port` and `api.config.gateway.auth.token`). You only need to set
-> `gatewayUrl` / `gatewayToken` manually if auto-detection fails (e.g. non-standard port).
->
-> **dryRun:** Defaults to `false` — the scheduler dispatches tasks live. Set `"dryRun": true`
-> to observe-only mode (previews dispatch decisions without spawning agents).
+**Returns:** `{ taskId, status, assignedAgent, filePath, sessionId }`
 
-Then restart the gateway: `openclaw gateway restart`
+**When to use:** You're the coordinator. You've broken down work and need to assign it.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `title` | ✅ | Short task title |
+| `brief` | ✅ | Detailed description (becomes task body) |
+| `priority` | | `low` / `normal` / `medium` / `high` / `critical` |
+| `assignedAgent` | | Agent ID from org chart. Omit to let routing rules decide. |
+| `ownerTeam` | | Team ID. Auto-resolved from agent if omitted. |
+| `checklist` | | Acceptance criteria (rendered as checkboxes) |
+| `inputs` | | File paths or references the agent needs |
+| `actor` | | Your agent ID (for audit trail) |
+
+### `aof_task_update` — Update a task in progress
+
+Log work, change status, mark blocked, or append outputs.
+
+```json
+{
+  "taskId": "TASK-2026-02-21-001",
+  "workLog": "Middleware implemented, writing tests now",
+  "outputs": ["src/middleware/rate-limit.ts"],
+  "actor": "swe-backend"
+}
+```
+
+**Returns:** `{ success, taskId, newStatus, updatedAt }`
+
+**When to use:** You're working on a task and need to log progress, add outputs, or change status.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `taskId` | ✅ | Task ID |
+| `status` | | New status: `backlog` / `ready` / `in-progress` / `blocked` / `review` / `done` |
+| `workLog` | | Progress note (appended with timestamp to Work Log section) |
+| `outputs` | | Deliverable file paths (appended to Outputs section) |
+| `blockedReason` | | Why the task is blocked (use with `status: "blocked"`) |
+| `body` | | Replace entire task body (use sparingly) |
+| `actor` | | Your agent ID |
+
+### `aof_task_complete` — Mark task done
+
+Completes a task with a summary and optional deliverables.
+
+```json
+{
+  "taskId": "TASK-2026-02-21-001",
+  "summary": "Rate limiting implemented with token-bucket algorithm. 24/24 tests passing.",
+  "outputs": [
+    "src/middleware/rate-limit.ts",
+    "src/middleware/__tests__/rate-limit.test.ts"
+  ],
+  "actor": "swe-backend"
+}
+```
+
+**Returns:** `{ success, taskId, finalStatus, completedAt }`
+
+**When to use:** You've finished your assigned task and met the acceptance criteria.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `taskId` | ✅ | Task ID |
+| `summary` | ✅ | What was done, key outcomes |
+| `outputs` | | Final deliverable file paths |
+| `skipReview` | | Skip review gate (default: false) |
+| `actor` | | Your agent ID |
+
+### `aof_status_report` — Query task status
+
+Get counts, task lists, and summaries filtered by agent or status.
+
+```json
+{
+  "agentId": "swe-backend",
+  "status": "in-progress",
+  "compact": true,
+  "actor": "main"
+}
+```
+
+**Returns:** `{ total, byStatus, tasks[], summary, details }`
+
+**When to use:** You need to know what's in flight, what's blocked, or what a specific agent is working on.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `agentId` | | Filter by agent |
+| `status` | | Filter by status |
+| `compact` | | Shorter output |
+| `limit` | | Max tasks to return |
+| `actor` | | Your agent ID |
+
+### `aof_board` — Kanban board view
+
+Visual board of tasks organized by status columns.
+
+```json
+{
+  "team": "swe",
+  "status": "in-progress",
+  "priority": "high"
+}
+```
+
+**Returns:** `{ team, timestamp, columns, stats }`
+
+**When to use:** You want a high-level view of the whole pipeline — what's where, what's stuck.
 
 ---
 
-## CLI Reference
+## Agent Workflow Patterns
 
-### Daemon
+### Pattern 1: Coordinator dispatches work
 
-```bash
-aof daemon start          # Start background daemon
-aof daemon stop           # Stop daemon
-aof daemon status         # Health check + active task count
-aof daemon restart        # Stop + start
-```
-
-### Tasks
-
-```bash
-aof scan                  # List all tasks by status
-aof task create "Title"   # Create a task
-aof task create "Title" --priority high --agent swe-backend
-aof task promote <id>     # Move backlog → ready
-aof task resurrect <id>   # Recover from dead-letter queue
-aof lint                  # Validate all task files
-```
-
-### Scheduler
-
-```bash
-aof scheduler run         # Dry-run: preview dispatch decisions
-aof scheduler run --active  # Live run: dispatch tasks to agents
-```
-
-### Org Chart
-
-```bash
-aof org validate [path]   # Validate org-chart.yaml schema
-aof org show [path]       # Display agents, teams, routing
-aof org lint [path]       # Check referential integrity
-aof org drift [path]      # Detect drift vs. active OpenClaw agents
-```
-
-### Memory
-
-```bash
-aof memory generate       # Generate memory config from org chart
-aof memory audit          # Audit memory config vs. org chart
-aof memory curate         # Generate curation tasks (adaptive thresholds)
-```
-
-### Observability
-
-```bash
-aof board                 # Kanban view of all tasks
-aof watch <viewType>      # Live-watch a view directory
-aof metrics serve         # Start Prometheus metrics endpoint
-```
-
----
-
-## Task Management
-
-AOF uses its own filesystem-based task tracking. Tasks are Markdown files dispatched to agents by the scheduler.
-
-### Core Commands
-
-```bash
-# Create tasks
-aof task create "Implement JWT auth" --agent swe-backend --priority high
-aof task create "Quick capture title"          # defaults: normal priority, _inbox project
-
-# Navigate tasks
-aof scan                                       # All tasks by status
-aof scan --status ready                        # Filter by status
-aof board                                      # Kanban view
-
-# Manage tasks
-aof task promote TASK-<id>                     # backlog → ready
-aof task block TASK-<id> "Reason"              # Mark blocked
-aof task unblock TASK-<id>                     # Unblock
-aof task close TASK-<id>                       # Mark done
-
-# Dependencies
-aof task dep add TASK-child TASK-blocker       # child depends on blocker
-aof task dep remove TASK-child TASK-blocker    # remove dependency
-aof scan --status ready                        # tasks with no open blockers
-```
-
-### Task Lifecycle
+The main/coordinator agent breaks down a request and delegates:
 
 ```
-backlog → ready → in-progress → review → done
-                      ↓
-                   blocked → (resurface) → ready
-                      ↓
-                  dead-letter (use aof task resurrect)
+1. Call aof_status_report to see current workload
+2. Call aof_dispatch for each subtask (with assignedAgent, checklist)
+3. AOF scheduler routes and dispatches automatically
+4. Periodically call aof_status_report to check progress
 ```
 
-### Task File Format (Markdown + YAML Frontmatter)
+### Pattern 2: Worker executes assigned task
 
-Tasks are plain `.md` files in `tasks/<status>/` directories:
+An agent receives a dispatched task and works on it:
 
-```markdown
----
-schemaVersion: 1
-id: TASK-2026-02-21-001
-title: Add rate limiting to API gateway
-status: ready
-priority: high
-routing:
-  role: swe-backend
-  team: swe
-  tags: [security, api, performance]
-createdAt: 2026-02-21T09:00:00Z
-updatedAt: 2026-02-21T09:00:00Z
-createdBy: swe-architect
-dependsOn: [TASK-2026-02-20-003]
-metadata:
-  phase: 2
-  epic: platform-hardening
----
-
-# Objective
-Add token-bucket rate limiting middleware to the API gateway.
-
-## Acceptance Criteria
-- [ ] 429 responses for requests exceeding 100 req/min per token
-- [ ] Rate limit config in org-chart (not hardcoded)
-- [ ] Tests pass (≥ 95% coverage)
-- [ ] No regressions in existing API tests
+```
+1. Read the task brief and checklist
+2. Do the work
+3. Call aof_task_update with workLog entries as you progress
+4. When done, call aof_task_complete with summary + outputs
 ```
 
-State transitions use atomic filesystem `rename()` — no database, no locks beyond the lease.
+### Pattern 3: Blocked task
 
----
+An agent can't proceed:
 
-## Org Chart (`org/org-chart.yaml`)
-
-The org chart is the **source of truth** for agents, teams, routing, and memory scopes.
-
-### Minimal Org Chart
-
-```yaml
-schemaVersion: 1
-template: "minimal"
-
-agents:
-  - id: main
-    name: "Coordinator"
-    description: "Central coordinator and strategist"
-    team: ops
-    canDelegate: true
-    active: true
-    capabilities:
-      tags: ["coordination", "delegation"]
-      concurrency: 3
-      model: "anthropic/claude-opus-4-6"
-      provider: "anthropic"
-    comms:
-      preferred: "send"
-
-  - id: swe-backend
-    name: "Backend Engineer"
-    description: "Implements APIs and data layer"
-    team: swe
-    reportsTo: "main"
-    active: true
-    capabilities:
-      tags: ["backend", "typescript", "api"]
-      concurrency: 1
-      model: "anthropic-api/claude-sonnet-4-5"
-      provider: "anthropic-api"
-    comms:
-      preferred: "send"
-      sessionKey: "agent:swe-backend:main"
-
-teams:
-  - id: ops
-    name: "Operations"
-    lead: "main"
-  - id: swe
-    name: "Engineering"
-    lead: "main"
-
-routing:
-  - matchTags: ["backend", "api", "typescript"]
-    targetAgent: "swe-backend"
-    weight: 10
+```
+1. Call aof_task_update with status: "blocked", blockedReason: "Need API spec from frontend team"
+2. AOF notifies the coordinator
+3. When unblocked, task returns to ready and gets re-dispatched
 ```
 
-### Full Org Chart with Memory Pools + Watchdog
+### Pattern 4: Dependency chains
 
-```yaml
-schemaVersion: 1
-template: "openclaw-full"
+Coordinator sets up sequential work:
 
-memoryPools:
-  hot:
-    path: "Resources/OpenClaw/_Core"
-    description: "Always-indexed operator context"
-  warm:
-    - id: architecture
-      path: "Resources/OpenClaw/Architecture"
-      description: "Architecture decision records"
-      roles: [main, swe-architect, swe-*]
-    - id: runbooks
-      path: "Resources/OpenClaw/Runbooks"
-      description: "Operational runbooks"
-      roles: [main, openclaw-custodian]
-  cold:
-    - Logs
-    - Approvals
-    - _archived
-
-agents:
-  - id: swe-architect
-    name: "SWE Architect"
-    description: "System design and orchestration"
-    team: swe
-    reportsTo: "main"
-    canDelegate: true
-    active: true
-    capabilities:
-      tags: ["architecture", "design", "delegation"]
-      concurrency: 2
-      model: "openai-api/gpt-4o"
-      provider: "openai-api"
-    comms:
-      preferred: "send"
-      sessionKey: "agent:swe-architect:main"
-
-  - id: swe-qa
-    name: "SWE QA"
-    description: "Quality assurance and testing"
-    team: swe
-    reportsTo: "swe-architect"
-    active: true
-    capabilities:
-      tags: ["testing", "qa", "bdd"]
-      concurrency: 1
-      model: "anthropic-api/claude-sonnet-4-5"
-      provider: "anthropic-api"
-
-teams:
-  - id: swe
-    name: "Software Engineering"
-    description: "Build and maintain systems"
-    lead: "swe-architect"
-
-routing:
-  - matchTags: ["security", "audit"]
-    targetAgent: "swe-security"
-    weight: 20
-  - matchTags: ["testing", "qa"]
-    targetAgent: "swe-qa"
-    weight: 15
-  - matchTags: ["backend", "api"]
-    targetAgent: "swe-backend"
-    weight: 10
-
-aof:
-  daemon:
-    watchdog:
-      enabled: true
-      pollIntervalMs: 60000
-      restartPolicy:
-        maxRestarts: 3
-        windowMs: 3600000
-      alerting:
-        channel: slack
-        webhook: "https://hooks.slack.com/services/..."
 ```
-
----
-
-## Workflow Gates
-
-Gates enforce multi-stage review checkpoints. Defined in `project.yaml`:
-
-```yaml
-workflow:
-  name: standard-feature
-  rejectionStrategy: origin        # rejected tasks return to the gate that submitted them
-  gates:
-    - id: implement
-      role: developer
-      description: "Build feature with tests"
-
-    - id: review
-      role: reviewer
-      canReject: true              # reviewer can send back for revision
-      description: "Architecture + code quality review"
-
-    - id: qa
-      role: qa-engineer
-      canReject: true
-      description: "Functional and regression testing"
-
-    - id: approve
-      role: product-owner
-      canReject: true
-      conditional: "task.metadata.needsApproval == true"   # skip if flag not set
-      description: "Final sign-off"
-
-  outcomes:
-    complete: advance              # done → advance to next gate
-    needs_review: reject           # needs_review → loop back
+1. aof_dispatch("Design API schema") → TASK-001
+2. aof_dispatch("Implement API", inputs: ["TASK-001"]) → TASK-002
+3. TASK-002 auto-blocks until TASK-001 completes
+4. On TASK-001 completion, AOF cascades → TASK-002 becomes ready
 ```
-
-**Gate transitions:** task.status stays `in-progress` as it moves through gates; the `gate` field tracks current position.
 
 ---
 
 ## Inter-Agent Protocols
 
-Structured messages for agent-to-agent coordination. All messages use the AOF/1 envelope.
+When agents communicate about tasks, use the AOF/1 protocol envelope:
 
-### Protocol Envelope
-
-```json
-{
-  "protocol": "aof",
-  "version": 1,
-  "type": "completion.report",
-  "taskId": "TASK-2026-02-21-001",
-  "fromAgent": "swe-backend",
-  "toAgent": "dispatcher",
-  "sentAt": "2026-02-21T10:00:00.000Z",
-  "payload": { "...": "type-specific" }
-}
+```
+AOF/1 {"protocol":"aof","version":1,"type":"completion.report","taskId":"TASK-001","fromAgent":"swe-backend","toAgent":"dispatcher","payload":{"outcome":"done","summary":"Implemented rate limiting"}}
 ```
 
-With `AOF/1` prefix (for plain-text channels):
-```
-AOF/1 {"protocol":"aof","version":1,"type":"completion.report",...}
-```
+### Protocol Types
 
-### Completion Report (task done / blocked / needs review)
+| Type | Direction | When |
+|------|-----------|------|
+| `completion.report` | Worker → Dispatcher | Task done/blocked/needs review |
+| `status.update` | Worker → Dispatcher | Mid-task progress |
+| `handoff.request` | Coordinator → Worker | Delegating a subtask |
+| `handoff.accepted` | Worker → Coordinator | Accepting delegation |
+| `handoff.rejected` | Worker → Coordinator | Can't accept (with reason) |
 
-```json
-{
-  "protocol": "aof", "version": 1,
-  "type": "completion.report",
-  "taskId": "TASK-2026-02-21-001",
-  "fromAgent": "swe-backend",
-  "toAgent": "dispatcher",
-  "sentAt": "2026-02-21T10:00:00.000Z",
-  "payload": {
-    "outcome": "done",
-    "summaryRef": "outputs/summary.md",
-    "deliverables": ["src/middleware/rate-limit.ts", "src/middleware/__tests__/rate-limit.test.ts"],
-    "tests": { "total": 24, "passed": 24, "failed": 0 },
-    "notes": "Implemented token-bucket; config loaded from org-chart"
-  }
-}
-```
+### Completion Outcomes
 
-**Outcomes:**
-- `done` — completed; transitions `in-progress → review → done`
-- `blocked` — cannot proceed; transitions to `blocked` (include `blockers` array)
-- `needs_review` — human review required; transitions to `review`
-- `partial` — partially complete; transitions to `review`
-
-### Status Update (mid-task progress)
-
-```json
-{
-  "protocol": "aof", "version": 1,
-  "type": "status.update",
-  "taskId": "TASK-2026-02-21-001",
-  "fromAgent": "swe-backend",
-  "toAgent": "dispatcher",
-  "sentAt": "2026-02-21T09:30:00.000Z",
-  "payload": {
-    "progress": 60,
-    "summary": "Middleware implemented; writing tests now",
-    "eta": "2026-02-21T11:00:00.000Z"
-  }
-}
-```
-
-### Handoff Request (delegation to child agent)
-
-```json
-{
-  "protocol": "aof", "version": 1,
-  "type": "handoff.request",
-  "taskId": "TASK-2026-02-21-001",
-  "fromAgent": "swe-architect",
-  "toAgent": "swe-backend",
-  "sentAt": "2026-02-21T09:00:00.000Z",
-  "payload": {
-    "childTaskId": "TASK-2026-02-21-002",
-    "context": "Implement token-bucket rate limiting. See outputs/spec.md.",
-    "acceptanceCriteria": [
-      "429 for >100 req/min per token",
-      "Config in org-chart",
-      "Tests ≥ 95% coverage"
-    ],
-    "inputs": ["outputs/spec.md", "outputs/api-contract.yaml"]
-  }
-}
-```
-
-Child agent responds:
-
-```json
-{
-  "type": "handoff.accepted",
-  "taskId": "TASK-2026-02-21-002",
-  "fromAgent": "swe-backend",
-  "toAgent": "swe-architect",
-  ...
-}
-```
-
-Or rejects (moves child to `blocked`):
-
-```json
-{
-  "type": "handoff.rejected",
-  "payload": { "reason": "Missing API contract for downstream service X" }
-}
-```
-
-### Resume Protocol (crash recovery)
-
-When the scheduler detects a stale heartbeat on a task, it consults `run_result.json`. If present, it applies the recorded outcome. If absent, it reclaims the task back to `ready` for re-dispatch.
-
-Agents write `run_result.json` before they finish:
-```json
-{
-  "outcome": "done",
-  "summaryRef": "outputs/summary.md",
-  "completedAt": "2026-02-21T10:00:00.000Z"
-}
-```
-
-This ensures **idempotent recovery** — re-dispatched agents pick up where they left off.
+| Outcome | Effect |
+|---------|--------|
+| `done` | Task → review → done; cascades dependencies |
+| `blocked` | Task → blocked; notifies coordinator |
+| `needs_review` | Task → review; awaits human/agent review |
+| `partial` | Task → review; partial completion logged |
 
 ---
 
-## Notification System
+## Org Chart Basics
 
-Configure in `org/notification-rules.yaml`. Rules are **first-match-wins**.
-
-### Severity Tiers
-
-| Tier | When | Dedupe Window |
-|------|------|--------------|
-| `info` | Routine lifecycle (task started, completed) | 5 min |
-| `warn` | Attention needed (blocked, SLA breach, lease expired) | 5–15 min |
-| `critical` | Urgent, never suppressed (dead-letter, gate escalation) | None (`neverSuppress: true`) |
-
-### Rule Structure
+The org chart (`org/org-chart.yaml`) defines agents, teams, and routing. It's the source of truth
+for the scheduler.
 
 ```yaml
-version: 1
+schemaVersion: 1
 
-defaults:
-  dedupeWindowMs: 300000        # 5 minutes global default
-  criticalNeverSuppressed: true
+agents:
+  - id: main                    # Must match OpenClaw agent ID
+    name: "Coordinator"
+    canDelegate: true
+    capabilities:
+      tags: [coordination, delegation]
+      concurrency: 3
+    comms:
+      preferred: send           # "send" | "spawn" | "cli"
 
-rules:
-  # Specific payload matchers BEFORE generic eventType rules
-  - match:
-      eventType: "task.transitioned"
-      payload:
-        to: "review"
-    severity: warn
-    audience: [team-lead, operator]
-    channel: "#eng-review"
-    template: "👀 {taskId} ready for review (by {actor})"
-    dedupeWindowMs: 0           # Always send — review is urgent
+  - id: swe-backend
+    reportsTo: main
+    capabilities:
+      tags: [backend, typescript, api]
+      concurrency: 1
+    comms:
+      preferred: send
+      sessionKey: "agent:main:swe-backend"
 
-  - match:
-      eventType: "task.deadletter"
-    severity: critical
-    audience: [operator]
-    channel: "#eng-alerts"
-    template: "🪦 Task {taskId} dead-lettered: {payload.reason}"
-    neverSuppress: true
+teams:
+  - id: swe
+    name: Engineering
+    lead: main
 
-  - match:
-      eventType: "sla.violation"
-    severity: warn
-    audience: [team-lead]
-    channel: "#eng-alerts"
-    template: "⚠️ SLA breach: {taskId} in-progress {payload.durationHrs}h (limit: {payload.limitHrs}h)"
-    dedupeWindowMs: 900000      # 15 min — matches SlaChecker rate
+routing:
+  - matchTags: [backend, api]
+    targetAgent: swe-backend
+    weight: 10
 ```
 
-### Key Event Types
-
-| Event | Fired When |
-|-------|-----------|
-| `task.created` | New task created |
-| `task.transitioned` | Status change (payload: `from`, `to`) |
-| `task.blocked` | Task marked blocked |
-| `task.deadletter` | Task moved to dead-letter queue |
-| `task.resurrected` | Dead-letter task recovered |
-| `dependency.cascaded` | Downstream tasks auto-promoted/blocked |
-| `sla.violation` | Task exceeds SLA time limit |
-| `lease.expired` | Agent heartbeat stale, lease reclaimed |
-| `gate_timeout` | Gate checkpoint stalled |
-| `gate_timeout_escalation` | Gate escalated after SLA breach |
-| `system.drift-detected` | Org chart vs. active agents out of sync |
-| `system.startup` / `system.shutdown` | Daemon lifecycle |
+**Key:** Agent `id` values must match your OpenClaw agent names. Run `aof init` to auto-sync
+from your existing OpenClaw config.
 
 ---
 
-## Common Workflows
+## Workflow Gates
 
-### 1. Create and Dispatch a Task
+Gates enforce quality checkpoints. Tasks pass through stages sequentially:
 
-```bash
-# Create task (lands in backlog)
-aof task create "Add OAuth2 support" \
-  --agent swe-backend \
-  --priority high
-
-# Promote from backlog to ready
-aof task promote TASK-<id>
-
-# Run scheduler to dispatch
-aof scheduler run --active
+```
+implement → review → qa → approve → done
 ```
 
-### 2. Check System Status
+If a reviewer rejects, the task loops back. Agents can't skip gates — the scheduler enforces order.
 
+Gates are defined in `project.yaml` and reference roles from the org chart.
+
+---
+
+## Human Operator CLI Reference
+
+**These commands are for humans, not agents.** Use for setup, debugging, and maintenance.
+
+### Setup
 ```bash
-aof board                        # Kanban view
-aof daemon status                # Daemon health + concurrency
-aof scan                         # All tasks by status
-aof org drift                    # Active agents vs. org chart
+aof init                          # Interactive OpenClaw integration wizard
+aof init --yes                    # Non-interactive with defaults
+aof org validate org-chart.yaml   # Validate org chart schema
+aof org drift                     # Show agents in org chart vs. OpenClaw
 ```
 
-### 3. Handle a Blocked Task
-
+### Monitoring
 ```bash
-cat tasks/blocked/TASK-<id>.md   # See why it's blocked
-aof task unblock TASK-<id>       # Unblock (after resolving the blocker)
-aof scheduler run --active       # Redispatch
+aof scan                          # All tasks by status
+aof board                         # Kanban view
+aof daemon status                 # Daemon health
 ```
 
-### 4. Resurrect a Dead-Lettered Task
-
+### Task Management
 ```bash
-aof task resurrect TASK-2026-02-21-001
-# → moves task from dead-letter back to backlog
-aof task promote TASK-2026-02-21-001
-# → backlog → ready → dispatcher picks it up on next run
+aof task create "Title" --priority high --agent swe-backend
+aof task promote TASK-<id>        # backlog → ready
+aof task resurrect TASK-<id>      # Recover from dead-letter
+aof lint                          # Validate all task files
 ```
 
-### 5. Validate Org Chart Changes
-
+### Scheduler
 ```bash
-aof org validate org/org-chart.yaml
-aof org lint org/org-chart.yaml
-aof org drift org/org-chart.yaml
-```
-
-### 6. Dependency Chain Orchestration
-
-```bash
-# Create tasks with blocking dependencies
-aof task create "Design API schema"           # → TASK-2026-02-21-001
-aof task create "Implement API"               # → TASK-2026-02-21-002
-aof task create "Write API docs"              # → TASK-2026-02-21-003
-
-# Set up dependency chain: 002 waits on 001, 003 waits on 002
-aof task dep add TASK-2026-02-21-002 TASK-2026-02-21-001
-aof task dep add TASK-2026-02-21-003 TASK-2026-02-21-002
-
-# Promote all to ready; scheduler dispatches only TASK-001 (others blocked)
-aof task promote TASK-2026-02-21-001
-aof task promote TASK-2026-02-21-002
-aof task promote TASK-2026-02-21-003
-aof scan --status ready
+aof scheduler run                 # Dry-run: preview dispatch
+aof scheduler run --active        # Live: dispatch tasks
 ```
 
 ---
 
-## Project Structure
+## Notification Events
 
-```
-~/Projects/AOF/
-├── src/
-│   ├── cli/commands/     # CLI command handlers (one file per command)
-│   ├── dispatch/         # Scheduler, executor, gate evaluator, SLA checker
-│   ├── store/            # Filesystem task storage + lease management
-│   ├── protocol/         # Protocol router, parsers, formatters
-│   ├── events/           # JSONL event logger + notification service
-│   ├── org/              # Org-chart parser and validator
-│   ├── memory/           # Memory medallion pipeline
-│   └── schemas/          # Zod schemas (source of truth for all data shapes)
-├── tasks/
-│   ├── backlog/          # Created but not scheduled
-│   ├── ready/            # Waiting for dispatch
-│   ├── in-progress/      # Claimed by an agent (has lease)
-│   ├── review/           # Awaiting human or agent review
-│   ├── blocked/          # Waiting on external dependency
-│   ├── done/             # Completed
-│   └── dead-letter/      # Failed after max retries
-├── org/
-│   ├── org-chart.yaml    # Agent/team/routing definitions
-│   └── notification-rules.yaml
-├── events/               # JSONL event log (append-only)
-├── views/                # Generated kanban + mailbox views
-└── docs/                 # Design docs, protocol specs, runbooks
-```
+AOF emits events that trigger notifications (configured in `org/notification-rules.yaml`):
+
+| Event | When |
+|-------|------|
+| `task.created` | New task |
+| `task.transitioned` | Status change |
+| `task.blocked` | Task blocked |
+| `task.deadletter` | Task failed after max retries |
+| `dependency.cascaded` | Downstream tasks auto-promoted |
+| `sla.violation` | Task exceeded time limit |
+| `lease.expired` | Agent heartbeat stale |
 
 ---
 
-## Key Design Principles
+## Decision Table
 
-- **No LLMs in the control plane** — all scheduling and routing is deterministic
-- **Filesystem as API** — state transitions use atomic `rename()`, no database required
-- **Crash-safe by default** — every dispatch writes `run.json` + heartbeat; recovery is automatic
-- **Org-chart driven** — agents, routing, memory scopes, and policies all defined in YAML
-- **Idempotent protocols** — sending the same completion report twice is safe
-- **Schema-first** — Zod schemas are the source of truth; TypeScript types are derived
-
-## See Also
-
-- `docs/PROTOCOLS-USER-GUIDE.md` — full protocol reference
-- `docs/WORKFLOW-GATES.md` — gate system deep-dive
-- `docs/notification-policy.md` — notification system internals
-- `docs/SLA-GUIDE.md` — SLA configuration reference
-- `docs/RECOVERY-RUNBOOK.md` — recovery procedures
+| Situation | Action |
+|-----------|--------|
+| Need to assign work to another agent | `aof_dispatch` |
+| Working on a task, want to log progress | `aof_task_update` with `workLog` |
+| Finished a task | `aof_task_complete` with `summary` |
+| Can't proceed on a task | `aof_task_update` with `status: "blocked"` |
+| Need to see what's in flight | `aof_status_report` or `aof_board` |
+| Need to set up AOF for first time | CLI: `aof init` (human operator) |
+| Need to debug task routing | CLI: `aof org drift`, `aof scan` (human operator) |
