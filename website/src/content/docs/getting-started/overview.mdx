@@ -1,0 +1,125 @@
+---
+title: What is AOF?
+description: An overview of the Agentic Ops Fabric — what it is, what problems it solves, and how it works.
+sidebar:
+  order: 1
+---
+
+import { Aside, Card, CardGrid } from '@astrojs/starlight/components';
+
+**AOF (Agentic Ops Fabric)** is an open-source orchestration layer for multi-agent systems. It provides the infrastructure to coordinate, schedule, and enforce quality workflows across a swarm of AI agents — without requiring agents to implement any orchestration logic themselves.
+
+## The Problem
+
+When you deploy multiple AI agents to work on complex tasks, you immediately run into coordination problems:
+
+- **State loss**: An agent crashes mid-task. What happens to its work?
+- **No enforcement**: An agent can skip a required code review or QA step.
+- **Race conditions**: Two agents update the same task simultaneously.
+- **No visibility**: You have no idea what's in-progress, blocked, or done.
+- **Dropped dependencies**: Task B completes but Task A (which depended on B's output) is never notified.
+
+AOF solves all of these at the infrastructure layer — agents just call tools.
+
+## Core Design Principles
+
+### Tasks Are Files
+
+Every task is a Markdown file with YAML frontmatter:
+
+```markdown
+---
+schemaVersion: 1
+id: TASK-2026-02-17-001
+title: Fix scheduler memory leak
+status: ready
+priority: high
+routing:
+  role: swe-backend
+  team: swe-suite
+---
+
+# Objective
+Fix memory leak in scheduler poll loop.
+
+## Acceptance Criteria
+- [ ] Memory stable over 1000 poll cycles
+```
+
+This means your task queue is:
+- **Human-readable** — open any task in a text editor
+- **Diff-able** — full git history of all changes
+- **Tool-agnostic** — no proprietary format or database lock-in
+
+### State Transitions Are Atomic
+
+Moving a task from `ready` to `in-progress` is an atomic filesystem `rename()`. This is the same guarantee that unix systems use for safe log rotation and atomic file updates — battle-tested, no database required.
+
+### The Scheduler Is Deterministic
+
+The AOF scheduler runs on a configurable poll interval and makes decisions based on pure business rules — no LLM calls, no probabilistic behavior. If a task is `ready` and its assigned agent has capacity, the scheduler dispatches it. Every time. Predictably.
+
+### Agents Are Decoupled From Orchestration
+
+An agent doesn't need to know about scheduling, capacity limits, or workflow enforcement. It:
+1. Receives a dispatch notification
+2. Reads the task file
+3. Does the work
+4. Calls `aof_task_complete` with a summary
+
+AOF handles everything else: lease renewal, heartbeat tracking, workflow gate progression, dependency cascading, and notifications.
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────┐
+│                  Your Agents                     │
+│  (call aof_dispatch, aof_task_complete, etc.)    │
+└────────────────────┬────────────────────────────┘
+                     │  AOF Tools (MCP or plugin)
+┌────────────────────▼────────────────────────────┐
+│                   AOF Core                       │
+│                                                  │
+│  ┌──────────┐  ┌──────────┐  ┌────────────────┐ │
+│  │Scheduler │  │ Protocol │  │  Gate Evaluator│ │
+│  │ (poll)   │  │ Router   │  │  (SDLC enforce)│ │
+│  └────┬─────┘  └────┬─────┘  └────────────────┘ │
+│       │             │                            │
+│  ┌────▼─────────────▼────────────────────────┐  │
+│  │         Filesystem Task Store             │  │
+│  │   (backlog/ ready/ in-progress/ done/)    │  │
+│  └───────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────┘
+```
+
+| Module | Purpose |
+|--------|---------|
+| `dispatch/` | Scheduler, gate evaluator, SLA checker, lease manager, dep-cascader |
+| `store/` | Filesystem task store with atomic state transitions |
+| `protocol/` | Inter-agent protocol router (handoff, resume, completion) |
+| `events/` | JSONL event logger + notification engine |
+| `memory/` | Medallion pipeline (hot → warm → cold) + HNSW vector index |
+| `org/` | Org-chart parser, validator, drift detection |
+| `recovery/` | Task resurrection, lease expiration, deadletter handling |
+| `metrics/` | Prometheus exporter |
+
+## Operating Modes
+
+AOF runs in two modes:
+
+**OpenClaw Plugin Mode** (recommended for agent deployments)
+: AOF registers as an OpenClaw plugin and exposes tools directly to your agents via the gateway. No separate process needed.
+
+**Standalone CLI/Daemon Mode**
+: AOF runs as an independent daemon with its own HTTP endpoint. Suitable for non-OpenClaw environments or hybrid setups.
+
+<Aside type="tip">
+If you're already running OpenClaw, plugin mode is the easiest path. See [Installation & Setup](/getting-started/installation).
+</Aside>
+
+## What AOF Is Not
+
+- **Not an LLM router** — AOF doesn't call language models. Agents call AOF.
+- **Not a message broker** — Protocol messages are filesystem-based, not queue-based.
+- **Not a database** — The task store is the filesystem. No PostgreSQL, Redis, or SQLite required for basic operation.
+- **Not opinionated about agent implementation** — Any agent that can call tools works with AOF.

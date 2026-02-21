@@ -1,0 +1,43 @@
+---
+title: AOF — Agentic Ops Fabric
+description: Deterministic orchestration for multi-agent systems.
+template: splash
+hero:
+  tagline: Turn your agent swarm into a reliable, observable, restart-safe operating environment — with enforced workflows, cascading dependencies, and structured inter-agent communication.
+  actions:
+    - text: Get Started
+      link: /aof/getting-started/overview
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/Seldon-Engine/aof
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## Why AOF?
+
+Multi-agent systems have a coordination problem. Agents run in parallel, share state, drop work on failure, and have no built-in mechanism to enforce quality gates or process stages. AOF solves this.
+
+<CardGrid stagger>
+  <Card title="Filesystem-first" icon="document">
+    Tasks are Markdown files — human-readable, diff-able, tool-agnostic. State transitions use atomic `rename()` — no database, no race conditions.
+  </Card>
+  <Card title="SDLC enforcement" icon="approve-check-circle">
+    Multi-stage workflow gates (implement → review → QA → approve) with rejection loops that agents cannot skip.
+  </Card>
+  <Card title="Deterministic scheduling" icon="setting">
+    Lease-based locking, adaptive concurrency, SLA enforcement — all without LLM involvement.
+  </Card>
+  <Card title="Protocol system" icon="random">
+    Structured handoff, resume, and completion messages give agents crash-safe, typed inter-agent communication.
+  </Card>
+  <Card title="Cascading dependencies" icon="list-format">
+    Task completion or blocking immediately propagates to dependents. No polling loops needed.
+  </Card>
+  <Card title="Memory medallion" icon="magnifier">
+    Hot/warm/cold tier architecture with HNSW vector search for agent memory across projects.
+  </Card>
+</CardGrid>

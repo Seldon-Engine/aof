@@ -1,0 +1,215 @@
+---
+title: Installation & Setup
+description: Install AOF as an OpenClaw plugin or standalone tool and configure it for your environment.
+sidebar:
+  order: 2
+---
+
+import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+AOF can be installed in two modes: as an **OpenClaw plugin** (recommended) or as a **standalone CLI/daemon**.
+
+## Prerequisites
+
+- **Node.js 22+** (AOF uses native ES modules)
+- **npm 9+**
+- **OpenClaw** (for plugin mode) — see [openclaw.dev](https://openclaw.dev)
+
+## OpenClaw Plugin Mode
+
+This is the recommended installation for agent deployments. AOF registers directly with the OpenClaw gateway and exposes tools to all connected agents.
+
+<Steps>
+
+1. **Install AOF**
+
+   ```bash
+   npm install -g aof
+   ```
+
+   Or add it to your project:
+
+   ```bash
+   npm install aof
+   ```
+
+2. **Run the integration wizard**
+
+   ```bash
+   aof integrate openclaw
+   ```
+
+   This wizard will:
+   - Locate your OpenClaw config (`~/.openclaw/openclaw.json`)
+   - Register the AOF plugin
+   - Create the `~/.openclaw/aof/` data directory
+   - Prompt you for initial configuration values
+
+3. **Restart the OpenClaw gateway**
+
+   ```bash
+   openclaw gateway restart
+   ```
+
+4. **Verify registration**
+
+   ```bash
+   openclaw gateway status
+   ```
+
+   You should see `aof` listed in the active plugins.
+
+</Steps>
+
+### Manual Plugin Registration
+
+If you prefer to configure manually, add AOF to your `~/.openclaw/openclaw.json`:
+
+```json
+{
+  "plugins": {
+    "aof": {
+      "enabled": true,
+      "config": {
+        "dryRun": false,
+        "dataDir": "~/.openclaw/aof",
+        "gatewayUrl": "http://127.0.0.1:18789",
+        "gatewayToken": "your-token-here",
+        "maxConcurrentDispatches": 3
+      }
+    }
+  }
+}
+```
+
+<Aside type="caution">
+`dryRun: false` is required for the scheduler to actually dispatch tasks. In dry-run mode, the scheduler will evaluate but not mutate state.
+</Aside>
+
+## Standalone Mode
+
+Use standalone mode when you're not running OpenClaw, or for CI/CD environments.
+
+<Steps>
+
+1. **Clone and build**
+
+   ```bash
+   git clone https://github.com/Seldon-Engine/aof.git
+   cd aof
+   npm install
+   npm run build
+   ```
+
+2. **Optional: add to PATH**
+
+   ```bash
+   # Add to your shell config (.zshrc, .bashrc, etc.)
+   alias aof="node /path/to/aof/dist/cli/index.js"
+   ```
+
+3. **Initialize a project**
+
+   ```bash
+   aof init
+   ```
+
+   This runs an interactive wizard that creates your project structure.
+
+4. **Start the daemon**
+
+   ```bash
+   aof daemon start
+   aof daemon status
+   ```
+
+</Steps>
+
+## Initializing a Project
+
+The `aof init` command sets up your task directory structure and creates a starter org chart:
+
+```bash
+# Interactive (recommended)
+aof init
+
+# Non-interactive with defaults
+aof init --yes --template minimal
+```
+
+After init, your project will have:
+
+```
+.aof/                     # or the configured dataDir
+├── tasks/
+│   ├── backlog/          # tasks waiting to be worked
+│   ├── ready/            # tasks cleared for dispatch
+│   ├── in-progress/      # tasks currently being worked
+│   ├── review/           # tasks in review gates
+│   ├── done/             # completed tasks
+│   ├── blocked/          # tasks blocked on external dependencies
+│   └── deadletter/       # tasks that exceeded SLA or failed
+├── org/
+│   └── org-chart.yaml    # declarative team/agent definition
+├── events/
+│   └── events.jsonl      # append-only event log
+└── views/                # auto-generated Kanban and mailbox files
+```
+
+## Memory Module Configuration
+
+AOF includes an optional memory module (disabled by default). To enable it:
+
+```json
+{
+  "plugins": {
+    "aof": {
+      "config": {
+        "modules": {
+          "memory": {
+            "enabled": true
+          }
+        },
+        "memory": {
+          "embedding": {
+            "provider": "openai",
+            "model": "text-embedding-3-small",
+            "apiKey": "sk-..."
+          },
+          "search": {
+            "hybridEnabled": true,
+            "vectorWeight": 0.7,
+            "bm25Weight": 0.3,
+            "maxResults": 10
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+<Aside type="note">
+If you're using `memory-core` (OpenClaw's built-in memory plugin), AOF's memory module is disabled by default to avoid conflicts. You can enable both — they use separate storage — but you'll need to configure the embedding provider for AOF's module independently. See [Memory Module Setup](/guides/memory-setup) for details.
+</Aside>
+
+## Verifying Your Installation
+
+```bash
+# Check CLI is working
+aof --version
+
+# Check daemon health (if running)
+curl http://localhost:18100/health
+
+# Validate org chart
+aof org validate
+
+# Run a dry scheduler cycle
+aof scheduler run
+```
+
+## Next Steps
+
+- [Quick Start Tutorial](/getting-started/quick-start) — Create your first org chart and dispatch a task
+- [Plugin Configuration Reference](/reference/plugin-config) — All config keys and defaults

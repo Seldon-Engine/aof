@@ -1,0 +1,55 @@
+/* AOF Documentation — custom styles */
+
+:root {
+  --sl-color-accent-low: #1a3a2e;
+  --sl-color-accent: #2d6a4f;
+  --sl-color-accent-high: #52b788;
+  --sl-color-white: #ffffff;
+  --sl-color-gray-1: #eef4ef;
+  --sl-color-gray-2: #c8dbc9;
+  --sl-color-gray-3: #8aad8c;
+  --sl-color-gray-4: #4d7d52;
+  --sl-color-gray-5: #2d4e31;
+  --sl-color-gray-6: #1a2f1c;
+  --sl-color-black: #0e1a10;
+}
+
+:root[data-theme="light"] {
+  --sl-color-accent-low: #d8f3dc;
+  --sl-color-accent: #2d6a4f;
+  --sl-color-accent-high: #1b4332;
+}
+
+/* Code blocks */
+.sl-markdown-content code {
+  font-family: "JetBrains Mono", "Fira Code", Menlo, monospace;
+  font-size: 0.875em;
+}
+
+/* Better table styling */
+.sl-markdown-content table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.sl-markdown-content table th {
+  background: var(--sl-color-gray-6);
+  color: var(--sl-color-white);
+  padding: 0.5rem 1rem;
+  text-align: left;
+}
+
+:root[data-theme="light"] .sl-markdown-content table th {
+  background: var(--sl-color-accent-low);
+  color: var(--sl-color-black);
+}
+
+.sl-markdown-content table td {
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--sl-color-gray-5);
+}
+
+/* Callouts */
+.sl-markdown-content .starlight-aside {
+  border-radius: 0.5rem;
+}

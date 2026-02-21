@@ -1,0 +1,298 @@
+---
+title: Quick Start Tutorial
+description: Create your first org chart and dispatch your first task with AOF.
+sidebar:
+  order: 3
+---
+
+import { Aside, Steps, Code } from '@astrojs/starlight/components';
+
+This tutorial walks you through AOF's core workflow: defining an org chart, dispatching a task, and completing it through a workflow gate. It takes about 10 minutes.
+
+## Before You Start
+
+Make sure you've completed [Installation & Setup](/getting-started/installation) and have AOF initialized in a project directory.
+
+## Step 1: Create Your Org Chart
+
+The org chart is the foundational declaration of your agent swarm. Create `org/org-chart.yaml` in your project:
+
+```yaml
+# org/org-chart.yaml
+schemaVersion: 1
+
+agents:
+  - id: swe-backend
+    name: Backend Engineer Agent
+    active: true
+    capabilities:
+      - typescript
+      - nodejs
+      - apis
+    team: engineering
+
+  - id: swe-reviewer
+    name: Senior Engineer (Reviewer)
+    active: true
+    capabilities:
+      - typescript
+      - architecture
+      - code-review
+    team: engineering
+
+teams:
+  - id: engineering
+    name: Engineering
+    members:
+      - swe-backend
+      - swe-reviewer
+
+roles:
+  developer:
+    agents:
+      - swe-backend
+    description: "Implements features and fixes"
+
+  reviewer:
+    agents:
+      - swe-reviewer
+    description: "Reviews code quality and correctness"
+
+memoryPools:
+  hot:
+    path: memory/hot
+  warm:
+    - id: per-agent
+      path: memory/warm/agents
+  cold:
+    path: memory/cold
+```
+
+Validate it:
+
+```bash
+aof org validate
+# ✅ Org chart valid: 2 agents, 1 team, 2 roles
+```
+
+## Step 2: Define a Workflow (Optional but Recommended)
+
+Create a workflow that enforces your development process. For this tutorial, we'll use a simple implement → review cycle:
+
+```yaml
+# org/workflows/simple-review.yaml
+workflow:
+  name: simple-review
+  rejectionStrategy: origin
+
+  gates:
+    - id: implement
+      role: developer
+      description: "Implement the feature"
+
+    - id: review
+      role: reviewer
+      canReject: true
+      description: "Review and approve the implementation"
+
+  outcomes:
+    complete: advance
+    needs_review: reject
+    blocked: hold
+```
+
+## Step 3: Dispatch Your First Task
+
+Dispatch a task using the CLI (or the `aof_dispatch` agent tool — same semantics):
+
+```bash
+aof task create "Add rate limiting to the auth endpoint" \
+  --agent swe-backend \
+  --priority high
+```
+
+Output:
+```
+✅ Created task: TASK-2026-02-21-001
+   Title: Add rate limiting to the auth endpoint
+   Priority: high
+   Status: backlog
+   Agent: swe-backend
+   Path: tasks/backlog/TASK-2026-02-21-001.md
+```
+
+The task file looks like:
+
+```markdown
+---
+schemaVersion: 1
+id: TASK-2026-02-21-001
+title: Add rate limiting to the auth endpoint
+status: backlog
+priority: high
+routing:
+  agent: swe-backend
+createdAt: 2026-02-21T15:00:00Z
+updatedAt: 2026-02-21T15:00:00Z
+createdBy: cli
+dependsOn: []
+---
+```
+
+## Step 4: Promote the Task to Ready
+
+Move it from `backlog` to `ready` so the scheduler can dispatch it:
+
+```bash
+aof task promote TASK-2026-02-21-001
+```
+
+Or set its status directly:
+
+```bash
+aof task status TASK-2026-02-21-001 ready
+```
+
+## Step 5: Run the Scheduler
+
+The scheduler picks up `ready` tasks and dispatches them to their assigned agents:
+
+```bash
+# Dry-run (see what would happen, no state changes)
+aof scheduler run
+
+# Active mode (actually dispatches)
+aof scheduler run --active
+```
+
+The scheduler output shows:
+```
+Scheduler poll — 1 ready task found
+  → Dispatching TASK-2026-02-21-001 to swe-backend
+  → Status: in-progress, Lease: 30m
+✅ Dispatched 1 task
+```
+
+The task file is now at `tasks/in-progress/TASK-2026-02-21-001.md` with a lease:
+
+```yaml
+---
+status: in-progress
+lease:
+  agent: swe-backend
+  expiresAt: 2026-02-21T15:30:00Z
+  sessionId: session-abc123
+---
+```
+
+## Step 6: Agent Completes the Task
+
+When the `swe-backend` agent finishes its work, it calls `aof_task_complete` (via the MCP tool or OpenClaw gateway):
+
+```json
+{
+  "tool": "aof_task_complete",
+  "params": {
+    "taskId": "TASK-2026-02-21-001",
+    "summary": "Added token bucket rate limiting (100 req/min) to POST /auth/login. Included tests for limit enforcement and header passthrough.",
+    "actor": "swe-backend"
+  }
+}
+```
+
+For tasks without a workflow gate, this moves the task to `done`.
+
+## Step 7: Using Workflow Gates
+
+Let's dispatch a gated task. First, create the task with a workflow reference:
+
+```bash
+aof task create "Implement user session expiry" \
+  --agent swe-backend \
+  --priority normal
+```
+
+Then edit the task file to add the workflow:
+
+```yaml
+routing:
+  agent: swe-backend
+  workflow: simple-review
+```
+
+When the scheduler dispatches this task, it routes to the `implement` gate. The `swe-backend` agent works on it and calls:
+
+```json
+{
+  "tool": "aof_task_complete",
+  "params": {
+    "taskId": "TASK-2026-02-21-002",
+    "outcome": "complete",
+    "summary": "Session expiry implemented. 15-minute timeout with sliding window. Tests added.",
+    "actor": "swe-backend",
+    "callerRole": "developer"
+  }
+}
+```
+
+The gate evaluator sees `outcome: "complete"` and advances the task to the `review` gate. It's now dispatched to `swe-reviewer`.
+
+The reviewer approves:
+
+```json
+{
+  "tool": "aof_task_complete",
+  "params": {
+    "taskId": "TASK-2026-02-21-002",
+    "outcome": "complete",
+    "summary": "LGTM. Good test coverage, clean implementation.",
+    "actor": "swe-reviewer",
+    "callerRole": "reviewer"
+  }
+}
+```
+
+Task moves to `done`. ✅
+
+Or the reviewer rejects with feedback:
+
+```json
+{
+  "tool": "aof_task_complete",
+  "params": {
+    "taskId": "TASK-2026-02-21-002",
+    "outcome": "needs_review",
+    "blockers": ["Missing test for concurrent session invalidation", "Token not invalidated on password change"],
+    "summary": "Needs fixes before approval.",
+    "actor": "swe-reviewer",
+    "callerRole": "reviewer"
+  }
+}
+```
+
+The task loops back to `implement` for `swe-backend` to address the feedback.
+
+## Step 8: View Your Board
+
+```bash
+aof board
+```
+
+```
+┌─────────────────────────────────────────────────────┐
+│  AOF Kanban — Engineering                           │
+├──────────┬──────────┬─────────────┬────────────────┤
+│ Backlog  │  Ready   │ In-Progress │    Done        │
+├──────────┼──────────┼─────────────┼────────────────┤
+│          │          │ TASK-001    │ TASK-002       │
+│          │          │ Rate limit  │ Session expiry │
+│          │          │ swe-backend │ [reviewed]     │
+└──────────┴──────────┴─────────────┴────────────────┘
+```
+
+## Next Steps
+
+- Learn about [Org Charts](/concepts/org-charts) — full schema and routing rules
+- Understand [Workflow Gates](/concepts/workflow-gates) — multi-stage SDLC enforcement
+- Explore [Agent Tools](/reference/agent-tools) — complete tool reference
+- Read about [Task Lifecycle](/concepts/task-lifecycle) — all states and transitions

@@ -1,0 +1,416 @@
+---
+title: CLI Reference
+description: Complete reference for all AOF CLI commands.
+sidebar:
+  order: 2
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+AOF provides a full CLI for managing tasks, the daemon, org charts, and memory. All commands are available as `aof <command>`.
+
+```bash
+# Global option — override the project root directory
+aof --root /path/to/project <command>
+```
+
+<Aside type="tip">
+Set `AOF_ROOT` in your environment to avoid passing `--root` on every command:
+```bash
+export AOF_ROOT=~/Projects/my-project
+```
+</Aside>
+
+---
+
+## init
+
+Initialize AOF and set up OpenClaw integration.
+
+```bash
+aof init [options]
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `-y, --yes` | Non-interactive mode — accept all defaults |
+| `--skip-openclaw` | Skip OpenClaw integration steps |
+
+This wizard:
+- Creates the task directory structure (`tasks/backlog`, `tasks/ready`, etc.)
+- Creates a starter `org/org-chart.yaml`
+- Registers the AOF plugin in `~/.openclaw/openclaw.json` (unless `--skip-openclaw`)
+- Creates `~/.openclaw/aof/` as the default data directory
+
+---
+
+## daemon
+
+Manage the AOF background daemon.
+
+```bash
+aof daemon <subcommand> [options]
+```
+
+### daemon start
+
+```bash
+aof daemon start [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--port <port>` | `18100` | HTTP health endpoint port |
+| `--bind <addr>` | `127.0.0.1` | Bind address |
+| `--data-dir <path>` | `~/.openclaw/aof` | Data directory |
+| `--log-level <level>` | `info` | Log level (`debug`\|`info`\|`warn`\|`error`) |
+
+### daemon stop
+
+```bash
+aof daemon stop [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--timeout <ms>` | `5000` | Shutdown timeout in milliseconds |
+
+### daemon status
+
+```bash
+aof daemon status
+```
+
+Shows whether the daemon is running, its PID, uptime, and last poll time.
+
+### daemon restart
+
+```bash
+aof daemon restart
+```
+
+Stops and restarts the daemon.
+
+---
+
+## task
+
+Task management commands.
+
+```bash
+aof task <subcommand> [options]
+```
+
+### task create
+
+```bash
+aof task create <title> [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-p, --priority <priority>` | `normal` | `low`\|`normal`\|`high`\|`critical` |
+| `-t, --team <team>` | — | Owner team ID |
+| `-a, --agent <agent>` | — | Target agent ID |
+| `--tags <tags>` | — | Comma-separated tags |
+| `--project <id>` | `_inbox` | Project ID |
+
+**Example:**
+```bash
+aof task create "Fix scheduler memory leak" \
+  --priority high \
+  --agent swe-backend \
+  --tags "bug,performance"
+```
+
+### task promote
+
+Promote a task from `backlog` to `ready`:
+
+```bash
+aof task promote <taskId>
+```
+
+### task cancel
+
+Cancel a task:
+
+```bash
+aof task cancel <taskId> [--reason "reason"]
+```
+
+### task resurrect
+
+Resurrect a deadlettered task back to `ready`:
+
+```bash
+aof task resurrect <taskId>
+```
+
+### task dep add
+
+Add a dependency:
+
+```bash
+aof task dep add <taskId> <blockerId>
+```
+
+### task dep remove
+
+Remove a dependency:
+
+```bash
+aof task dep remove <taskId> <blockerId>
+```
+
+### task block
+
+Block a task on an external dependency:
+
+```bash
+aof task block <taskId> --reason "Waiting for AWS credentials"
+```
+
+### task unblock
+
+Unblock a task:
+
+```bash
+aof task unblock <taskId>
+```
+
+### task edit
+
+Edit task metadata:
+
+```bash
+aof task edit <taskId> [--priority high] [--agent swe-backend]
+```
+
+### task close
+
+Mark a task as done:
+
+```bash
+aof task close <taskId> [--summary "Completed successfully"]
+```
+
+---
+
+## scheduler
+
+Run the scheduler manually.
+
+```bash
+aof scheduler run [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--active` | `false` | Active mode — actually mutate state. Without this flag, runs in dry-run mode. |
+| `--project <id>` | `_inbox` | Project to schedule for |
+
+**Examples:**
+
+```bash
+# Dry-run — see what would be dispatched
+aof scheduler run
+
+# Active — actually dispatch tasks
+aof scheduler run --active
+```
+
+---
+
+## org
+
+Org chart management commands.
+
+```bash
+aof org <subcommand> [path]
+```
+
+### org validate
+
+Validate the org chart schema:
+
+```bash
+aof org validate [path]
+# ✅ Org chart valid: 5 agents, 2 teams, 4 roles
+# ✗ Error: Agent 'swe-backend' references undefined team 'engineering'
+```
+
+### org show
+
+Display the org chart in a human-readable format:
+
+```bash
+aof org show [path]
+```
+
+### org lint
+
+Check referential integrity (cross-references between agents, teams, roles):
+
+```bash
+aof org lint [path]
+```
+
+### org drift
+
+Detect drift between the org chart and actually-registered OpenClaw agents:
+
+```bash
+aof org drift [path]
+# ⚠️  Drift detected:
+#   - swe-qa defined in org chart but no active OpenClaw session found
+#   - agent:main:swe-ops active in OpenClaw but not in org chart
+```
+
+---
+
+## memory
+
+Memory module management.
+
+```bash
+aof memory <subcommand> [options]
+```
+
+### memory generate
+
+Generate a memory configuration file from your org chart:
+
+```bash
+aof memory generate [--org-chart path/to/org-chart.yaml]
+```
+
+### memory audit
+
+Audit memory configuration against the org chart:
+
+```bash
+aof memory audit
+```
+
+### memory curate
+
+Generate curation tasks for promoting warm/cold content to hot tier:
+
+```bash
+aof memory curate [--org-chart path]
+```
+
+---
+
+## scan
+
+List all tasks by status:
+
+```bash
+aof scan [options]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--status <status>` | Filter by status |
+| `--agent <agent>` | Filter by agent |
+| `--project <id>` | Project ID |
+
+---
+
+## board
+
+Display a Kanban board of all tasks:
+
+```bash
+aof board [options]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--team <team>` | Filter by team |
+| `--project <id>` | Project ID |
+
+---
+
+## watch
+
+Watch a view directory for real-time updates:
+
+```bash
+aof watch <viewType>
+```
+
+| View type | Description |
+|-----------|-------------|
+| `kanban` | Live Kanban board |
+| `mailbox` | Agent mailbox view |
+| `board` | Board view |
+
+---
+
+## lint
+
+Lint all task files for schema and format errors:
+
+```bash
+aof lint [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--project <id>` | `_inbox` | Project ID |
+
+---
+
+## metrics
+
+Start the Prometheus metrics server:
+
+```bash
+aof metrics serve [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--port <port>` | `9090` | Metrics server port |
+
+Metrics are available at `http://localhost:9090/metrics` in standard Prometheus text format.
+
+Available metrics include:
+- `aof_tasks_total` — Task count by status and priority
+- `aof_dispatch_duration_ms` — Dispatch latency histogram
+- `aof_scheduler_poll_duration_ms` — Poll cycle duration
+- `aof_lease_expirations_total` — Lease expiration count
+- `aof_gate_transitions_total` — Gate transitions by outcome and gate
+
+---
+
+## project
+
+Project management commands (multi-project support).
+
+```bash
+aof project <subcommand>
+```
+
+### project create
+
+```bash
+aof project create <id> --name "My Project"
+```
+
+### project list
+
+```bash
+aof project list
+```
+
+### project show
+
+```bash
+aof project show <id>
+```
