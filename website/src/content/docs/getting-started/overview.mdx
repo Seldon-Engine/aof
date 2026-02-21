@@ -98,7 +98,7 @@ AOF handles everything else: lease renewal, heartbeat tracking, workflow gate pr
 | `store/` | Filesystem task store with atomic state transitions |
 | `protocol/` | Inter-agent protocol router (handoff, resume, completion) |
 | `events/` | JSONL event logger + notification engine |
-| `memory/` | Medallion pipeline (hot → warm → cold) + HNSW vector index |
+| `memory/` | Tiered memory pipeline (hot → warm → cold) + HNSW vector index |
 | `org/` | Org-chart parser, validator, drift detection |
 | `recovery/` | Task resurrection, lease expiration, deadletter handling |
 | `metrics/` | Prometheus exporter |

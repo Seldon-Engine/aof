@@ -56,7 +56,7 @@ Multi-stage process enforcement with review gates, rejection loops, and conditio
 
 - **[Memory Module](MEMORY-MODULE.md)** — HNSW vector search, embeddings, curation, and memory tools
 - **[Memory Module Architecture Plan](architecture/MEMORY-MODULE-PLAN.md)** — Design decisions and implementation plan
-- **[Memory Medallion Pipeline](memory-medallion-pipeline.md)** — Hot/warm/cold tier curation pipeline
+- **[Tiered Memory Pipeline](memory-tier-pipeline.md)** — Hot/warm/cold tier curation pipeline
 - **[Event Logs](event-logs.md)** — Date-rotated JSONL event stream and audit trail
 
 ### Protocols
@@ -93,8 +93,8 @@ Multi-stage process enforcement with review gates, rejection loops, and conditio
 | [Adaptive Concurrency](design/adaptive-concurrency.md) | Platform limit detection and concurrency tuning |
 | [E2E Test Harness Design](E2E-TEST-HARNESS-DESIGN.md) | End-to-end test harness architecture |
 | [Security Remediation Design](SECURITY-REMEDIATION-DESIGN.md) | Protocol security hardening |
-| [Memory Module Plan](architecture/MEMORY-MODULE-PLAN.md) | Memory v2 architecture (embeddings, SQLite-vec, medallion) |
-| [Memory Medallion Pipeline](memory-medallion-pipeline.md) | Tier-aware curation and retrieval pipeline |
+| [Memory Module Plan](architecture/MEMORY-MODULE-PLAN.md) | Memory v2 architecture (embeddings, SQLite-vec, tiered memory) |
+| [Tiered Memory Pipeline](memory-tier-pipeline.md) | Tier-aware curation and retrieval pipeline |
 
 ---
 

@@ -1,4 +1,4 @@
-# Memory Medallion Pipeline — Design Specification
+# Tiered Memory Pipeline — Design Specification
 
 **Version:** 1.0  
 **Status:** Draft  
@@ -7,7 +7,9 @@
 
 ## Overview
 
-The **Memory Medallion Pipeline** implements a three-tier data architecture for AOF memory management, inspired by the "medallion" pattern (Bronze/Silver/Gold) commonly used in data engineering. Our tiers are:
+The **Tiered Memory Pipeline** implements a three-tier memory architecture for AOF memory management. It uses **hot/warm/cold** tiers for storage and retrieval. This is not a full tiered system yet; it is a tiered storage model with rule-based aggregation.
+
+Tiers:
 
 - **Cold (Bronze)**: Raw, immutable event logs, transcripts, and incident details
 - **Warm (Silver)**: Aggregated, team-scoped operational documents (runbooks, decisions, status)

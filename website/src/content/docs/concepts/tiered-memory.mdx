@@ -1,5 +1,5 @@
 ---
-title: Memory Medallion Architecture
+title: Tiered Memory Architecture
 description: How AOF organizes agent memory into hot, warm, and cold tiers for efficient context management.
 sidebar:
   order: 4
@@ -7,23 +7,27 @@ sidebar:
 
 import { Aside } from '@astrojs/starlight/components';
 
-AOF's memory system uses a **medallion architecture** — a three-tier data organization pattern borrowed from data engineering. Each tier has different freshness, relevance, and indexing characteristics. Agents retrieve memory from the appropriate tier based on what they need.
+AOF's memory system organizes knowledge into three tiers — hot, warm, and cold — each with distinct freshness, relevance, and indexing characteristics. Agents retrieve memory from the appropriate tier based on what they need.
+
+<Aside type="note">
+The current implementation uses **rule-based tier management** with gated promotion. LLM-based summarization and pressure-driven tier compaction are planned for a future release.
+</Aside>
 
 ## The Three Tiers
 
 ```
-Hot (Gold) ──── Canonical, always-indexed core documentation
-    │             Always fresh, small (&lt;50KB total)
-    │             Read frequently, written rarely
-    │
-Warm (Silver) ── Team-scoped operational knowledge
-    │             Updated automatically from task patterns
-    │             Aggregated runbooks, decisions, status
-    │
-Cold (Bronze) ── Immutable historical record
-                  Event logs, transcripts, incidents
-                  Write-heavy, rarely read
-                  Never indexed
+Hot  ──── Canonical, always-indexed core documentation
+   │        Always fresh, small (<50KB total)
+   │        Read frequently, written rarely
+   │
+Warm ──── Team-scoped operational knowledge
+   │        Updated automatically from task patterns
+   │        Aggregated runbooks, decisions, status
+   │
+Cold ──── Immutable historical record
+           Event logs, transcripts, incidents
+           Write-heavy, rarely read
+           Never indexed
 ```
 
 ### Hot Tier
@@ -39,6 +43,7 @@ The hot tier contains **canonical, always-indexed** documentation — the source
 - **Always indexed** — every agent context query includes hot tier
 - **Small** — target &lt;50KB total to avoid context bloat
 - **Stable** — changes infrequently; human-curated
+- **Gated promotion** — warm content must pass a review before being promoted to hot
 - **Path:** `memory/hot/` (configurable via `memoryPools.hot.path`)
 
 ### Warm Tier
@@ -52,7 +57,7 @@ The warm tier contains **team-scoped operational knowledge** — living document
 
 **Characteristics:**
 - **Role-scoped** — agents see warm pools that match their role
-- **Aggregated** — content is assembled from completed task outputs
+- **Aggregated** — content is assembled from completed task outputs using rule-based logic
 - **Fresh** — updated on each scheduler cycle
 - **Path:** `memory/warm/` (configurable via `memoryPools.warm`)
 
@@ -137,9 +142,9 @@ AOF uses **HNSW (Hierarchical Navigable Small World)** indexes for vector simila
 }
 ```
 
-## Promotion Pipeline
+## Tier Promotion Pipeline
 
-Documents flow up the tiers automatically:
+Documents flow up the tiers through a gated review process:
 
 ```
 Agent completes task
@@ -148,6 +153,7 @@ Agent completes task
 Task output written to cold/logs/
         │
 Warm aggregation job runs (scheduler)
+Rule-based: extract patterns, decisions, status
         │
         ▼
 Patterns extracted → warm/runbooks/
@@ -159,6 +165,8 @@ Curation task dispatched
 Human/agent curator promotes to hot/
 (when pattern is canonical and stable)
 ```
+
+**Current implementation:** Aggregation from cold → warm is rule-based (pattern matching over event logs). LLM-based summarization is a planned future enhancement.
 
 ### Generating Memory Configuration
 

@@ -120,7 +120,7 @@ Config example:
 
 ### 7. Tier Metadata Source
 
-Read from file **frontmatter** (`tier: hot|warm|cold`) or infer from pool default. No dependency on medallion state. This keeps memory standalone.
+Read from file **frontmatter** (`tier: hot|warm|cold`) or infer from pool default. No dependency on tiered memory state. This keeps memory standalone.
 
 ---
 
@@ -155,7 +155,7 @@ src/memory/
   
   memory-module.ts           # Module registration (~250 LOC)
   
-  # Existing medallion modules (keep as-is)
+  # Existing tiered memory modules (keep as-is)
   hot-promotion.ts           # 209 LOC ✅
   warm-aggregation.ts        # 247 LOC ✅
   cold-tier.ts               # 118 LOC ✅
@@ -170,7 +170,7 @@ src/memory/
 
 **Total**:
 - New memory system: ~2190 LOC
-- Existing medallion: ~1840 LOC
+- Existing tiered memory: ~1840 LOC
 - Grand total: ~4030 LOC (all files <500 LOC ✅)
 
 ---

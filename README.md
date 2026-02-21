@@ -353,7 +353,7 @@ aof/
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Deployment guide |
 | [docs/notification-policy.md](docs/notification-policy.md) | Notification engine configuration |
 | [docs/RECOVERY-RUNBOOK.md](docs/RECOVERY-RUNBOOK.md) | Recovery procedures |
-| [docs/memory-medallion-pipeline.md](docs/memory-medallion-pipeline.md) | Memory tier architecture |
+| [docs/memory-tier-pipeline.md](docs/memory-tier-pipeline.md) | Memory tier architecture |
 
 ---
 
