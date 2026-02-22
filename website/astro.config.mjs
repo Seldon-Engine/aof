@@ -35,7 +35,7 @@ export default defineConfig({
             { label: "Org Charts", link: "/concepts/org-charts" },
             { label: "Task Lifecycle", link: "/concepts/task-lifecycle" },
             { label: "Workflow Gates", link: "/concepts/workflow-gates" },
-            { label: "Memory Medallion Architecture", link: "/concepts/memory-medallion" },
+            { label: "Tiered Memory Architecture", link: "/concepts/tiered-memory" },
             { label: "Protocol System", link: "/concepts/protocols" },
             { label: "Notification Engine", link: "/concepts/notifications" },
             { label: "Cascading Dependencies", link: "/concepts/cascading-dependencies" },
