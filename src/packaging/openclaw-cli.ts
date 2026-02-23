@@ -11,7 +11,7 @@ import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-const execFileAsync = promisify(execFile);
+export const execFileAsync = promisify(execFile);
 
 export interface OpenClawDetection {
   detected: boolean;

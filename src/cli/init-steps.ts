@@ -41,6 +41,9 @@ export interface WizardState {
   memoryConfigured: boolean;
   skillInstalled: boolean;
   skillsWired: boolean;
+  orgChartValid: boolean;
+  gatewayRestarted: boolean;
+  daemonRunning: boolean;
   warnings: string[];
   skipped: string[];
 }
@@ -53,6 +56,9 @@ export function makeInitialState(): WizardState {
     memoryConfigured: false,
     skillInstalled: false,
     skillsWired: false,
+    orgChartValid: false,
+    gatewayRestarted: false,
+    daemonRunning: false,
     warnings: [],
     skipped: [],
   };

@@ -16,6 +16,7 @@ import {
   runSkillStep,
   runSkillWiringStep,
 } from "./init-steps.js";
+import { runLintStep, runRestartStep, runDaemonStep } from "./init-steps-lifecycle.js";
 import type { WizardState } from "./init-steps.js";
 
 export interface InitOptions {
@@ -80,6 +81,15 @@ export async function init(opts: InitOptions = {}): Promise<void> {
   // Step 5: Wire 'aof' skill to all agents in openclaw.json
   await runSkillWiringStep(state, yes);
 
+  // Step 6: Lint org chart + confirm allow list
+  await runLintStep(state, yes);
+
+  // Step 7: Restart gateway
+  await runRestartStep(state, yes);
+
+  // Step 8: Start AOF daemon
+  await runDaemonStep(state, yes);
+
   // Summary
   printSummary(state, detection.configPath);
 }
@@ -99,6 +109,9 @@ function printSummary(state: WizardState, configPath: string | null | undefined)
   if (state.memoryConfigured) done.push("✅ Memory system configured");
   if (state.skillInstalled) done.push("✅ Companion skill installed");
   if (state.skillsWired) done.push("✅ AOF skill wired to all agents");
+  if (state.orgChartValid) done.push("✅ Org chart validated");
+  if (state.gatewayRestarted) done.push("✅ Gateway restarted and healthy");
+  if (state.daemonRunning) done.push("✅ AOF daemon running");
 
   for (const item of done) console.log(`  ${item}`);
   for (const item of state.skipped) console.log(`  ⏭  ${item}`);
@@ -111,7 +124,7 @@ function printSummary(state: WizardState, configPath: string | null | undefined)
   const hasGatewayWork = state.pluginRegistered || state.memoryConfigured;
   const anythingDone = done.length > 0;
 
-  if (hasGatewayWork) {
+  if (hasGatewayWork && !state.gatewayRestarted) {
     console.log("\n🔄 Next step: restart the OpenClaw gateway to activate changes.");
     console.log("   Run: openclaw gateway restart");
   }
