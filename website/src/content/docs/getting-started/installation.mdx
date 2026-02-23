@@ -36,14 +36,15 @@ This is the recommended installation for agent deployments. AOF registers direct
 2. **Run the integration wizard**
 
    ```bash
-   aof integrate openclaw
+   aof init
    ```
 
    This wizard will:
    - Locate your OpenClaw config (`~/.openclaw/openclaw.json`)
-   - Register the AOF plugin
-   - Create the `~/.openclaw/aof/` data directory
-   - Prompt you for initial configuration values
+   - Register the AOF plugin and add it to the allow list
+   - Sync your org chart with OpenClaw's registered agents (bidirectional)
+   - Optionally configure AOF as the memory provider
+   - Install the AOF companion skill to `~/.openclaw/skills/aof/`
 
 3. **Restart the OpenClaw gateway**
 
@@ -125,36 +126,23 @@ Use standalone mode when you're not running OpenClaw, or for CI/CD environments.
 
 </Steps>
 
-## Initializing a Project
+## Initializing a project
 
-The `aof init` command sets up your task directory structure and creates a starter org chart:
+The `aof init` command connects AOF to your OpenClaw installation:
 
 ```bash
 # Interactive (recommended)
 aof init
 
-# Non-interactive with defaults
-aof init --yes --template minimal
+# Non-interactive — accept all defaults
+aof init --yes
 ```
 
-After init, your project will have:
+The wizard runs four steps: plugin registration, org chart sync, memory configuration (optional), and companion skill installation. Each step is idempotent, so it's safe to re-run.
 
-```
-.aof/                     # or the configured dataDir
-├── tasks/
-│   ├── backlog/          # tasks waiting to be worked
-│   ├── ready/            # tasks cleared for dispatch
-│   ├── in-progress/      # tasks currently being worked
-│   ├── review/           # tasks in review gates
-│   ├── done/             # completed tasks
-│   ├── blocked/          # tasks blocked on external dependencies
-│   └── deadletter/       # tasks that exceeded SLA or failed
-├── org/
-│   └── org-chart.yaml    # declarative team/agent definition
-├── events/
-│   └── events.jsonl      # append-only event log
-└── views/                # auto-generated Kanban and mailbox files
-```
+See the [CLI reference](/reference/cli#init) for a full walkthrough of what each step does.
+
+Task directories (`tasks/backlog/`, `tasks/ready/`, etc.) are created automatically by AOF as tasks are written — you don't need to create them manually.
 
 ## Memory Module Configuration
 

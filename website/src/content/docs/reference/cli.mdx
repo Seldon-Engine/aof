@@ -25,7 +25,7 @@ export AOF_ROOT=~/Projects/my-project
 
 ## init
 
-Initialize AOF and set up OpenClaw integration.
+Set up AOF's OpenClaw integration: register the plugin, sync the org chart, optionally configure memory, and install the companion skill.
 
 ```bash
 aof init [options]
@@ -35,14 +35,89 @@ aof init [options]
 
 | Flag | Description |
 |------|-------------|
-| `-y, --yes` | Non-interactive mode — accept all defaults |
-| `--skip-openclaw` | Skip OpenClaw integration steps |
+| `-y, --yes` | Non-interactive — accept all defaults, skip all confirmation prompts |
+| `--skip-openclaw` | Skip OpenClaw steps (plugin, org sync, memory) — only installs the companion skill |
 
-This wizard:
-- Creates the task directory structure (`tasks/backlog`, `tasks/ready`, etc.)
-- Creates a starter `org/org-chart.yaml`
-- Registers the AOF plugin in `~/.openclaw/openclaw.json` (unless `--skip-openclaw`)
-- Creates `~/.openclaw/aof/` as the default data directory
+### Steps
+
+The wizard runs four steps in sequence. Each step is idempotent — it checks current state before making changes and skips silently if already configured. A failure in one step doesn't abort the others.
+
+**Step 1: Detect OpenClaw**
+
+Checks for `~/.openclaw/openclaw.json`. If OpenClaw isn't found (or `--skip-openclaw` is set), the wizard jumps directly to Step 4.
+
+**Step 2: Plugin registration**
+
+Registers AOF in your OpenClaw config via `openclaw config set`:
+- Sets `plugins.entries.aof` to `{ enabled: true }`
+- Adds `"aof"` to `plugins.allow`
+
+Skipped if AOF is already registered and in the allow list.
+
+**Step 2.5: Org chart sync**
+
+Bidirectional sync between `org/org-chart.yaml` and OpenClaw's registered agents:
+- **Import** — adds active OpenClaw agents missing from the org chart
+- **Export** — registers org chart agents (with an `openclawAgentId`) that aren't in OpenClaw
+- **Drift report** — shows any remaining mismatches after sync
+
+Skipped if no org chart exists at `org/org-chart.yaml` or no OpenClaw agents are detected. In interactive mode, you choose which agents to import or export. With `--yes`, all are accepted.
+
+**Step 3: Memory configuration** *(optional, defaults to skip)*
+
+Prompts whether to configure AOF as the OpenClaw memory provider. If confirmed:
+- Sets `plugins.slots.memory` to `"aof"`
+- Enables `plugins.entries.aof.config.modules.memory`
+- Disables the previously active memory plugin (e.g., `memory-core`), if any
+
+With `--yes`, this step is skipped by default (the prompt default is `No`). You must explicitly confirm in interactive mode.
+
+**Step 4: Companion skill**
+
+Copies the bundled AOF skill to `~/.openclaw/skills/aof/SKILL.md`. This skill gives your agents the context they need to use AOF tools effectively.
+
+Skipped if the skill is already installed at that path.
+
+### Summary and next steps
+
+After all steps complete, init prints a summary and, when plugin registration or memory changes were made, reminds you to restart the gateway:
+
+```
+────────────────────────────────────────────────────────────
+📋 Summary
+
+  ✅ AOF plugin registered
+  ✅ Added to allow list
+  ✅ Org chart synced with OpenClaw agents
+  ⏭  Memory system (user declined)
+  ✅ Companion skill installed
+
+🔄 Next step: restart the OpenClaw gateway to activate changes.
+   Run: openclaw gateway restart
+```
+
+### Examples
+
+```bash
+# Interactive (recommended for first setup)
+aof init
+
+# Non-interactive — accept all defaults
+aof init --yes
+
+# Skip OpenClaw steps — only install the companion skill
+aof init --skip-openclaw
+```
+
+<Aside type="caution">
+After plugin registration or memory configuration, restart the OpenClaw gateway:
+
+```bash
+openclaw gateway restart
+```
+
+Plugin and memory changes take effect only after a gateway restart.
+</Aside>
 
 ---
 
