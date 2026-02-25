@@ -3,22 +3,29 @@ import { OpenClawExecutor } from "../executor.js";
 import type { OpenClawApi } from "../types.js";
 import type { TaskContext } from "../../dispatch/executor.js";
 
+const mockRunEmbeddedPiAgent = vi.fn();
+const mockExtApi = {
+  runEmbeddedPiAgent: mockRunEmbeddedPiAgent,
+  resolveAgentWorkspaceDir: vi.fn(() => "/tmp/ws"),
+  resolveAgentDir: vi.fn(() => "/tmp/agent"),
+  ensureAgentWorkspace: vi.fn(async (p: { dir: string }) => ({ dir: p.dir })),
+  resolveSessionFilePath: vi.fn((id: string) => `/tmp/s/${id}.jsonl`),
+};
+
 describe("OpenClawExecutor", () => {
   let mockApi: OpenClawApi;
   let executor: OpenClawExecutor;
 
   beforeEach(() => {
-    mockApi = {
-      spawnAgent: vi.fn(),
-    } as unknown as OpenClawApi;
+    vi.clearAllMocks();
+    mockApi = { config: { agents: {} } } as unknown as OpenClawApi;
     executor = new OpenClawExecutor(mockApi);
+    (executor as any).extensionApi = mockExtApi;
   });
 
   it("spawns agent session successfully", async () => {
-    const mockSessionId = "session-12345";
-    (mockApi.spawnAgent as ReturnType<typeof vi.fn>).mockResolvedValue({
-      success: true,
-      sessionId: mockSessionId,
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
+      meta: { durationMs: 1000, agentMeta: { sessionId: "session-12345", provider: "a", model: "m" } },
     });
 
     const context: TaskContext = {
@@ -32,23 +39,18 @@ describe("OpenClawExecutor", () => {
     const result = await executor.spawn(context);
 
     expect(result.success).toBe(true);
-    expect(result.sessionId).toBe(mockSessionId);
-    expect(mockApi.spawnAgent).toHaveBeenCalledWith({
-      agentId: "swe-backend",
-      task: expect.stringContaining("TASK-001"),
-      context: {
-        taskId: "TASK-001",
-        taskPath: "/path/to/task.md",
-        priority: "high",
-        routing: { role: "backend-engineer" },
-      },
-    });
+    expect(result.sessionId).toBe("session-12345");
+    expect(mockRunEmbeddedPiAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "swe-backend",
+        prompt: expect.stringContaining("TASK-001"),
+      }),
+    );
   });
 
   it("handles spawn failure gracefully", async () => {
-    (mockApi.spawnAgent as ReturnType<typeof vi.fn>).mockResolvedValue({
-      success: false,
-      error: "Agent not found",
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
+      meta: { durationMs: 500, error: { kind: "retry_limit", message: "Agent not found" } },
     });
 
     const context: TaskContext = {
@@ -63,13 +65,11 @@ describe("OpenClawExecutor", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("Agent not found");
-    expect(result.sessionId).toBeUndefined();
   });
 
   it("respects timeout option", async () => {
-    (mockApi.spawnAgent as ReturnType<typeof vi.fn>).mockResolvedValue({
-      success: true,
-      sessionId: "session-timeout",
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
+      meta: { durationMs: 1000, agentMeta: { sessionId: "s-t", provider: "a", model: "m" } },
     });
 
     const context: TaskContext = {
@@ -82,18 +82,14 @@ describe("OpenClawExecutor", () => {
 
     await executor.spawn(context, { timeoutMs: 60000 });
 
-    expect(mockApi.spawnAgent).toHaveBeenCalledWith({
-      agentId: "swe-qa",
-      task: expect.any(String),
-      context: expect.any(Object),
-      timeoutMs: 60000,
-    });
+    expect(mockRunEmbeddedPiAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ timeoutMs: 60000 }),
+    );
   });
 
-  it("includes routing metadata in spawn call", async () => {
-    (mockApi.spawnAgent as ReturnType<typeof vi.fn>).mockResolvedValue({
-      success: true,
-      sessionId: "session-routing",
+  it("includes routing metadata in prompt", async () => {
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
+      meta: { durationMs: 1000, agentMeta: { sessionId: "s-r", provider: "a", model: "m" } },
     });
 
     const context: TaskContext = {
@@ -101,32 +97,17 @@ describe("OpenClawExecutor", () => {
       taskPath: "/path/to/task.md",
       agent: "swe-frontend",
       priority: "critical",
-      routing: {
-        role: "frontend-engineer",
-        team: "swe",
-        tags: ["ui", "react"],
-      },
+      routing: { role: "frontend-engineer", team: "swe", tags: ["ui", "react"] },
     };
 
     await executor.spawn(context);
 
-    expect(mockApi.spawnAgent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        context: expect.objectContaining({
-          routing: {
-            role: "frontend-engineer",
-            team: "swe",
-            tags: ["ui", "react"],
-          },
-        }),
-      }),
-    );
+    const params = mockRunEmbeddedPiAgent.mock.calls[0][0];
+    expect(params.prompt).toContain("frontend-engineer");
   });
 
   it("handles API exceptions", async () => {
-    (mockApi.spawnAgent as ReturnType<typeof vi.fn>).mockRejectedValue(
-      new Error("Network error"),
-    );
+    mockRunEmbeddedPiAgent.mockRejectedValueOnce(new Error("Network error"));
 
     const context: TaskContext = {
       taskId: "TASK-005",
@@ -143,9 +124,8 @@ describe("OpenClawExecutor", () => {
   });
 
   it("includes aof_task_complete instruction with taskId", async () => {
-    (mockApi.spawnAgent as ReturnType<typeof vi.fn>).mockResolvedValue({
-      success: true,
-      sessionId: "session-complete-instruction",
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
+      meta: { durationMs: 1000, agentMeta: { sessionId: "s-c", provider: "a", model: "m" } },
     });
 
     const context: TaskContext = {
@@ -158,77 +138,45 @@ describe("OpenClawExecutor", () => {
 
     await executor.spawn(context);
 
-    expect(mockApi.spawnAgent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.stringContaining("aof_task_complete"),
-      }),
-    );
-    expect(mockApi.spawnAgent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.stringContaining('taskId="TASK-006"'),
-      }),
-    );
+    const params = mockRunEmbeddedPiAgent.mock.calls[0][0];
+    expect(params.prompt).toContain("aof_task_complete");
+    expect(params.prompt).toContain('taskId="TASK-006"');
   });
 
-  it("normalizes agent ID by trying multiple formats", async () => {
-    // First call fails, second succeeds
-    (mockApi.spawnAgent as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce({
-        success: false,
-        error: "Agent not found",
-      })
-      .mockResolvedValueOnce({
-        success: true,
-        sessionId: "session-normalized",
-      });
+  it("normalizes agent:prefix:suffix to agent name", async () => {
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
+      meta: { durationMs: 1000, agentMeta: { sessionId: "s-n", provider: "a", model: "m" } },
+    });
 
     const context: TaskContext = {
       taskId: "TASK-007",
       taskPath: "/path/to/task.md",
-      agent: "swe-backend",
+      agent: "agent:swe-backend:main",
       priority: "normal",
       routing: {},
     };
 
-    const result = await executor.spawn(context);
+    await executor.spawn(context);
 
-    expect(result.success).toBe(true);
-    expect(result.sessionId).toBe("session-normalized");
-    expect(mockApi.spawnAgent).toHaveBeenCalledTimes(2);
-    
-    // First call with raw agent ID
-    expect(mockApi.spawnAgent).toHaveBeenNthCalledWith(1,
-      expect.objectContaining({
-        agentId: "swe-backend",
-      }),
-    );
-    
-    // Second call with normalized agent ID
-    expect(mockApi.spawnAgent).toHaveBeenNthCalledWith(2,
-      expect.objectContaining({
-        agentId: "agent:swe-backend:main",
-      }),
+    expect(mockRunEmbeddedPiAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: "swe-backend" }),
     );
   });
 
-  it("handles graceful fallback when agent not found in any format", async () => {
-    (mockApi.spawnAgent as ReturnType<typeof vi.fn>).mockResolvedValue({
-      success: false,
-      error: "Agent not found",
-    });
+  it("handles missing config gracefully", async () => {
+    const noConfigApi = {} as unknown as OpenClawApi;
+    const exec = new OpenClawExecutor(noConfigApi);
+    (exec as any).extensionApi = mockExtApi;
 
-    const context: TaskContext = {
+    const result = await exec.spawn({
       taskId: "TASK-008",
       taskPath: "/path/to/task.md",
-      agent: "nonexistent-agent",
+      agent: "swe-backend",
       priority: "normal",
       routing: {},
-    };
-
-    const result = await executor.spawn(context);
+    });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("Agent not found");
-    expect(mockApi.spawnAgent).toHaveBeenCalledTimes(2); // Tried both formats
+    expect(result.error).toContain("config");
   });
 });

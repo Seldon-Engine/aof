@@ -9,8 +9,6 @@ type AofPluginConfig = {
   pollIntervalMs?: number;
   defaultLeaseTtlMs?: number;
   dryRun?: boolean;
-  gatewayUrl?: string;
-  gatewayToken?: string;
 };
 
 const DEFAULT_DATA_DIR = join(homedir(), ".openclaw", "aof");
@@ -47,12 +45,6 @@ const normalizeBoolean = (value: unknown, fallback: boolean): boolean => {
   return typeof value === "boolean" ? value : fallback;
 };
 
-const normalizeString = (value: unknown): string | undefined => {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-};
-
 const plugin = {
   id: "aof",
   name: "AOF — Agentic Ops Fabric",
@@ -64,8 +56,6 @@ const plugin = {
     const pollIntervalMs = normalizeNumber(config.pollIntervalMs, DEFAULT_POLL_INTERVAL_MS);
     const defaultLeaseTtlMs = normalizeNumber(config.defaultLeaseTtlMs, DEFAULT_LEASE_TTL_MS);
     const dryRun = normalizeBoolean(config.dryRun, DEFAULT_DRY_RUN);
-    const gatewayUrl = normalizeString(config.gatewayUrl);
-    const gatewayToken = normalizeString(config.gatewayToken);
 
     try {
       registerAofPlugin(api, {
@@ -73,8 +63,6 @@ const plugin = {
         pollIntervalMs,
         defaultLeaseTtlMs,
         dryRun,
-        gatewayUrl,
-        gatewayToken,
       });
 
       registerMemoryModule(api);

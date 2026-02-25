@@ -4,4 +4,3 @@
  */
 
 export { OpenClawExecutor } from "./openclaw-executor.js";
-export type { OpenClawExecutorOptions } from "./types.js";

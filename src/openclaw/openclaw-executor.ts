@@ -1,291 +1,199 @@
 /**
- * OpenClawExecutor — spawns agent sessions using OpenClaw's sessions API.
- * 
- * Primary dispatch: HTTP fetch to gateway REST API
- * Fallback: api.spawnAgent() if available
+ * OpenClawExecutor — spawns agent sessions via in-process runEmbeddedPiAgent().
+ *
+ * Runs agents directly inside the gateway process, bypassing HTTP dispatch,
+ * WebSocket auth, and device pairing entirely. This is the same code path
+ * the gateway itself uses for all agent execution.
+ *
+ * The extensionAPI module is loaded lazily on first spawn from the gateway's
+ * dist directory.
  */
 
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import type { DispatchExecutor, TaskContext, ExecutorResult } from "../dispatch/executor.js";
-import type { OpenClawApi, OpenClawExecutorOptions } from "./types.js";
+import type { OpenClawApi } from "./types.js";
+
+/** Minimal shape of the functions we need from extensionAPI.js */
+interface ExtensionApi {
+  runEmbeddedPiAgent: (params: Record<string, unknown>) => Promise<EmbeddedPiRunResult>;
+  resolveAgentWorkspaceDir: (cfg: Record<string, unknown>, agentId: string) => string;
+  resolveAgentDir: (cfg: Record<string, unknown>, agentId: string) => string;
+  ensureAgentWorkspace: (params: { dir: string }) => Promise<{ dir: string }>;
+  resolveSessionFilePath: (sessionId: string) => string;
+}
+
+/** Subset of the result type we actually use */
+interface EmbeddedPiRunResult {
+  payloads?: Array<{
+    text?: string;
+    isError?: boolean;
+  }>;
+  meta: {
+    durationMs: number;
+    agentMeta?: {
+      sessionId: string;
+      provider: string;
+      model: string;
+    };
+    aborted?: boolean;
+    error?: {
+      kind: string;
+      message: string;
+    };
+  };
+}
+
+const DEFAULT_TIMEOUT_MS = 300_000; // 5 minutes
 
 export class OpenClawExecutor implements DispatchExecutor {
-  private readonly gatewayUrl?: string;
-  private readonly gatewayToken?: string;
+  private extensionApi: ExtensionApi | undefined;
+  private extensionApiLoadPromise: Promise<ExtensionApi> | undefined;
 
-  constructor(
-    private readonly api: OpenClawApi,
-    opts: OpenClawExecutorOptions = {}
-  ) {
-    // Priority: constructor opts > env vars > api.config
-    this.gatewayUrl = opts.gatewayUrl 
-      || process.env.OPENCLAW_GATEWAY_URL
-      || this.deriveGatewayUrl();
-    
-    this.gatewayToken = opts.gatewayToken
-      || process.env.OPENCLAW_GATEWAY_TOKEN
-      || this.api.config?.gateway?.auth?.token
-      || this.api.config?.gateway?.token;
+  constructor(private readonly api: OpenClawApi) {
+    console.info("[AOF] OpenClawExecutor initialized (embedded agent mode)");
   }
 
   async spawn(context: TaskContext, opts?: { timeoutMs?: number }): Promise<ExecutorResult> {
     console.info(`[AOF] OpenClawExecutor.spawn() for task ${context.taskId}, agent: ${context.agent}`);
 
-    // Normalize agent ID - try multiple formats
-    const agentIds = this.normalizeAgentId(context.agent);
-
-    // Primary: HTTP dispatch to /tools/invoke (proven path, works with sessions_spawn allow-list)
-    if (this.gatewayUrl && this.gatewayToken) {
-      let lastPlatformLimit: number | undefined;
-      let lastError: string | undefined;
-      
-      for (const agentId of agentIds) {
-        try {
-          console.info(`[AOF] No api.spawnAgent, falling back to HTTP dispatch with agentId: ${agentId}`);
-          const contextWithAgent = { ...context, agent: agentId };
-          const result = await this.httpDispatch(contextWithAgent, opts);
-          return result;
-        } catch (err: any) {
-          const error = err as Error;
-          console.warn(`[AOF] HTTP dispatch failed with agentId ${agentId}: ${error.message}`);
-          
-          // Preserve last error and platform limit
-          lastError = error.message;
-          if (err.platformLimit !== undefined) {
-            lastPlatformLimit = err.platformLimit;
-          }
-        }
-      }
-
-      // HTTP failed, try api.spawnAgent() if available (future OpenClaw versions)
-      if (this.api.spawnAgent) {
-        console.info(`[AOF] HTTP dispatch failed, trying api.spawnAgent`);
-        return this.spawnAgentFallbackWithNormalization(context, opts, agentIds);
-      }
-
+    let ext: ExtensionApi;
+    try {
+      ext = await this.loadExtensionApi();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[AOF] Failed to load extensionAPI: ${message}`);
       return {
         success: false,
-        error: lastError || `Dispatch failed for ${context.agent}: all spawn attempts exhausted`,
-        platformLimit: lastPlatformLimit,
+        error: `Failed to load gateway extensionAPI: ${message}`,
       };
     }
 
-    // No HTTP config — try api.spawnAgent() directly
-    if (this.api.spawnAgent) {
-      return this.spawnAgentFallbackWithNormalization(context, opts, agentIds);
+    const config = this.api.config as Record<string, unknown> | undefined;
+    if (!config) {
+      return {
+        success: false,
+        error: "No OpenClaw config available on api.config",
+      };
     }
 
-    // No dispatch method available
-    console.error(`[AOF] No dispatch method available (no gateway config, api.spawnAgent not present)`);
-    return {
-      success: false,
-      error: "No dispatch method available — update OpenClaw or configure gateway",
-    };
-  }
+    const agentId = this.normalizeAgentId(context.agent);
+    const sessionId = randomUUID();
+    const runId = sessionId;
+    // The scheduler's spawnTimeoutMs (default 30s) was designed for fast HTTP
+    // dispatch. For embedded agents, we need the full execution budget.
+    // Use the larger of the caller's timeout and our minimum.
+    const timeoutMs = Math.max(opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
 
-  private normalizeAgentId(agent: string): string[] {
-    // Return array of agent ID formats to try, in order
-    const formats: string[] = [agent]; // Try raw value first
-    
-    // If not already in full format, try agent:xxx:main
-    if (!agent.startsWith("agent:")) {
-      formats.push(`agent:${agent}:main`);
-    }
-    
-    return formats;
-  }
-
-  private async spawnAgentFallbackWithNormalization(
-    context: TaskContext,
-    opts: { timeoutMs?: number } | undefined,
-    agentIds: string[]
-  ): Promise<ExecutorResult> {
-    let lastError: string | undefined;
-    
-    for (const agentId of agentIds) {
-      const contextWithAgent = { ...context, agent: agentId };
-      const result = await this.spawnAgentFallback(contextWithAgent, opts);
-      
-      if (result.success) {
-        return result;
-      }
-      
-      lastError = result.error;
-      
-      // If the error is not about agent not found, don't retry with other formats
-      if (result.error && !result.error.toLowerCase().includes("agent") && !result.error.toLowerCase().includes("not found")) {
-        console.warn(`[AOF] spawnAgent failed with non-agent error: ${result.error}`);
-        return result; // Return immediately for non-agent errors
-      }
-      
-      // Log failure but continue trying other formats for agent-related errors
-      console.warn(`[AOF] spawnAgent failed with agentId ${agentId}: ${result.error}`);
-    }
-    
-    // All formats failed with agent-related errors
-    console.warn(`[AOF] Agent ${context.agent} not found in any format, leaving task in ready`);
-    return {
-      success: false,
-      error: lastError || `Agent not found: ${context.agent}`,
-    };
-  }
-
-  private async httpDispatch(context: TaskContext, opts?: { timeoutMs?: number }): Promise<ExecutorResult> {
-    const taskInstruction = this.formatTaskInstruction(context);
-    
-    const payload = {
-      tool: "sessions_spawn",
-      args: {
-        agentId: context.agent,
-        task: taskInstruction,
-        ...(context.thinking && { thinking: context.thinking }),
-      },
-      sessionKey: "agent:main:main",
-    };
-
-    const signal = AbortSignal.timeout(60000);
-    
     try {
-      const response = await fetch(`${this.gatewayUrl}/tools/invoke`, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${this.gatewayToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-        signal,
+      // Resolve paths synchronously so failures are reported to the scheduler
+      const workspaceDirRaw = ext.resolveAgentWorkspaceDir(config, agentId);
+      const { dir: workspaceDir } = await ext.ensureAgentWorkspace({ dir: workspaceDirRaw });
+      const agentDir = ext.resolveAgentDir(config, agentId);
+      const sessionFile = ext.resolveSessionFilePath(sessionId);
+
+      const prompt = this.formatTaskInstruction(context);
+
+      console.info(`[AOF] Launching embedded agent (fire-and-forget): agentId=${agentId}, sessionId=${sessionId}`);
+
+      // Fire-and-forget: launch the agent in the background so the scheduler
+      // isn't blocked by the spawnTimeoutMs (designed for fast HTTP dispatch).
+      // The agent calls aof_task_complete when done; the scheduler's lease
+      // expiry handles the failure case.
+      void this.runAgentBackground(ext, {
+        sessionId,
+        sessionFile,
+        workspaceDir,
+        agentDir,
+        config,
+        prompt,
+        agentId,
+        timeoutMs,
+        runId,
+        taskId: context.taskId,
+        thinking: context.thinking,
       });
-
-      // Always parse JSON to get detailed error messages
-      const data = await response.json() as any;
-
-      if (!response.ok) {
-        // Try to extract error message from response body
-        const errorMsg = data?.error || data?.message || `HTTP ${response.status} ${response.statusText}`;
-        throw new Error(errorMsg);
-      }
-
-      // Check for application-level errors (HTTP 200 but tool returned error/forbidden)
-      const details = data?.result?.details ?? data?.result ?? data;
-      if (details?.status === "forbidden" || details?.status === "error") {
-        const errorMsg = details.error || details.message || "Unknown spawn error";
-        throw new Error(errorMsg);
-      }
-
-      const sessionId = this.extractSessionId(data);
-
-      if (!sessionId) {
-        throw new Error("No sessionId in response");
-      }
 
       return {
         success: true,
         sessionId,
       };
     } catch (err) {
-      const error = err as Error;
-      const platformLimit = this.parsePlatformLimitError(error.message);
-      
-      // Throw error with platformLimit attached
-      const enhancedError: any = new Error(error.message);
-      enhancedError.platformLimit = platformLimit;
-      throw enhancedError;
-    }
-  }
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[AOF] Embedded agent setup failed: ${message}`);
 
-  private extractSessionId(data: any): string | undefined {
-    // Try top-level sessionId
-    if (data.sessionId) return data.sessionId;
+      const platformLimit = this.parsePlatformLimitError(message);
 
-    // Try result.sessionId
-    if (data.result?.sessionId) return data.result.sessionId;
-
-    // Try result.details child session identifiers
-    if (data.result?.details?.childSessionKey) return data.result.details.childSessionKey;
-    if (data.result?.details?.runId) return data.result.details.runId;
-
-    // Try data.sessionId
-    if (data.data?.sessionId) return data.data.sessionId;
-
-    // Try result.content[0].text (nested JSON)
-    if (data.result?.content?.[0]?.text) {
-      try {
-        const parsed = JSON.parse(data.result.content[0].text);
-        if (parsed.childSessionKey) return parsed.childSessionKey;
-        if (parsed.runId) return parsed.runId;
-        if (parsed.sessionId) return parsed.sessionId;
-      } catch {
-        // Not JSON, ignore
-      }
-    }
-
-    return undefined;
-  }
-
-  private async spawnAgentFallback(context: TaskContext, opts?: { timeoutMs?: number }): Promise<ExecutorResult> {
-    if (!this.api.spawnAgent) {
-      console.error(`[AOF] spawnAgent API not available — update OpenClaw or check plugin compatibility (task: ${context.taskId})`);
-      
       return {
         success: false,
-        error: "spawnAgent not available - update OpenClaw or check plugin compatibility (see gateway log for remediation steps)",
-      };
-    }
-
-
-
-    try {
-      const taskInstruction = this.formatTaskInstruction(context);
-
-      const request = {
-        agentId: context.agent,
-        task: taskInstruction,
-        context: {
-          taskId: context.taskId,
-          taskPath: context.taskPath,
-          priority: context.priority,
-          routing: context.routing,
-          projectId: context.projectId,
-          projectRoot: context.projectRoot,
-          taskRelpath: context.taskRelpath,
-        },
-        timeoutMs: opts?.timeoutMs,
-      };
-
-      const response = await this.api.spawnAgent(request);
-
-      if (response.success) {
-        return {
-          success: true,
-          sessionId: response.sessionId,
-        };
-      } else {
-        const platformLimit = response.error ? this.parsePlatformLimitError(response.error) : undefined;
-        return {
-          success: false,
-          error: response.error ?? "Unknown spawn failure",
-          platformLimit,
-        };
-      }
-    } catch (err) {
-      const error = err as Error;
-      const errorMsg = error.message;
-      const errorStack = error.stack ?? "No stack trace available";
-
-      console.error(`[AOF] Spawn exception for ${context.taskId} (agent: ${context.agent}): ${errorMsg}`);
-
-      const platformLimit = this.parsePlatformLimitError(errorMsg);
-      return {
-        success: false,
-        error: errorMsg,
+        error: message,
         platformLimit,
       };
     }
   }
 
-  private formatTaskInstruction(context: TaskContext): string {
-    let instruction = `Execute the task: ${context.taskId}
+  /** Run the embedded agent in the background, logging results when done. */
+  private async runAgentBackground(
+    ext: ExtensionApi,
+    params: {
+      sessionId: string;
+      sessionFile: string;
+      workspaceDir: string;
+      agentDir: string;
+      config: Record<string, unknown>;
+      prompt: string;
+      agentId: string;
+      timeoutMs: number;
+      runId: string;
+      taskId: string;
+      thinking?: string;
+    },
+  ): Promise<void> {
+    try {
+      const result = await ext.runEmbeddedPiAgent({
+        sessionId: params.sessionId,
+        sessionFile: params.sessionFile,
+        workspaceDir: params.workspaceDir,
+        agentDir: params.agentDir,
+        config: params.config,
+        prompt: params.prompt,
+        agentId: params.agentId,
+        timeoutMs: params.timeoutMs,
+        runId: params.runId,
+        lane: "aof",
+        senderIsOwner: true,
+        ...(params.thinking && { thinkLevel: params.thinking }),
+      });
 
-Task file: ${context.taskPath}`;
+      if (result.meta.error) {
+        console.warn(
+          `[AOF] Agent run completed with error for ${params.taskId}: ${result.meta.error.kind}: ${result.meta.error.message}`,
+        );
+      } else if (result.meta.aborted) {
+        console.warn(`[AOF] Agent run was aborted for ${params.taskId}`);
+      } else {
+        console.info(
+          `[AOF] Agent run completed for ${params.taskId} in ${result.meta.durationMs}ms`,
+        );
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[AOF] Background agent run failed for ${params.taskId}: ${message}`);
+    }
+  }
+
+  private normalizeAgentId(agent: string): string {
+    // Strip "agent:" prefix if present (e.g. "agent:swe-backend:main" → "swe-backend")
+    if (agent.startsWith("agent:")) {
+      const parts = agent.split(":");
+      return parts[1] ?? agent;
+    }
+    return agent;
+  }
+
+  private formatTaskInstruction(context: TaskContext): string {
+    let instruction = `Execute the task: ${context.taskId}\n\nTask file: ${context.taskPath}`;
 
     if (context.projectId) {
       instruction += `\nProject: ${context.projectId}`;
@@ -297,41 +205,85 @@ Task file: ${context.taskPath}`;
       instruction += `\nTask path (relative): ${context.taskRelpath}`;
     }
 
-    instruction += `\n\nPriority: ${context.priority}
-Routing: ${JSON.stringify(context.routing)}
-
-Read the task file for full details and acceptance criteria.
-
-**IMPORTANT:** When you have completed this task, call the \`aof_task_complete\` tool with taskId="${context.taskId}" to mark it as done.`;
+    instruction += `\n\nPriority: ${context.priority}\nRouting: ${JSON.stringify(context.routing)}\n\nRead the task file for full details and acceptance criteria.\n\n**IMPORTANT:** When you have completed this task, call the \`aof_task_complete\` tool with taskId="${context.taskId}" to mark it as done.`;
 
     return instruction;
   }
 
-  private deriveGatewayUrl(): string | undefined {
-    // Prefer explicit URL from gateway config
-    const explicitUrl = this.api.config?.gateway?.url;
-    if (explicitUrl) return explicitUrl;
+  /**
+   * Lazily load the gateway's extensionAPI module.
+   * Cached after first successful load.
+   */
+  private async loadExtensionApi(): Promise<ExtensionApi> {
+    if (this.extensionApi) return this.extensionApi;
 
-    // Fall back to constructing URL from port
-    const port = this.api.config?.gateway?.port;
-    if (port) {
-      return `http://127.0.0.1:${port}`;
+    // Deduplicate concurrent loads
+    if (this.extensionApiLoadPromise) return this.extensionApiLoadPromise;
+
+    this.extensionApiLoadPromise = this.doLoadExtensionApi();
+    try {
+      this.extensionApi = await this.extensionApiLoadPromise;
+      return this.extensionApi;
+    } finally {
+      this.extensionApiLoadPromise = undefined;
     }
-    return undefined;
+  }
+
+  private async doLoadExtensionApi(): Promise<ExtensionApi> {
+    const distDir = this.resolveGatewayDistDir();
+    const extensionApiPath = join(distDir, "extensionAPI.js");
+    const url = new URL(`file://${extensionApiPath}`).href;
+
+    // The bundled extensionAPI and its dependency graph resolve config/paths
+    // relative to CWD. The gateway process CWD is typically "/", which causes
+    // module initialization failures. Temporarily switch to the workspace
+    // package root so relative lookups succeed.
+    const packageDir = join(distDir, "..");
+    const prevCwd = process.cwd();
+    process.chdir(packageDir);
+
+    let mod: Record<string, unknown>;
+    try {
+      mod = await import(url);
+    } finally {
+      process.chdir(prevCwd);
+    }
+
+    // Validate required exports
+    const required = [
+      "runEmbeddedPiAgent",
+      "resolveAgentWorkspaceDir",
+      "resolveAgentDir",
+      "ensureAgentWorkspace",
+      "resolveSessionFilePath",
+    ] as const;
+
+    for (const name of required) {
+      if (typeof mod[name] !== "function") {
+        throw new Error(`extensionAPI.js missing export: ${name}`);
+      }
+    }
+
+    console.info(`[AOF] Loaded extensionAPI from ${extensionApiPath}`);
+    return mod as unknown as ExtensionApi;
   }
 
   /**
-   * Parse platform concurrency limit from OpenClaw error message.
-   * 
-   * Example error:
-   *   "sessions_spawn has reached max active children for this session (3/2)"
-   * 
-   * Returns: 2 (the platform limit Y from pattern X/Y)
+   * Resolve the gateway dist directory.
+   * Order: OPENCLAW_STATE_DIR env > ~/.openclaw
    */
+  private resolveGatewayDistDir(): string {
+    const stateDir =
+      process.env.OPENCLAW_STATE_DIR?.trim() ||
+      process.env.CLAWDBOT_STATE_DIR?.trim() ||
+      join(homedir(), ".openclaw");
+    return join(stateDir, "workspace", "package", "dist");
+  }
+
   private parsePlatformLimitError(error: string): number | undefined {
     const match = error.match(/max active children for this session \((\d+)\/(\d+)\)/);
     if (match?.[2]) {
-      return parseInt(match[2], 10); // Y = platform limit
+      return parseInt(match[2], 10);
     }
     return undefined;
   }

@@ -31,8 +31,6 @@ export interface AOFPluginOptions {
   pollIntervalMs?: number;
   defaultLeaseTtlMs?: number;
   dryRun?: boolean;
-  gatewayUrl?: string;
-  gatewayToken?: string;
   maxConcurrentDispatches?: number;
   store?: ITaskStore;
   logger?: EventLogger;
@@ -92,11 +90,8 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
   const engine = new NotificationPolicyEngine(notifAdapter, DEFAULT_RULES);
 
   // Create executor for agent dispatch (only when explicitly not in dry-run mode)
-  const executor = opts.dryRun === false 
-    ? new OpenClawExecutor(api, {
-        gatewayUrl: opts.gatewayUrl,
-        gatewayToken: opts.gatewayToken,
-      })
+  const executor = opts.dryRun === false
+    ? new OpenClawExecutor(api)
     : undefined;
 
   const service = opts.service

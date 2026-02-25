@@ -1,6 +1,10 @@
 /**
- * Tests for HTTP-based dispatch in OpenClawExecutor
- * TDD: Tests written before implementation
+ * Tests for embedded agent dispatch in OpenClawExecutor
+ *
+ * The executor uses fire-and-forget: spawn() returns immediately with
+ * { success: true, sessionId } after launching the agent in the background.
+ * Only setup failures (missing config, extensionAPI load errors) return
+ * { success: false }.
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -8,25 +12,34 @@ import { OpenClawExecutor } from "../openclaw-executor.js";
 import type { OpenClawApi } from "../types.js";
 import type { TaskContext } from "../../dispatch/executor.js";
 
-const mockFetch = vi.fn();
-global.fetch = mockFetch as any;
+// Mock the dynamic import of extensionAPI
+const mockRunEmbeddedPiAgent = vi.fn();
+const mockResolveAgentWorkspaceDir = vi.fn(() => "/tmp/workspace/swe-backend");
+const mockResolveAgentDir = vi.fn(() => "/tmp/agents/swe-backend");
+const mockEnsureAgentWorkspace = vi.fn(async (p: { dir: string }) => ({ dir: p.dir }));
+const mockResolveSessionFilePath = vi.fn((id: string) => `/tmp/sessions/${id}.jsonl`);
 
-describe("OpenClawExecutor HTTP Dispatch", () => {
+vi.mock("node:crypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:crypto")>();
+  return {
+    ...actual,
+    randomUUID: () => "test-uuid-1234",
+  };
+});
+
+describe("OpenClawExecutor (embedded agent)", () => {
   let mockApi: OpenClawApi;
   let executor: OpenClawExecutor;
   let taskContext: TaskContext;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    
+
     mockApi = {
       config: {
-        gateway: {
-          port: 18789,
-          auth: { token: "test-token-123" },
-        },
+        agents: { list: [] },
       },
-    } as OpenClawApi;
+    } as unknown as OpenClawApi;
 
     taskContext = {
       taskId: "TASK-001",
@@ -35,369 +48,192 @@ describe("OpenClawExecutor HTTP Dispatch", () => {
       priority: "normal",
       routing: { team: "engineering" },
     };
+
+    executor = new OpenClawExecutor(mockApi);
+
+    // Inject the mock extensionAPI (bypass lazy loading)
+    (executor as any).extensionApi = {
+      runEmbeddedPiAgent: mockRunEmbeddedPiAgent,
+      resolveAgentWorkspaceDir: mockResolveAgentWorkspaceDir,
+      resolveAgentDir: mockResolveAgentDir,
+      ensureAgentWorkspace: mockEnsureAgentWorkspace,
+      resolveSessionFilePath: mockResolveSessionFilePath,
+    };
   });
 
-  it("HTTP success: fetch called with correct URL/headers/payload, returns parsed sessionId", async () => {
-    executor = new OpenClawExecutor(mockApi, {
-      gatewayUrl: "http://127.0.0.1:18789",
-      gatewayToken: "test-token-123",
-    });
-
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        sessionId: "session-test-001",
-        sessionKey: "agent:swe-backend:test-001",
-      }),
-    });
-
-    const result = await executor.spawn(taskContext);
-
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-    expect(mockFetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:18789/tools/invoke",
-      expect.objectContaining({
-        method: "POST",
-        headers: {
-          "Authorization": "Bearer test-token-123",
-          "Content-Type": "application/json",
-        },
-        body: expect.stringContaining('"tool":"sessions_spawn"'),
-        signal: expect.any(AbortSignal),
-      })
-    );
-
-    const callBody = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(callBody).toMatchObject({
-      tool: "sessions_spawn",
-      args: {
-        agentId: "swe-backend",
-        task: expect.stringContaining("TASK-001"),
+  it("calls runEmbeddedPiAgent with correct params and returns generated sessionId", async () => {
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
+      payloads: [{ text: "Task completed" }],
+      meta: {
+        durationMs: 5000,
+        agentMeta: { sessionId: "embedded-session-001", provider: "anthropic", model: "claude-sonnet-4-20250514" },
       },
-      sessionKey: "agent:main:main",
     });
 
+    const result = await executor.spawn(taskContext);
+
+    // Fire-and-forget: returns immediately with the generated sessionId
     expect(result).toEqual({
       success: true,
-      sessionId: "session-test-001",
+      sessionId: "test-uuid-1234",
     });
+
+    // Wait for the background promise to resolve
+    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
+
+    const params = mockRunEmbeddedPiAgent.mock.calls[0][0];
+    expect(params).toMatchObject({
+      sessionId: "test-uuid-1234",
+      runId: "test-uuid-1234",
+      agentId: "swe-backend",
+      prompt: expect.stringContaining("TASK-001"),
+      lane: "aof",
+      senderIsOwner: true,
+    });
+    expect(params.sessionFile).toContain("test-uuid-1234");
+    expect(params.workspaceDir).toBe("/tmp/workspace/swe-backend");
+    expect(params.agentDir).toBe("/tmp/agents/swe-backend");
+    expect(params.timeoutMs).toBe(300_000);
   });
 
-  it("uses thinking metadata when present in task context", async () => {
-    executor = new OpenClawExecutor(mockApi, {
-      gatewayUrl: "http://127.0.0.1:18789",
-      gatewayToken: "test-token-123",
+  it("passes thinking level from task context", async () => {
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
+      meta: { durationMs: 1000, agentMeta: { sessionId: "s1", provider: "a", model: "m" } },
     });
 
-    const contextWithThinking: TaskContext = {
+    await executor.spawn({ ...taskContext, thinking: "medium" });
+    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
+
+    const params = mockRunEmbeddedPiAgent.mock.calls[0][0];
+    expect(params.thinkLevel).toBe("medium");
+  });
+
+  it("logs agent run errors in background without affecting spawn result", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
+      meta: {
+        durationMs: 2000,
+        error: { kind: "context_overflow", message: "Token limit exceeded" },
+        agentMeta: { sessionId: "s-err", provider: "a", model: "m" },
+      },
+    });
+
+    const result = await executor.spawn(taskContext);
+
+    // Spawn returns success (fire-and-forget)
+    expect(result.success).toBe(true);
+
+    // Background logs the error
+    await vi.waitFor(() => expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("context_overflow"),
+    ));
+
+    warnSpy.mockRestore();
+  });
+
+  it("logs aborted agent run in background without affecting spawn result", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
+      meta: { durationMs: 1000, aborted: true },
+    });
+
+    const result = await executor.spawn(taskContext);
+
+    expect(result.success).toBe(true);
+
+    await vi.waitFor(() => expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("aborted"),
+    ));
+
+    warnSpy.mockRestore();
+  });
+
+  it("logs thrown exception in background without affecting spawn result", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockRunEmbeddedPiAgent.mockRejectedValueOnce(new Error("Runtime crash"));
+
+    const result = await executor.spawn(taskContext);
+
+    expect(result.success).toBe(true);
+
+    await vi.waitFor(() => expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Runtime crash"),
+    ));
+
+    errorSpy.mockRestore();
+  });
+
+  it("returns error when api.config is missing", async () => {
+    const noConfigApi = {} as unknown as OpenClawApi;
+    const exec = new OpenClawExecutor(noConfigApi);
+    (exec as any).extensionApi = (executor as any).extensionApi;
+
+    const result = await exec.spawn(taskContext);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("No OpenClaw config");
+  });
+
+  it("normalizes agent:prefix:suffix to just the agent name", async () => {
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
+      meta: { durationMs: 1000, agentMeta: { sessionId: "s2", provider: "a", model: "m" } },
+    });
+
+    await executor.spawn({ ...taskContext, agent: "agent:swe-backend:main" });
+    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
+
+    const params = mockRunEmbeddedPiAgent.mock.calls[0][0];
+    expect(params.agentId).toBe("swe-backend");
+  });
+
+  it("includes project context in prompt when available", async () => {
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
+      meta: { durationMs: 1000, agentMeta: { sessionId: "s3", provider: "a", model: "m" } },
+    });
+
+    await executor.spawn({
       ...taskContext,
-      thinking: "medium",
-    };
-
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ sessionId: "session-002" }),
+      projectId: "my-project",
+      projectRoot: "/home/user/my-project",
+      taskRelpath: "tasks/TASK-001.md",
     });
+    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
 
-    await executor.spawn(contextWithThinking);
-
-    const callBody = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(callBody.args.thinking).toBe("medium");
+    const params = mockRunEmbeddedPiAgent.mock.calls[0][0];
+    expect(params.prompt).toContain("my-project");
+    expect(params.prompt).toContain("/home/user/my-project");
+    expect(params.prompt).toContain("tasks/TASK-001.md");
   });
 
-  it("parses sessionId from result.content[0].text if present", async () => {
-    executor = new OpenClawExecutor(mockApi, {
-      gatewayUrl: "http://127.0.0.1:18789",
-      gatewayToken: "test-token-123",
+  it("uses custom timeout from opts", async () => {
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
+      meta: { durationMs: 1000, agentMeta: { sessionId: "s4", provider: "a", model: "m" } },
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        result: {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({ sessionId: "session-nested-001" }),
-            },
-          ],
-        },
-      }),
+    await executor.spawn(taskContext, { timeoutMs: 60_000 });
+    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
+
+    const params = mockRunEmbeddedPiAgent.mock.calls[0][0];
+    expect(params.timeoutMs).toBe(60_000);
+  });
+
+  it("returns generated sessionId (not agentMeta sessionId) since dispatch is fire-and-forget", async () => {
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
+      meta: { durationMs: 1000 },
     });
 
     const result = await executor.spawn(taskContext);
 
-    expect(result).toEqual({
-      success: true,
-      sessionId: "session-nested-001",
-    });
+    expect(result.success).toBe(true);
+    expect(result.sessionId).toBe("test-uuid-1234");
   });
 
-  it("parses childSessionKey from result.content[0].text if present", async () => {
-    executor = new OpenClawExecutor(mockApi, {
-      gatewayUrl: "http://127.0.0.1:18789",
-      gatewayToken: "test-token-123",
-    });
-
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        result: {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({ childSessionKey: "child-session-text-001" }),
-            },
-          ],
-        },
-      }),
-    });
-
-    const result = await executor.spawn(taskContext);
-
-    expect(result).toEqual({
-      success: true,
-      sessionId: "child-session-text-001",
-    });
-  });
-
-  it("parses childSessionKey from result.details if present", async () => {
-    executor = new OpenClawExecutor(mockApi, {
-      gatewayUrl: "http://127.0.0.1:18789",
-      gatewayToken: "test-token-123",
-    });
-
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        result: {
-          details: {
-            childSessionKey: "child-session-details-001",
-          },
-        },
-      }),
-    });
-
-    const result = await executor.spawn(taskContext);
-
-    expect(result).toEqual({
-      success: true,
-      sessionId: "child-session-details-001",
-    });
-  });
-
-  it("parses runId from result.details if present", async () => {
-    executor = new OpenClawExecutor(mockApi, {
-      gatewayUrl: "http://127.0.0.1:18789",
-      gatewayToken: "test-token-123",
-    });
-
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        result: {
-          details: {
-            runId: "run-details-001",
-          },
-        },
-      }),
-    });
-
-    const result = await executor.spawn(taskContext);
-
-    expect(result).toEqual({
-      success: true,
-      sessionId: "run-details-001",
-    });
-  });
-
-  it("parses sessionId from result field if present", async () => {
-    executor = new OpenClawExecutor(mockApi, {
-      gatewayUrl: "http://127.0.0.1:18789",
-      gatewayToken: "test-token-123",
-    });
-
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        result: { sessionId: "session-result-001" },
-      }),
-    });
-
-    const result = await executor.spawn(taskContext);
-
-    expect(result).toEqual({
-      success: true,
-      sessionId: "session-result-001",
-    });
-  });
-
-  it("parses sessionId from data field if present", async () => {
-    executor = new OpenClawExecutor(mockApi, {
-      gatewayUrl: "http://127.0.0.1:18789",
-      gatewayToken: "test-token-123",
-    });
-
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        data: { sessionId: "session-data-001" },
-      }),
-    });
-
-    const result = await executor.spawn(taskContext);
-
-    expect(result).toEqual({
-      success: true,
-      sessionId: "session-data-001",
-    });
-  });
-
-  it("fallback: fetch fails + spawnAgent exists uses spawnAgent", async () => {
-    const apiWithSpawn = {
-      ...mockApi,
-      spawnAgent: vi.fn(async () => ({
-        success: true,
-        sessionId: "session-fallback-001",
-      })),
-    };
-
-    executor = new OpenClawExecutor(apiWithSpawn, {
-      gatewayUrl: "http://127.0.0.1:18789",
-      gatewayToken: "test-token-123",
-    });
-
-    // Fetch fails for both agent ID formats
-    mockFetch.mockRejectedValue(new Error("Network error"));
-
-    const result = await executor.spawn(taskContext);
-
-    // HTTP tried first (2 agent ID formats), then falls back to spawnAgent
-    expect(mockFetch).toHaveBeenCalledTimes(2);
-    expect(apiWithSpawn.spawnAgent).toHaveBeenCalledTimes(1);
-    expect(result).toEqual({
-      success: true,
-      sessionId: "session-fallback-001",
-    });
-  });
-
-  it("no dispatch: no config + no spawnAgent returns failure result", async () => {
-    const apiNoConfig = {} as OpenClawApi;
-    executor = new OpenClawExecutor(apiNoConfig);
-
-    const result = await executor.spawn(taskContext);
-
-    expect(mockFetch).not.toHaveBeenCalled();
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("No dispatch method");
-  });
-
-  it("resolves config from env vars when not in constructor opts", async () => {
-    process.env.OPENCLAW_GATEWAY_URL = "http://127.0.0.1:19000";
-    process.env.OPENCLAW_GATEWAY_TOKEN = "env-token-456";
-
-    executor = new OpenClawExecutor(mockApi);
-
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ sessionId: "session-env-001" }),
-    });
-
-    await executor.spawn(taskContext);
-
-    expect(mockFetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:19000/tools/invoke",
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          "Authorization": "Bearer env-token-456",
-        }),
-      })
-    );
-
-    delete process.env.OPENCLAW_GATEWAY_URL;
-    delete process.env.OPENCLAW_GATEWAY_TOKEN;
-  });
-
-  it("resolves config from api.config.gateway when no opts or env", async () => {
-    executor = new OpenClawExecutor(mockApi);
-
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ sessionId: "session-api-config-001" }),
-    });
-
-    await executor.spawn(taskContext);
-
-    expect(mockFetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:18789/tools/invoke",
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          "Authorization": "Bearer test-token-123",
-        }),
-      })
-    );
-  });
-
-  it("prioritizes constructor opts over env vars", async () => {
-    process.env.OPENCLAW_GATEWAY_URL = "http://127.0.0.1:19000";
-    process.env.OPENCLAW_GATEWAY_TOKEN = "env-token-456";
-
-    executor = new OpenClawExecutor(mockApi, {
-      gatewayUrl: "http://127.0.0.1:20000",
-      gatewayToken: "opts-token-789",
-    });
-
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ sessionId: "session-opts-001" }),
-    });
-
-    await executor.spawn(taskContext);
-
-    expect(mockFetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:20000/tools/invoke",
-      expect.any(Object)
-    );
-
-    delete process.env.OPENCLAW_GATEWAY_URL;
-    delete process.env.OPENCLAW_GATEWAY_TOKEN;
-  });
-
-  it("uses 60s timeout via AbortSignal", async () => {
-    executor = new OpenClawExecutor(mockApi, {
-      gatewayUrl: "http://127.0.0.1:18789",
-      gatewayToken: "test-token-123",
-    });
-
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ sessionId: "session-timeout-001" }),
-    });
-
-    await executor.spawn(taskContext);
-
-    const signal = mockFetch.mock.calls[0][1].signal;
-    expect(signal).toBeInstanceOf(AbortSignal);
-  });
-
-  it("handles HTTP error responses gracefully", async () => {
-    executor = new OpenClawExecutor(mockApi, {
-      gatewayUrl: "http://127.0.0.1:18789",
-      gatewayToken: "test-token-123",
-    });
-
-    // HTTP error for both agent ID formats
-    mockFetch.mockResolvedValue({
-      ok: false,
-      status: 500,
-      statusText: "Internal Server Error",
-    });
+  it("returns setup failure when ensureAgentWorkspace throws", async () => {
+    mockEnsureAgentWorkspace.mockRejectedValueOnce(new Error("Disk full"));
 
     const result = await executor.spawn(taskContext);
 
     expect(result.success).toBe(false);
-    // After HTTP fails for all formats, it tries spawnAgent and that also fails
-    // So the final error is about agent not found
-    expect(result.error).toBeDefined();
+    expect(result.error).toContain("Disk full");
   });
 });

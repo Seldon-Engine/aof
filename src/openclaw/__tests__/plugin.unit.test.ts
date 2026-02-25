@@ -144,13 +144,11 @@ describe("AOF OpenClaw plugin entrypoint", () => {
     });
   });
 
-  it("forwards gatewayUrl and gatewayToken from plugin config", () => {
+  it("forwards dryRun from plugin config", () => {
     const spy = vi.spyOn(adapter, "registerAofPlugin");
     const { api } = createStrictApi({
       pluginConfig: {
         dataDir: "/tmp/aof",
-        gatewayUrl: "http://127.0.0.1:18789",
-        gatewayToken: "test-token-123",
         dryRun: false,
       },
     });
@@ -159,8 +157,8 @@ describe("AOF OpenClaw plugin entrypoint", () => {
 
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy.mock.calls[0]?.[1]).toMatchObject({
-      gatewayUrl: "http://127.0.0.1:18789",
-      gatewayToken: "test-token-123",
+      dataDir: "/tmp/aof",
+      dryRun: false,
     });
   });
 });

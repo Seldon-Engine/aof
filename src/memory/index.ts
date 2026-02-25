@@ -104,7 +104,7 @@ export function registerMemoryModule(api: OpenClawApi): void {
   const embeddingProvider = new OpenAIEmbeddingProvider({
     model: embCfg.model,
     baseUrl: embCfg.baseUrl,
-    apiKey: embCfg.apiKey,
+    apiKey: embCfg.apiKey ?? process.env.OPENAI_API_KEY,
     dimensions,
   });
 

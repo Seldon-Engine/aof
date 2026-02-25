@@ -78,17 +78,10 @@ describe("BUG-001: Executor Wiring (P0)", () => {
     await service.stop();
   });
 
-  it("BUG-001: executor works with HTTP dispatch (no spawnAgent required)", async () => {
-    const apiWithoutSpawn = {
-      ...mockApi,
-      spawnAgent: undefined,
-    };
-
-    const service = registerAofPlugin(apiWithoutSpawn, {
+  it("BUG-001: executor works with embedded agent dispatch (no HTTP required)", async () => {
+    const service = registerAofPlugin(mockApi, {
       dataDir: "/tmp/aof-test",
       dryRun: false,
-      gatewayUrl: "http://127.0.0.1:18789",
-      gatewayToken: "test-token",
     });
 
     expect(service).toBeDefined();

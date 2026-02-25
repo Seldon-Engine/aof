@@ -411,7 +411,7 @@ export async function poll(
     // Alert when no successful dispatches in active mode
     if (actionsExecuted === 0 && stats.ready > 0 && actionsFailed > 0) {
       console.error(`[AOF] ALERT: No successful dispatches this poll (${stats.ready} ready, ${actionsFailed} failed)`);
-      console.error(`[AOF] ALERT: Check spawnAgent API availability and agent registry`);
+      console.error(`[AOF] ALERT: Check gateway credentials and agent registry`);
     }
   }
 

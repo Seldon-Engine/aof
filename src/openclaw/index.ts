@@ -3,7 +3,7 @@
  */
 
 export { registerAofPlugin, type AOFPluginOptions } from "./adapter.js";
-export { OpenClawExecutor, type OpenClawExecutorOptions } from "./executor.js";
+export { OpenClawExecutor } from "./executor.js";
 export { MatrixNotifier, MockMatrixMessageTool, type MatrixMessageTool } from "./matrix-notifier.js";
 export type {
   OpenClawServiceDefinition,
@@ -11,6 +11,4 @@ export type {
   OpenClawToolOpts,
   OpenClawHttpRouteDefinition,
   OpenClawApi,
-  SpawnAgentRequest,
-  SpawnAgentResponse,
 } from "./types.js";

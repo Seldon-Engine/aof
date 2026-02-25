@@ -35,40 +35,10 @@ export interface OpenClawHttpRouteDefinition {
   handler: GatewayHandler;
 }
 
-export interface SpawnAgentRequest {
-  agentId: string;
-  task: string;
-  context?: Record<string, unknown>;
-  timeoutMs?: number;
-}
-
-export interface SpawnAgentResponse {
-  success: boolean;
-  sessionId?: string;
-  error?: string;
-}
-
-// --- HTTP Dispatch Types ---
-
-export interface OpenClawGatewayConfig {
-  url?: string;
-  token?: string;
-  port?: number;
-  auth?: { token?: string };
-}
-
-export interface OpenClawExecutorOptions {
-  gatewayUrl?: string;
-  gatewayToken?: string;
-}
-
 // --- API Interface ---
 
 export interface OpenClawApi {
-  config?: {
-    gateway?: OpenClawGatewayConfig;
-    [key: string]: unknown;
-  };
+  config?: Record<string, unknown>;
   pluginConfig?: Record<string, unknown>;
   logger?: { info(msg: string): void; warn?(msg: string): void; error(msg: string): void; debug?(msg: string): void };
   log?(level: string, msg: string): void;
@@ -78,5 +48,4 @@ export interface OpenClawApi {
   registerHttpRoute?(def: OpenClawHttpRouteDefinition): void;
   registerCli?(registrar: (...args: unknown[]) => void, opts?: { commands: string[] }): void;
   on(event: string, handler: (...args: unknown[]) => void): void;
-  spawnAgent?(req: SpawnAgentRequest): Promise<SpawnAgentResponse>;
 }
