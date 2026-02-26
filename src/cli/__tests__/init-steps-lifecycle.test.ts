@@ -15,7 +15,7 @@ vi.mock("../../packaging/openclaw-cli.js", () => ({
   openclawConfigGet: vi.fn(),
   execFileAsync: vi.fn(),
 }));
-vi.mock("../commands/daemon.js", () => ({ daemonStart: vi.fn() }));
+vi.mock("../../daemon/service-file.js", () => ({ installService: vi.fn() }));
 
 import { confirm } from "@inquirer/prompts";
 import { readFile, access } from "node:fs/promises";
@@ -23,7 +23,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import { OrgChart } from "../../schemas/org-chart.js";
 import { isAofInAllowList, openclawConfigGet, execFileAsync } from "../../packaging/openclaw-cli.js";
-import { daemonStart } from "../commands/daemon.js";
+import { installService } from "../../daemon/service-file.js";
 import { runLintStep, runRestartStep, runDaemonStep } from "../init-steps-lifecycle.js";
 
 function makeState(): WizardState {
@@ -156,13 +156,13 @@ describe("runDaemonStep", () => {
     killSpy.mockRestore();
   });
 
-  it("11: PID file absent + user confirms → calls daemonStart, daemonRunning=true", async () => {
+  it("11: PID file absent + user confirms → calls installService, daemonRunning=true", async () => {
     vi.mocked(existsSync).mockReturnValue(false);
     vi.mocked(confirm).mockResolvedValue(true);
-    vi.mocked(daemonStart).mockResolvedValue(undefined);
+    vi.mocked(installService).mockResolvedValue({ platform: "darwin", servicePath: "/tmp/test.plist", started: true });
     const state = makeState();
     await runDaemonStep(state, false);
-    expect(daemonStart).toHaveBeenCalled();
+    expect(installService).toHaveBeenCalled();
     expect(state.daemonRunning).toBe(true);
   });
 
@@ -175,12 +175,12 @@ describe("runDaemonStep", () => {
     expect(state.skipped).toContain("AOF daemon start");
   });
 
-  it("13: daemonStart throws → warning added, daemonRunning=false", async () => {
+  it("13: installService throws → warning added, daemonRunning=false", async () => {
     vi.mocked(existsSync).mockReturnValue(false);
-    vi.mocked(daemonStart).mockRejectedValue(new Error("port in use"));
+    vi.mocked(installService).mockRejectedValue(new Error("port in use"));
     const state = makeState();
     await runDaemonStep(state, true);
     expect(state.daemonRunning).toBe(false);
-    expect(state.warnings.some((w) => w.includes("Daemon start failed"))).toBe(true);
+    expect(state.warnings.some((w) => w.includes("Daemon install failed"))).toBe(true);
   });
 });
