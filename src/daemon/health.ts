@@ -2,6 +2,7 @@ import type { ITaskStore } from "../store/interfaces.js";
 
 export interface HealthStatus {
   status: "healthy" | "degraded" | "unhealthy";
+  version: string;
   uptime: number;
   lastPollAt: number;
   lastEventAt: number;
@@ -12,6 +13,16 @@ export interface HealthStatus {
     blocked: number;
     done: number;
   };
+  components: {
+    scheduler: "running" | "stopped";
+    store: "ok" | "error";
+    eventLogger: "ok" | "error";
+  };
+  config: {
+    dataDir: string;
+    pollIntervalMs: number;
+    providersConfigured: number;
+  };
 }
 
 export interface DaemonState {
@@ -20,11 +31,38 @@ export interface DaemonState {
   uptime: number;
 }
 
+/** Extended state for rich /status responses. */
+export interface DaemonStatusContext {
+  version: string;
+  dataDir: string;
+  pollIntervalMs: number;
+  providersConfigured: number;
+  schedulerRunning: boolean;
+  eventLoggerOk: boolean;
+}
+
 const STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+
+/** Whether the daemon process is in shutdown mode. */
+let shuttingDown = false;
+
+/** Mark the daemon as shutting down (liveness will report error). */
+export function setShuttingDown(value: boolean): void {
+  shuttingDown = value;
+}
+
+/**
+ * Minimal liveness check for supervisor watchdog.
+ * No store queries, no async work -- returns synchronously.
+ */
+export function getLivenessStatus(): { status: "ok" | "error" } {
+  return { status: shuttingDown ? "error" : "ok" };
+}
 
 export async function getHealthStatus(
   state: DaemonState,
   store: ITaskStore,
+  context?: DaemonStatusContext,
 ): Promise<HealthStatus> {
   const now = Date.now();
 
@@ -58,9 +96,20 @@ export async function getHealthStatus(
 
   return {
     status,
+    version: context?.version ?? "unknown",
     uptime: state.uptime,
     lastPollAt: state.lastPollAt,
     lastEventAt: state.lastEventAt,
     taskCounts,
+    components: {
+      scheduler: context?.schedulerRunning ?? !isStale ? "running" : "stopped",
+      store: storeHealthy ? "ok" : "error",
+      eventLogger: context?.eventLoggerOk ?? true ? "ok" : "error",
+    },
+    config: {
+      dataDir: context?.dataDir ?? "unknown",
+      pollIntervalMs: context?.pollIntervalMs ?? 0,
+      providersConfigured: context?.providersConfigured ?? 0,
+    },
   };
 }
