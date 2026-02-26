@@ -190,12 +190,16 @@ describe("AOF daemon", () => {
 
       expect(existsSync(pidFile)).toBe(true);
 
-      // Simulate SIGTERM
+      // Simulate SIGTERM — handler is now async (drain-aware)
       process.emit("SIGTERM" as any);
 
-      // PID file should be removed
+      // Wait for async drain to complete (poller resolves instantly, so drain is fast)
+      await vi.waitFor(() => {
+        expect(exitSpy).toHaveBeenCalledWith(0);
+      }, { timeout: 2000 });
+
+      // PID file should be removed after drain completes
       expect(existsSync(pidFile)).toBe(false);
-      expect(exitSpy).toHaveBeenCalledWith(0);
 
       // Restore and clean up
       exitSpy.mockRestore();

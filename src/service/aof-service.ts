@@ -10,6 +10,9 @@ import { parseProtocolMessage, ProtocolRouter } from "../protocol/router.js";
 import { discoverProjects, type ProjectRecord } from "../projects/index.js";
 import { createMurmurHook } from "../dispatch/murmur-hooks.js";
 
+/** Maximum time to wait for in-flight polls to complete during shutdown (ms). */
+const DRAIN_TIMEOUT_MS = 10_000;
+
 export interface AOFServiceConfig {
   dataDir: string;
   dryRun?: boolean;
@@ -147,8 +150,48 @@ export class AOFService {
   async stop(): Promise<void> {
     if (!this.running) return;
     this.running = false;
+
+    // 1. Stop scheduling new polls
     if (this.pollTimer) clearInterval(this.pollTimer);
     this.pollTimer = undefined;
+
+    // 2. Wait for in-flight poll with drain timeout
+    const drainStart = Date.now();
+
+    console.info("[AOF] Drain started — waiting for in-flight transitions...");
+    try {
+      await this.logger.logSystem("system.shutdown", {
+        drainTimeoutMs: DRAIN_TIMEOUT_MS,
+        reason: "stop_signal",
+      });
+    } catch {
+      // Logging errors should not block shutdown
+    }
+
+    // Countdown logger
+    const countdownTimer = setInterval(() => {
+      const remaining = Math.max(0, Math.round((DRAIN_TIMEOUT_MS - (Date.now() - drainStart)) / 1000));
+      console.info(`[AOF] Drain in progress... ${remaining}s remaining`);
+    }, 2000);
+
+    try {
+      await Promise.race([
+        this.pollQueue,
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error("drain_timeout")), DRAIN_TIMEOUT_MS)
+        ),
+      ]);
+      console.info(`[AOF] Drain complete — all transitions finished (${Date.now() - drainStart}ms)`);
+    } catch (err) {
+      if ((err as Error).message === "drain_timeout") {
+        console.warn(`[AOF] Drain timeout after ${DRAIN_TIMEOUT_MS}ms — forcing exit`);
+        console.warn("[AOF] Orphaned tasks will be reclaimed on next startup");
+      } else {
+        console.error(`[AOF] Drain error: ${(err as Error).message}`);
+      }
+    } finally {
+      clearInterval(countdownTimer);
+    }
   }
 
   async handleSessionEnd(_event?: unknown): Promise<void> {

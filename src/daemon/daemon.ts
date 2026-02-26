@@ -80,21 +80,6 @@ export async function startAofDaemon(opts: AOFDaemonOptions): Promise<AOFDaemonC
     }
   });
 
-  // Handle SIGTERM/SIGINT
-  process.on("SIGTERM", () => {
-    if (existsSync(lockFile)) {
-      unlinkSync(lockFile);
-    }
-    process.exit(0);
-  });
-
-  process.on("SIGINT", () => {
-    if (existsSync(lockFile)) {
-      unlinkSync(lockFile);
-    }
-    process.exit(0);
-  });
-
   await service.start();
 
   // Start health server if enabled
@@ -110,12 +95,25 @@ export async function startAofDaemon(opts: AOFDaemonOptions): Promise<AOFDaemonC
     };
 
     healthServer = createHealthServer(
-      getState, 
-      store, 
-      opts.healthPort ?? 3000, 
+      getState,
+      store,
+      opts.healthPort ?? 3000,
       opts.healthBind ?? "127.0.0.1"
     );
   }
+
+  // Handle SIGTERM/SIGINT with drain-aware shutdown
+  // Registered after service.start() and health server creation
+  // so both are accessible for graceful shutdown.
+  const drainAndExit = async () => {
+    await service.stop(); // Includes drain protocol (waits up to 10s for in-flight polls)
+    if (healthServer) healthServer.close();
+    if (existsSync(lockFile)) unlinkSync(lockFile);
+    process.exit(0);
+  };
+
+  process.on("SIGTERM", () => { void drainAndExit(); });
+  process.on("SIGINT", () => { void drainAndExit(); });
 
   return { service, healthServer };
 }
