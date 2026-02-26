@@ -1,6 +1,6 @@
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { homedir } from "node:os";
-import type { OpenClawApi } from "../openclaw/types.js";
+import type { OpenClawApi, OpenClawToolDefinition } from "../openclaw/types.js";
 import type { SqliteDb } from "./types.js";
 import { existsSync } from "node:fs";
 import { initMemoryDb } from "./store/schema.js";
@@ -18,9 +18,12 @@ import { createMemoryDeleteTool } from "./tools/delete.js";
 import { createMemoryListTool } from "./tools/list.js";
 import { memoryGetTool } from "./tools/get.js";
 import { IndexSyncService } from "./tools/indexing.js";
+import { getProjectMemoryStore, saveAllProjectMemory } from "./project-memory.js";
 
 export { generateMemoryConfig, resolvePoolPath } from "./generator.js";
 export { auditMemoryConfig, formatMemoryAuditReport } from "./audit.js";
+export { getProjectMemoryStore, saveAllProjectMemory, clearProjectMemoryCache } from "./project-memory.js";
+export type { ProjectMemoryStore } from "./project-memory.js";
 
 // ─── Memory module registration (AOF-a39) ────────────────────────────────────
 
@@ -76,6 +79,21 @@ export function rebuildHnswFromDb(db: SqliteDb, hnsw: HnswIndex): void {
   // Track last rebuild time in memory_meta
   ensureMemoryMeta(db);
   db.prepare("INSERT OR REPLACE INTO memory_meta (key, value) VALUES ('last_rebuild_time', datetime('now'))").run();
+}
+
+/** Add `project` parameter to a tool's schema. */
+function _addProjectParam(tool: OpenClawToolDefinition): OpenClawToolDefinition["parameters"] {
+  return {
+    type: tool.parameters?.type ?? "object",
+    properties: {
+      ...(tool.parameters?.properties ?? {}),
+      project: {
+        type: "string",
+        description: "Project ID to scope this memory operation to. Omit for global memory.",
+      },
+    },
+    required: tool.parameters?.required,
+  };
 }
 
 export function registerMemoryModule(api: OpenClawApi): void {
@@ -152,17 +170,130 @@ export function registerMemoryModule(api: OpenClawApi): void {
     : null;
   const topKBeforeRerank = memoryCfg.reranker?.topKBeforeRerank;
 
-  api.registerTool(
-    createMemorySearchTool({
-      embeddingProvider,
-      searchEngine,
-      ...(reranker ? { reranker, topKBeforeRerank } : {}),
-    }),
-  );
-  api.registerTool(createMemoryStoreTool({ db, embeddingProvider, vectorStore, ftsStore, poolPaths, defaultPool, defaultTier }));
-  api.registerTool(createMemoryUpdateTool({ db, embeddingProvider, vectorStore, ftsStore }));
-  api.registerTool(createMemoryDeleteTool({ db, vectorStore, ftsStore }));
-  api.registerTool(createMemoryListTool({ db, defaultLimit }));
+  // ─── Project-aware tool helpers ────────────────────────────────────────────
+  // Each memory tool accepts an optional `project` param. When provided, the
+  // tool resolves the project-specific memory store and delegates to a
+  // project-scoped tool instance. When absent, the global store is used.
+
+  const vaultRoot = resolve(dataDir, "..");
+
+  /** Resolve project root from a project ID. */
+  const getProjectRoot = (projectId: string): string =>
+    join(vaultRoot, "Projects", projectId);
+
+  // ─── memory_search (project-aware) ──────────────────────────────────────────
+  const globalSearchTool = createMemorySearchTool({
+    embeddingProvider,
+    searchEngine,
+    ...(reranker ? { reranker, topKBeforeRerank } : {}),
+  });
+
+  api.registerTool({
+    ...globalSearchTool,
+    parameters: _addProjectParam(globalSearchTool),
+    execute: async (id: string, params: Record<string, unknown>) => {
+      const projectId = params.project as string | undefined;
+      if (projectId) {
+        const projectMemory = getProjectMemoryStore(getProjectRoot(projectId), dimensions);
+        const projectSearchTool = createMemorySearchTool({
+          embeddingProvider,
+          searchEngine: projectMemory.searchEngine,
+          ...(reranker ? { reranker, topKBeforeRerank } : {}),
+        });
+        return projectSearchTool.execute(id, params);
+      }
+      return globalSearchTool.execute(id, params);
+    },
+  });
+
+  // ─── memory_store (project-aware) ───────────────────────────────────────────
+  const globalStoreTool = createMemoryStoreTool({ db, embeddingProvider, vectorStore, ftsStore, poolPaths, defaultPool, defaultTier });
+
+  api.registerTool({
+    ...globalStoreTool,
+    parameters: _addProjectParam(globalStoreTool),
+    execute: async (id: string, params: Record<string, unknown>) => {
+      const projectId = params.project as string | undefined;
+      if (projectId) {
+        const pRoot = getProjectRoot(projectId);
+        const projectMemory = getProjectMemoryStore(pRoot, dimensions);
+        const projectPoolPaths: Record<string, string> = { core: join(pRoot, "memory") };
+        const projectTool = createMemoryStoreTool({
+          db: projectMemory.db,
+          embeddingProvider,
+          vectorStore: projectMemory.vectorStore,
+          ftsStore: projectMemory.ftsStore,
+          poolPaths: projectPoolPaths,
+          defaultPool,
+          defaultTier,
+        });
+        return projectTool.execute(id, params);
+      }
+      return globalStoreTool.execute(id, params);
+    },
+  });
+
+  // ─── memory_update (project-aware) ──────────────────────────────────────────
+  const globalUpdateTool = createMemoryUpdateTool({ db, embeddingProvider, vectorStore, ftsStore });
+
+  api.registerTool({
+    ...globalUpdateTool,
+    parameters: _addProjectParam(globalUpdateTool),
+    execute: async (id: string, params: Record<string, unknown>) => {
+      const projectId = params.project as string | undefined;
+      if (projectId) {
+        const projectMemory = getProjectMemoryStore(getProjectRoot(projectId), dimensions);
+        const projectTool = createMemoryUpdateTool({
+          db: projectMemory.db,
+          embeddingProvider,
+          vectorStore: projectMemory.vectorStore,
+          ftsStore: projectMemory.ftsStore,
+        });
+        return projectTool.execute(id, params);
+      }
+      return globalUpdateTool.execute(id, params);
+    },
+  });
+
+  // ─── memory_delete (project-aware) ──────────────────────────────────────────
+  const globalDeleteTool = createMemoryDeleteTool({ db, vectorStore, ftsStore });
+
+  api.registerTool({
+    ...globalDeleteTool,
+    parameters: _addProjectParam(globalDeleteTool),
+    execute: async (id: string, params: Record<string, unknown>) => {
+      const projectId = params.project as string | undefined;
+      if (projectId) {
+        const projectMemory = getProjectMemoryStore(getProjectRoot(projectId), dimensions);
+        const projectTool = createMemoryDeleteTool({
+          db: projectMemory.db,
+          vectorStore: projectMemory.vectorStore,
+          ftsStore: projectMemory.ftsStore,
+        });
+        return projectTool.execute(id, params);
+      }
+      return globalDeleteTool.execute(id, params);
+    },
+  });
+
+  // ─── memory_list (project-aware) ────────────────────────────────────────────
+  const globalListTool = createMemoryListTool({ db, defaultLimit });
+
+  api.registerTool({
+    ...globalListTool,
+    parameters: _addProjectParam(globalListTool),
+    execute: (id: string, params: Record<string, unknown>) => {
+      const projectId = params.project as string | undefined;
+      if (projectId) {
+        const projectMemory = getProjectMemoryStore(getProjectRoot(projectId), dimensions);
+        const projectTool = createMemoryListTool({ db: projectMemory.db, defaultLimit });
+        return projectTool.execute(id, params);
+      }
+      return globalListTool.execute(id, params);
+    },
+  });
+
+  // ─── memory_get (unchanged -- operates by chunk ID across global DB) ────────
   api.registerTool(memoryGetTool);
 
   const syncService = new IndexSyncService({
@@ -187,6 +318,7 @@ export function registerMemoryModule(api: OpenClawApi): void {
       } catch {
         // Non-critical: index will be rebuilt from sqlite on next start
       }
+      saveAllProjectMemory();
     },
   });
 }
