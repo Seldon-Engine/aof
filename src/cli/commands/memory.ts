@@ -1,14 +1,88 @@
 /**
  * Memory management CLI commands.
- * Registers memory V2 commands (generate, audit, aggregate, promote, curate).
+ * Registers memory V2 commands (generate, audit, aggregate, promote, curate, health, rebuild).
  */
 
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { existsSync } from "node:fs";
 import type { Command } from "commander";
+import type { SqliteDb } from "../../memory/types.js";
+import type { HnswIndex } from "../../memory/store/hnsw-index.js";
 import { generateMemoryConfigFile, auditMemoryConfigFile } from "../../commands/memory.js";
 import { loadOrgChart } from "../../org/index.js";
 import { FilesystemTaskStore } from "../../store/task-store.js";
+
+// ─── Health Report Types ────────────────────────────────────────────────────
+
+export type PoolBreakdown = {
+  pool: string;
+  count: number;
+};
+
+export type HealthReport = {
+  hnswCount: number;
+  sqliteCount: number;
+  syncStatus: "ok" | "desynced";
+  fragmentationPct: number;
+  lastRebuildTime: string | null;
+  pools: PoolBreakdown[];
+};
+
+/**
+ * Compute a health report from the given SQLite database and HNSW index.
+ * This is a pure function (given its inputs) and can be unit-tested without the full CLI.
+ */
+export function computeHealthReport(db: SqliteDb, hnsw: HnswIndex): HealthReport {
+  const hnswCount = hnsw.count;
+  const sqliteCount = (db.prepare("SELECT COUNT(*) as c FROM vec_chunks").get() as { c: number }).c;
+  const syncStatus = hnswCount === sqliteCount ? "ok" : "desynced";
+
+  const maxEl = hnsw.maxElements;
+  const fragmentationPct = maxEl > 0
+    ? Math.round(((maxEl - hnswCount) / maxEl) * 1000) / 10
+    : 0;
+
+  // memory_meta may not exist yet
+  let lastRebuildTime: string | null = null;
+  try {
+    const row = db.prepare("SELECT value FROM memory_meta WHERE key = 'last_rebuild_time'").get() as { value: string } | undefined;
+    lastRebuildTime = row?.value ?? null;
+  } catch {
+    // Table doesn't exist yet — that's fine
+  }
+
+  const poolRows = db.prepare("SELECT pool, COUNT(*) as count FROM chunks GROUP BY pool").all() as Array<{ pool: string | null; count: number }>;
+  const pools: PoolBreakdown[] = poolRows.map((r) => ({
+    pool: r.pool ?? "(none)",
+    count: r.count,
+  }));
+
+  return {
+    hnswCount,
+    sqliteCount,
+    syncStatus,
+    fragmentationPct,
+    lastRebuildTime,
+    pools,
+  };
+}
+
+function printHealthReport(report: HealthReport): void {
+  console.log("Memory Health Report");
+  console.log(`  HNSW count:      ${report.hnswCount}`);
+  console.log(`  SQLite count:    ${report.sqliteCount}`);
+  console.log(`  Sync status:     ${report.syncStatus}`);
+  console.log(`  Fragmentation:   ${report.fragmentationPct}%`);
+  console.log(`  Last rebuild:    ${report.lastRebuildTime ?? "never"}`);
+  if (report.pools.length > 0) {
+    console.log("");
+    console.log("  Pool Breakdown:");
+    for (const p of report.pools) {
+      console.log(`    ${p.pool.padEnd(15)}${p.count}`);
+    }
+  }
+}
 
 function printImportReport(report: import("../../memory/import/index.js").ImportReport): void {
   console.log("\n🔍 Memory Import Audit");
@@ -348,5 +422,184 @@ export function registerMemoryCommands(program: Command): void {
       });
       printImportReport(report);
       if (report.errors.length > 0) process.exitCode = 1;
+    });
+
+  // ─── Health command ─────────────────────────────────────────────────────
+
+  memory
+    .command("health")
+    .description("Show memory index health metrics")
+    .option("--json", "Output as JSON", false)
+    .action(async (opts: { json: boolean }) => {
+      const root = program.opts()["root"] as string;
+      const { initMemoryDb } = await import("../../memory/store/schema.js");
+      const { HnswIndex: HnswIndexClass } = await import("../../memory/store/hnsw-index.js");
+
+      const dbPath = join(root, "memory.db");
+      const hnswPath = dbPath.replace(/\.db$/, "-hnsw.dat");
+
+      // Load HNSW to discover dimensions, then open DB with those dimensions
+      let dimensions = 768; // default fallback
+      let hnswFound = true;
+
+      const tempHnsw = new HnswIndexClass(dimensions);
+      if (existsSync(hnswPath)) {
+        try {
+          tempHnsw.load(hnswPath);
+          dimensions = tempHnsw.dimensions;
+        } catch {
+          console.error("HNSW index corrupt or unreadable.");
+          hnswFound = false;
+        }
+      } else {
+        console.error("HNSW index: NOT FOUND");
+        hnswFound = false;
+      }
+
+      const db = initMemoryDb(dbPath, dimensions);
+
+      // If HNSW wasn't loadable, create a fresh (empty) one for reporting
+      const hnsw = hnswFound ? tempHnsw : new HnswIndexClass(dimensions);
+
+      const report = computeHealthReport(db, hnsw);
+      db.close();
+
+      if (opts.json) {
+        console.log(JSON.stringify(report, null, 2));
+      } else {
+        printHealthReport(report);
+      }
+    });
+
+  // ─── Rebuild command ────────────────────────────────────────────────────
+
+  memory
+    .command("rebuild")
+    .description("Rebuild HNSW index from SQLite")
+    .option("--yes", "Skip confirmation prompt", false)
+    .action(async (opts: { yes: boolean }) => {
+      const root = program.opts()["root"] as string;
+      const { initMemoryDb } = await import("../../memory/store/schema.js");
+      const { HnswIndex: HnswIndexClass } = await import("../../memory/store/hnsw-index.js");
+
+      const dbPath = join(root, "memory.db");
+      const hnswPath = dbPath.replace(/\.db$/, "-hnsw.dat");
+      const pidPath = join(root, "daemon.pid");
+
+      // Determine dimensions: try loading existing HNSW, fallback to 768
+      let dimensions = 768;
+      if (existsSync(hnswPath)) {
+        try {
+          const probe = new HnswIndexClass(dimensions);
+          probe.load(hnswPath);
+          dimensions = probe.dimensions;
+        } catch {
+          // Corrupt — we'll rebuild anyway
+        }
+      }
+
+      const db = initMemoryDb(dbPath, dimensions);
+
+      const totalChunks = (db.prepare("SELECT COUNT(*) as c FROM vec_chunks").get() as { c: number }).c;
+
+      // Check if daemon is running
+      if (existsSync(pidPath)) {
+        console.warn("Warning: Daemon appears to be running (PID file exists). The daemon will use the old index until restarted.");
+      }
+
+      // Confirmation prompt
+      if (!opts.yes) {
+        const { confirm } = await import("@inquirer/prompts");
+        const answer = await confirm({
+          message: `This will rebuild the HNSW index from SQLite (${totalChunks} chunks). Continue?`,
+          default: false,
+        });
+        if (!answer) {
+          console.log("Aborted.");
+          db.close();
+          return;
+        }
+      }
+
+      // Record before stats
+      let beforeCount = 0;
+      if (existsSync(hnswPath)) {
+        try {
+          const oldHnsw = new HnswIndexClass(dimensions);
+          oldHnsw.load(hnswPath);
+          beforeCount = oldHnsw.count;
+        } catch {
+          // Corrupt — before count stays 0
+        }
+      }
+
+      // Read all chunks from SQLite
+      const rows = db
+        .prepare("SELECT chunk_id, embedding FROM vec_chunks")
+        .all() as Array<{ chunk_id: bigint; embedding: Buffer }>;
+
+      const chunks = rows.map((row) => ({
+        id: Number(row.chunk_id),
+        embedding: Array.from(new Float32Array(row.embedding.buffer)),
+      }));
+
+      // Create new index and rebuild with progress
+      const hnsw = new HnswIndexClass(dimensions);
+      const capacity = Math.max(Math.ceil(chunks.length * 1.5), 10_000);
+      // We need to rebuild manually for progress reporting
+      // HnswIndex.rebuild() doesn't support progress callbacks
+      // So we access the internal structure via add() after initializing a fresh index
+
+      const startTime = Date.now();
+
+      if (process.stdout.isTTY) {
+        // Progress bar for TTY
+        const { SingleBar, Presets } = await import("cli-progress");
+        const bar = new SingleBar(
+          { format: "Indexing [{bar}] {percentage}% | {value}/{total} chunks | ETA: {eta}s" },
+          Presets.shades_classic,
+        );
+        // Rebuild using the internal rebuild method (no per-chunk progress)
+        // Instead we'll use add() one-by-one for progress
+        hnsw.rebuild([]); // Reset to empty with proper capacity
+        // Actually, let's use the rebuild chunks approach but chunk it
+        // The simplest: call hnsw.rebuild() and just show a spinner style
+        // But the plan says "progress bar during rebuild"
+        // So: build manually using add()
+        bar.start(chunks.length, 0);
+        for (const chunk of chunks) {
+          hnsw.add(chunk.id, chunk.embedding);
+          bar.increment();
+        }
+        bar.stop();
+      } else {
+        // Non-TTY: line-based progress
+        const step = Math.max(Math.floor(chunks.length / 10), 1);
+        for (let i = 0; i < chunks.length; i++) {
+          hnsw.add(chunks[i]!.id, chunks[i]!.embedding);
+          if ((i + 1) % step === 0 || i === chunks.length - 1) {
+            console.log(`Indexing: ${i + 1}/${chunks.length} chunks...`);
+          }
+        }
+      }
+
+      const durationMs = Date.now() - startTime;
+
+      // Save index
+      hnsw.save(hnswPath);
+
+      // Update last rebuild time
+      db.exec("CREATE TABLE IF NOT EXISTS memory_meta (key TEXT PRIMARY KEY, value TEXT)");
+      db.prepare("INSERT OR REPLACE INTO memory_meta (key, value) VALUES ('last_rebuild_time', datetime('now'))").run();
+
+      db.close();
+
+      // Print summary
+      const durationSec = (durationMs / 1000).toFixed(1);
+      console.log("");
+      console.log("Rebuild Complete");
+      console.log(`  Before:    ${beforeCount} elements${beforeCount !== totalChunks ? " (desynced)" : ""}`);
+      console.log(`  After:     ${hnsw.count} elements`);
+      console.log(`  Duration:  ${durationSec}s`);
     });
 }
