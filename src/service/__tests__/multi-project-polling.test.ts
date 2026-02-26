@@ -218,7 +218,7 @@ Test task for multi-project polling.
     const proj1 = await createProject("project-stats-1");
     const proj2 = await createProject("project-stats-2");
 
-    // Project 1: 2 ready, 1 in-progress
+    // Project 1: 2 ready, 1 in-progress (will be reclaimed to ready by FOUND-03 reconciliation)
     await createTask(proj1, "TASK-2026-02-12-005", { agent: "swe-backend" });
     await createTask(proj1, "TASK-2026-02-12-006", { agent: "swe-qa" });
     await createTask(proj1, "TASK-2026-02-12-007", { status: "in-progress" });
@@ -241,11 +241,12 @@ Test task for multi-project polling.
 
     const status = service.getStatus();
     expect(status.lastPollResult).toBeDefined();
-    
+
     const stats = status.lastPollResult!.stats;
     expect(stats.total).toBe(5);
-    // After dispatch, the 3 ready tasks become in-progress, plus the 1 that was already in-progress
-    expect(stats.inProgress).toBe(4);
+    // After FOUND-03 reconciliation, the 1 in-progress task is reclaimed to ready (4 ready total).
+    // Dispatch is limited by maxConcurrentDispatches (default 3), so 3 become in-progress.
+    expect(stats.inProgress).toBe(3);
     expect(stats.done).toBe(1);
 
     await service.stop();

@@ -271,4 +271,262 @@ describe("AOFService", () => {
     // ODD: after stop, running is false
     expect(service.getStatus().running).toBe(false);
   });
+
+  describe("Foundation Hardening (Phase 1)", () => {
+    // --- FOUND-01: Timeout guard tests ---
+    describe("poll timeout guard (FOUND-01)", () => {
+      it("aborts a poll that exceeds pollTimeoutMs", async () => {
+        // Poller that hangs forever (never resolves)
+        const hangingPoller = vi.fn(
+          () => new Promise<PollResult>(() => {/* never resolves */})
+        );
+        const service = new AOFService(
+          { store, logger, poller: hangingPoller },
+          { dataDir: tmpDir, pollIntervalMs: 60_000, dryRun: true, pollTimeoutMs: 100 },
+        );
+
+        await service.start();
+
+        // Wait for timeout to fire + some margin
+        await new Promise(r => setTimeout(r, 300));
+
+        // ODD: getStatus().lastError reflects the timeout
+        const status = service.getStatus();
+        expect(status.lastError).toContain("Poll timeout");
+        // Service is still running (not crashed)
+        expect(status.running).toBe(true);
+
+        await service.stop();
+      });
+
+      it("proceeds to next poll after timeout", async () => {
+        let callCount = 0;
+        // First call hangs, second call succeeds
+        const poller = vi.fn((): Promise<PollResult> => {
+          callCount++;
+          if (callCount === 1) {
+            return new Promise(() => {/* never resolves */});
+          }
+          return Promise.resolve(makePollResult());
+        });
+
+        const service = new AOFService(
+          { store, logger, poller },
+          { dataDir: tmpDir, pollIntervalMs: 200, dryRun: true, pollTimeoutMs: 100 },
+        );
+
+        await service.start();
+
+        // Wait for: first poll timeout (100ms) + interval (200ms) + second poll + margin
+        await new Promise(r => setTimeout(r, 600));
+
+        // ODD: poller was called at least twice (first timed out, second succeeded)
+        expect(poller.mock.calls.length).toBeGreaterThanOrEqual(2);
+        // ODD: after a successful poll, lastError should be cleared
+        const status = service.getStatus();
+        expect(status.lastError).toBeUndefined();
+
+        await service.stop();
+      });
+    });
+
+    // --- FOUND-02: Drain tests ---
+    describe("graceful drain (FOUND-02)", () => {
+      it("stop() waits for in-flight poll to complete", async () => {
+        // Poller that takes 500ms to complete
+        const slowPoller = vi.fn(
+          () => new Promise<PollResult>(resolve =>
+            setTimeout(() => resolve(makePollResult()), 500)
+          )
+        );
+
+        const service = new AOFService(
+          { store, logger, poller: slowPoller },
+          { dataDir: tmpDir, pollIntervalMs: 60_000, dryRun: true },
+        );
+
+        await service.start();
+
+        // Trigger a poll and immediately stop
+        const pollPromise = service["triggerPoll"]("test");
+        const stopStart = Date.now();
+        // Await pollPromise in parallel with stop so we don't deadlock
+        const [, ] = await Promise.all([pollPromise, service.stop()]);
+        const stopDuration = Date.now() - stopStart;
+
+        // ODD: stop() should have waited for the slow poll (~500ms), not returned instantly
+        expect(stopDuration).toBeGreaterThanOrEqual(300);
+      });
+
+      it("stop() force-exits after drain timeout", async () => {
+        // Poller that hangs forever but resolves a gate so we know it started
+        let pollStarted: () => void;
+        const pollStartedPromise = new Promise<void>(r => { pollStarted = r; });
+        const hangingPoller = vi.fn(
+          () => {
+            pollStarted!();
+            return new Promise<PollResult>(() => {/* never resolves */});
+          }
+        );
+
+        const service = new AOFService(
+          { store, logger, poller: hangingPoller },
+          // Poll timeout must be longer than drain timeout so the poll is
+          // still "in-flight" when drain fires. 60s poll timeout >> 10s drain.
+          { dataDir: tmpDir, pollIntervalMs: 60_000, dryRun: true, pollTimeoutMs: 60_000 },
+        );
+
+        // Don't await start() -- it blocks until triggerPoll("startup") completes,
+        // which includes runPoll(). Since the poller hangs and poll timeout is 60s,
+        // start() would block for 60s. Instead, fire-and-forget and wait for the
+        // poller to actually start.
+        void service.start();
+        await pollStartedPromise;
+
+        // The startup poll is now in-flight and hanging. Call stop().
+        // Drain timeout is 10s. We'll verify stop() completes.
+        const stopStart = Date.now();
+        await service.stop();
+        const stopDuration = Date.now() - stopStart;
+
+        // ODD: stop() should complete after drain timeout (~10s), not hang forever
+        // Using generous bounds to account for CI variability
+        expect(stopDuration).toBeGreaterThanOrEqual(9_000);
+        expect(stopDuration).toBeLessThan(15_000);
+      }, 20_000);
+
+      it("stop() returns quickly when no poll in flight", async () => {
+        const poller = vi.fn(async () => makePollResult());
+        const service = new AOFService(
+          { store, logger, poller },
+          { dataDir: tmpDir, pollIntervalMs: 60_000, dryRun: true },
+        );
+
+        await service.start();
+        // Wait for startup poll to finish
+        await new Promise(r => setTimeout(r, 50));
+
+        const stopStart = Date.now();
+        await service.stop();
+        const stopDuration = Date.now() - stopStart;
+
+        // ODD: stop() should return quickly (<500ms) when no poll is in-flight
+        expect(stopDuration).toBeLessThan(500);
+      });
+    });
+
+    // --- FOUND-03: Reconciliation tests ---
+    describe("startup orphan reconciliation (FOUND-03)", () => {
+      it("reclaims in-progress tasks on startup", async () => {
+        // Create a task and manually transition it to in-progress
+        const task = await store.create({
+          title: "Orphaned task",
+          priority: "normal",
+          routing: { agent: "swe-backend" },
+          createdBy: "test",
+        });
+        await store.transition(task.frontmatter.id, "ready");
+        await store.transition(task.frontmatter.id, "in-progress", {
+          agent: "swe-backend",
+        });
+
+        // Verify it's in-progress
+        const before = await store.get(task.frontmatter.id);
+        expect(before?.frontmatter.status).toBe("in-progress");
+
+        // Start a new service (simulates daemon restart)
+        const poller = vi.fn(async () => makePollResult());
+        const service = new AOFService(
+          { store, logger, poller },
+          { dataDir: tmpDir, pollIntervalMs: 60_000, dryRun: true },
+        );
+        await service.start();
+
+        // ODD: task should now be "ready" (reclaimed)
+        const after = await store.get(task.frontmatter.id);
+        expect(after?.frontmatter.status).toBe("ready");
+
+        await service.stop();
+      });
+
+      it("logs each reclaimed task individually", async () => {
+        const infoSpy = vi.spyOn(console, "info");
+
+        // Create 2 in-progress tasks
+        const task1 = await store.create({
+          title: "Orphan 1",
+          priority: "normal",
+          routing: { agent: "agent-a" },
+          createdBy: "test",
+        });
+        await store.transition(task1.frontmatter.id, "ready");
+        await store.transition(task1.frontmatter.id, "in-progress", { agent: "agent-a" });
+
+        const task2 = await store.create({
+          title: "Orphan 2",
+          priority: "normal",
+          routing: { agent: "agent-b" },
+          createdBy: "test",
+        });
+        await store.transition(task2.frontmatter.id, "ready");
+        await store.transition(task2.frontmatter.id, "in-progress", { agent: "agent-b" });
+
+        const poller = vi.fn(async () => makePollResult());
+        const service = new AOFService(
+          { store, logger, poller },
+          { dataDir: tmpDir, pollIntervalMs: 60_000, dryRun: true },
+        );
+        await service.start();
+
+        // ODD: console.info called with each task ID
+        const reclaimLogs = infoSpy.mock.calls
+          .map(c => c[0] as string)
+          .filter(msg => msg.includes("Reclaimed orphaned task"));
+        expect(reclaimLogs.length).toBe(2);
+        expect(reclaimLogs.some(l => l.includes(task1.frontmatter.id))).toBe(true);
+        expect(reclaimLogs.some(l => l.includes(task2.frontmatter.id))).toBe(true);
+
+        // ODD: summary line logged
+        const summaryLogs = infoSpy.mock.calls
+          .map(c => c[0] as string)
+          .filter(msg => msg.includes("2 task(s) reclaimed"));
+        expect(summaryLogs.length).toBe(1);
+
+        infoSpy.mockRestore();
+        await service.stop();
+      });
+
+      it("handles startup with no orphaned tasks", async () => {
+        const infoSpy = vi.spyOn(console, "info");
+
+        // Create a task in backlog (not in-progress)
+        await store.create({
+          title: "Normal task",
+          priority: "normal",
+          createdBy: "test",
+        });
+
+        const poller = vi.fn(async () => makePollResult());
+        const service = new AOFService(
+          { store, logger, poller },
+          { dataDir: tmpDir, pollIntervalMs: 60_000, dryRun: true },
+        );
+        await service.start();
+
+        // ODD: no reclaim logs, only "no orphaned tasks" summary
+        const reclaimLogs = infoSpy.mock.calls
+          .map(c => c[0] as string)
+          .filter(msg => msg.includes("Reclaimed orphaned task"));
+        expect(reclaimLogs.length).toBe(0);
+
+        const noOrphanLogs = infoSpy.mock.calls
+          .map(c => c[0] as string)
+          .filter(msg => msg.includes("no orphaned tasks found"));
+        expect(noOrphanLogs.length).toBe(1);
+
+        infoSpy.mockRestore();
+        await service.stop();
+      });
+    });
+  });
 });

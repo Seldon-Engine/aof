@@ -127,14 +127,17 @@ export class AOFService {
 
   async start(): Promise<void> {
     if (this.running) return;
-    
+
     // Initialize projects if multi-project mode
     if (this.vaultRoot) {
       await this.initializeProjects();
     } else {
       await this.store.init();
     }
-    
+
+    // Reclaim orphaned tasks from prior crash before first poll
+    await this.reconcileOrphans();
+
     this.running = true;
 
     // Log startup — engine picks it up via EventLogger.onEvent callback
@@ -258,6 +261,76 @@ export class AOFService {
     }
 
     console.info(`[AOF] Initialized ${this.projectStores.size} project stores`);
+  }
+
+  /**
+   * Reclaim orphaned tasks that were mid-transition during a crash.
+   *
+   * On startup, ALL in-progress tasks are considered orphaned because
+   * the daemon that owned them just restarted. Each is reset to "ready"
+   * for the next poll cycle to re-evaluate and re-dispatch.
+   *
+   * Phase 1 scope: interrupted state transitions only. Long-running
+   * dispatched work is Phase 3/4 scope.
+   */
+  private async reconcileOrphans(): Promise<void> {
+    // Collect all stores to reconcile
+    const storesToReconcile: Array<[string, ITaskStore]> = [];
+
+    if (this.vaultRoot && this.projectStores.size > 0) {
+      // Multi-project mode: reconcile all project stores
+      for (const [projectId, store] of this.projectStores) {
+        storesToReconcile.push([projectId, store]);
+      }
+    } else {
+      storesToReconcile.push(["default", this.store]);
+    }
+
+    let totalReclaimed = 0;
+
+    for (const [_storeId, store] of storesToReconcile) {
+      const inProgress = await store.list({ status: "in-progress" });
+
+      for (const task of inProgress) {
+        const lease = task.frontmatter.lease;
+
+        try {
+          await store.transition(task.frontmatter.id, "ready", {
+            reason: "startup_reconciliation",
+          });
+
+          console.info(
+            `[AOF] Reclaimed orphaned task ${task.frontmatter.id} ` +
+            `(was in-progress, leased to ${lease?.agent ?? "unknown"}) -> ready`
+          );
+
+          try {
+            await this.logger.log("task.reclaimed", "system", {
+              taskId: task.frontmatter.id,
+              payload: {
+                previousStatus: "in-progress",
+                previousAgent: lease?.agent,
+                reason: "startup_reconciliation",
+              },
+            });
+          } catch {
+            // Logging errors should not block reconciliation
+          }
+
+          totalReclaimed++;
+        } catch (err) {
+          console.error(
+            `[AOF] Failed to reclaim task ${task.frontmatter.id}: ${(err as Error).message}`
+          );
+        }
+      }
+    }
+
+    if (totalReclaimed > 0) {
+      console.info(`[AOF] Startup reconciliation: ${totalReclaimed} task(s) reclaimed`);
+    } else {
+      console.info("[AOF] Startup reconciliation: no orphaned tasks found");
+    }
   }
 
   private async runPoll(): Promise<void> {
