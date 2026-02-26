@@ -30,7 +30,8 @@
           { "type": "ci",       "section": "🔄 CI/CD",  "hidden": true }
         ]
       },
-      "infile": false,
+      "infile": "CHANGELOG.md",
+      "header": "# Changelog",
       "gitRawCommitsOpts": {
         "merges": null
       }
