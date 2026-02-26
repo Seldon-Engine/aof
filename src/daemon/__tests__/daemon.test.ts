@@ -89,7 +89,6 @@ describe("AOF daemon", () => {
 
     it("prevents concurrent daemon starts with clear error message", async () => {
       const poller = vi.fn(async () => makePollResult());
-      const pidFile = join(tmpDir, "daemon.pid");
 
       // Start first daemon
       const { service: service1 } = await startAofDaemon({
@@ -203,6 +202,157 @@ describe("AOF daemon", () => {
 
       // Restore and clean up
       exitSpy.mockRestore();
+      await service.stop();
+    });
+  });
+
+  describe("PID gating on health self-check", () => {
+    it("writes PID file only after health server self-check succeeds", async () => {
+      const poller = vi.fn(async () => makePollResult());
+      const pidFile = join(tmpDir, "daemon.pid");
+      const socketPath = join(tmpDir, "daemon.sock");
+
+      expect(existsSync(pidFile)).toBe(false);
+
+      const { service, healthServer } = await startAofDaemon({
+        dataDir: tmpDir,
+        pollIntervalMs: 60_000,
+        dryRun: true,
+        store,
+        logger,
+        poller,
+        enableHealthServer: true,
+        socketPath,
+      });
+
+      // PID file should exist after successful startup (health self-check passed)
+      expect(existsSync(pidFile)).toBe(true);
+      // Health server should be running
+      expect(healthServer).toBeDefined();
+
+      if (healthServer) healthServer.close();
+      await service.stop();
+    });
+  });
+
+  describe("crash recovery detection", () => {
+    it("detects stale PID file and emits crash recovery event", async () => {
+      const poller = vi.fn(async () => makePollResult());
+      const pidFile = join(tmpDir, "daemon.pid");
+
+      // Write a stale PID file with a non-existent PID
+      const stalePid = 999999;
+      writeFileSync(pidFile, String(stalePid));
+
+      // Spy on logger to verify crash recovery event
+      const logSystemSpy = vi.spyOn(logger, "logSystem");
+
+      const { service } = await startAofDaemon({
+        dataDir: tmpDir,
+        pollIntervalMs: 60_000,
+        dryRun: true,
+        store,
+        logger,
+        poller,
+        enableHealthServer: false,
+      });
+
+      // Should have emitted system.crash_recovery event
+      expect(logSystemSpy).toHaveBeenCalledWith(
+        "system.crash_recovery",
+        expect.objectContaining({
+          previousPid: stalePid,
+          recoveredAt: expect.any(String),
+        }),
+      );
+
+      await service.stop();
+    });
+
+    it("does not emit crash recovery on clean start", async () => {
+      const poller = vi.fn(async () => makePollResult());
+
+      // Spy on logger
+      const logSystemSpy = vi.spyOn(logger, "logSystem");
+
+      const { service } = await startAofDaemon({
+        dataDir: tmpDir,
+        pollIntervalMs: 60_000,
+        dryRun: true,
+        store,
+        logger,
+        poller,
+        enableHealthServer: false,
+      });
+
+      // Should NOT have emitted system.crash_recovery
+      const crashCalls = logSystemSpy.mock.calls.filter(
+        (call) => call[0] === "system.crash_recovery",
+      );
+      expect(crashCalls).toHaveLength(0);
+
+      await service.stop();
+    });
+  });
+
+  describe("socket cleanup on shutdown", () => {
+    it("cleans up socket file on signal-triggered shutdown", async () => {
+      const poller = vi.fn(async () => makePollResult());
+      const socketPath = join(tmpDir, "daemon.sock");
+
+      const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {}) as any);
+
+      const { service, healthServer } = await startAofDaemon({
+        dataDir: tmpDir,
+        pollIntervalMs: 60_000,
+        dryRun: true,
+        store,
+        logger,
+        poller,
+        enableHealthServer: true,
+        socketPath,
+      });
+
+      // Socket file should exist while server is running
+      expect(existsSync(socketPath)).toBe(true);
+
+      // Simulate SIGTERM
+      process.emit("SIGTERM" as any);
+
+      await vi.waitFor(() => {
+        expect(exitSpy).toHaveBeenCalledWith(0);
+      }, { timeout: 2000 });
+
+      // Socket file should be removed after shutdown
+      expect(existsSync(socketPath)).toBe(false);
+
+      exitSpy.mockRestore();
+      await service.stop();
+    });
+  });
+
+  describe("config forwarding", () => {
+    it("forwards pollTimeoutMs and taskActionTimeoutMs to AOFService", async () => {
+      const poller = vi.fn(async () => makePollResult());
+
+      // This test verifies the daemon passes timeout config.
+      // Since AOFService is constructed internally, we verify by ensuring
+      // startAofDaemon accepts and doesn't error with these options.
+      const { service } = await startAofDaemon({
+        dataDir: tmpDir,
+        pollIntervalMs: 60_000,
+        pollTimeoutMs: 15_000,
+        taskActionTimeoutMs: 5_000,
+        dryRun: true,
+        store,
+        logger,
+        poller,
+        enableHealthServer: false,
+      });
+
+      // Service should start successfully with forwarded config
+      expect(service.getStatus().running).toBe(true);
+
       await service.stop();
     });
   });

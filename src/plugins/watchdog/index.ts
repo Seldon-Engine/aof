@@ -72,6 +72,7 @@ export async function startWatchdog(config: WatchdogConfig): Promise<Watchdog | 
     const health = await getHealthStatus();
     const fallbackHealth: HealthStatus = {
       status: "unhealthy",
+      version: "unknown",
       uptime: 0,
       lastPollAt: 0,
       lastEventAt: 0,
@@ -81,6 +82,16 @@ export async function startWatchdog(config: WatchdogConfig): Promise<Watchdog | 
         inProgress: 0,
         blocked: 0,
         done: 0,
+      },
+      components: {
+        scheduler: "stopped",
+        store: "error",
+        eventLogger: "error",
+      },
+      config: {
+        dataDir: "unknown",
+        pollIntervalMs: 0,
+        providersConfigured: 0,
       },
     };
 

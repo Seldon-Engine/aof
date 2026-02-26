@@ -83,6 +83,7 @@ export const EventType = z.enum([
   "system.config-changed",
   "system.drift-detected",
   "system.recovery",
+  "system.crash_recovery",
 
   // Recovery
   "recovery_action",

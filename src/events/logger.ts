@@ -135,7 +135,7 @@ export class EventLogger {
 
   /** Log system events. */
   async logSystem(
-    type: "system.startup" | "system.shutdown" | "system.config-changed" | "system.drift-detected" | "system.recovery",
+    type: "system.startup" | "system.shutdown" | "system.config-changed" | "system.drift-detected" | "system.recovery" | "system.crash_recovery",
     payload?: Record<string, unknown>,
   ): Promise<void> {
     await this.log(type, "system", { payload });
