@@ -13,6 +13,7 @@ import { EventLogger } from "../events/logger.js";
 export interface ToolContext {
   store: ITaskStore;
   logger: EventLogger;
+  projectId?: string;  // Auto-populated from active task's project
 }
 
 // Project tools (task creation/dispatch)

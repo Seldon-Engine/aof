@@ -10,10 +10,10 @@ import { MatrixNotifier } from "./matrix-notifier.js";
 import { OpenClawAdapter } from "./openclaw-executor.js";
 import { MockAdapter } from "../dispatch/executor.js";
 import type { GatewayAdapter } from "../dispatch/executor.js";
-import { 
-  aofDispatch, 
-  aofStatusReport, 
-  aofTaskComplete, 
+import {
+  aofDispatch,
+  aofStatusReport,
+  aofTaskComplete,
   aofTaskUpdate,
   aofTaskEdit,
   aofTaskCancel,
@@ -42,6 +42,8 @@ export interface AOFPluginOptions {
     send(target: string, message: string): Promise<void>;
   };
   orgChartPath?: string;
+  /** Map of project ID -> task store for multi-project resolution */
+  projectStores?: Map<string, ITaskStore>;
 }
 
 const SERVICE_NAME = "aof-scheduler";
@@ -68,7 +70,7 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
   const store = opts.store ?? new FilesystemTaskStore(opts.dataDir);
   const logger = opts.logger ?? new EventLogger(join(opts.dataDir, "events"));
   const metrics = opts.metrics ?? new AOFMetrics();
-  
+
   // Load org chart for permission enforcement (if provided)
   // This will be loaded asynchronously, but we'll handle the undefined case gracefully
   let orgChartPromise: Promise<OrgChart | undefined> | undefined;
@@ -87,20 +89,33 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
         return undefined;
       });
   }
-  
+
+  /**
+   * Resolve the correct project-scoped store for a given project ID.
+   * Falls back to global store when no project ID or no project stores configured.
+   */
+  const resolveProjectStore = (projectId?: string): ITaskStore => {
+    if (projectId && opts.projectStores?.has(projectId)) {
+      return opts.projectStores.get(projectId)!;
+    }
+    return store; // Fall back to global store for backward compat
+  };
+
   /**
    * Get a permission-aware store for the given actor.
    * If org chart is not loaded, returns the original store (no permission checks).
+   * Accepts an optional base store to use instead of the global store.
    */
-  const getStoreForActor = async (actor?: string): Promise<ITaskStore> => {
+  const getStoreForActor = async (actor?: string, baseStore?: ITaskStore): Promise<ITaskStore> => {
+    const effectiveStore = baseStore ?? store;
     if (!orgChartPromise || !actor || actor === "unknown") {
-      return store;
+      return effectiveStore;
     }
     const orgChart = await orgChartPromise;
     if (!orgChart) {
-      return store;
+      return effectiveStore;
     }
-    return new PermissionAwareTaskStore(store, orgChart, actor);
+    return new PermissionAwareTaskStore(effectiveStore, orgChart, actor);
   };
 
   // Build notification adapter: MatrixNotifier (plugin mode) or ConsoleNotifier (standalone)
@@ -165,34 +180,37 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
         agent: { type: "string", description: "Agent ID to assign task to" },
         team: { type: "string", description: "Team name for routing" },
         role: { type: "string", description: "Role name for routing" },
-        priority: { 
-          type: "string", 
+        priority: {
+          type: "string",
           description: "Task priority (critical, high, normal, low)",
           enum: ["critical", "high", "normal", "low"]
         },
-        dependsOn: { 
-          type: "array", 
+        dependsOn: {
+          type: "array",
           items: { type: "string" },
           description: "Array of task IDs this task depends on"
         },
         parentId: { type: "string", description: "Parent task ID (for subtasks)" },
-        metadata: { 
-          type: "object", 
+        metadata: {
+          type: "object",
           description: "Additional metadata (tags, type, etc.)"
         },
-        tags: { 
-          type: "array", 
+        tags: {
+          type: "array",
           items: { type: "string" },
           description: "Task tags"
         },
         actor: { type: "string", description: "Agent performing the action" },
+        project: { type: "string", description: "Project ID to scope operation to (auto-populated from task context)" },
       },
       required: ["title", "brief"],
     },
     execute: async (_id: string, params: Record<string, unknown>) => {
       const actor = (params as any).actor;
-      const permissionStore = await getStoreForActor(actor);
-      const result = await aofDispatch({ store: permissionStore, logger }, params as any);
+      const projectId = (params as any).project as string | undefined;
+      const projectStore = resolveProjectStore(projectId);
+      const permissionStore = await getStoreForActor(actor, projectStore);
+      const result = await aofDispatch({ store: permissionStore, logger, projectId }, params as any);
       return wrapResult(result);
     },
   });
@@ -208,13 +226,16 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
         body: { type: "string", description: "New body content" },
         reason: { type: "string", description: "Reason for transition" },
         actor: { type: "string", description: "Agent performing the update" },
+        project: { type: "string", description: "Project ID to scope operation to (auto-populated from task context)" },
       },
       required: ["taskId"],
     },
     execute: async (_id: string, params: Record<string, unknown>) => {
       const actor = (params as any).actor;
-      const permissionStore = await getStoreForActor(actor);
-      const result = await aofTaskUpdate({ store: permissionStore, logger }, params as any);
+      const projectId = (params as any).project as string | undefined;
+      const projectStore = resolveProjectStore(projectId);
+      const permissionStore = await getStoreForActor(actor, projectStore);
+      const result = await aofTaskUpdate({ store: permissionStore, logger, projectId }, params as any);
       return wrapResult(result);
     },
   });
@@ -228,13 +249,16 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
         agent: { type: "string", description: "Filter by agent ID" },
         status: { type: "string", description: "Filter by status" },
         actor: { type: "string", description: "Agent requesting the report" },
+        project: { type: "string", description: "Project ID to scope operation to (auto-populated from task context)" },
       },
       required: [],
     },
     execute: async (_id: string, params: Record<string, unknown>) => {
       const actor = (params as any).actor;
-      const permissionStore = await getStoreForActor(actor);
-      const result = await aofStatusReport({ store: permissionStore, logger }, params as any);
+      const projectId = (params as any).project as string | undefined;
+      const projectStore = resolveProjectStore(projectId);
+      const permissionStore = await getStoreForActor(actor, projectStore);
+      const result = await aofStatusReport({ store: permissionStore, logger, projectId }, params as any);
       return wrapResult(result);
     },
   });
@@ -253,14 +277,14 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
   - "complete": Your work is done and ready to advance (default if omitted)
   - "needs_review": Work needs fixes - include specific blockers
   - "blocked": Can't proceed - external dependency or blocker
-  
+
 - summary (optional): Brief description of what you did (1-2 sentences)
 
 - blockers (optional, array of strings): Specific issues that need fixing
   - Required if outcome is "needs_review" or "blocked"
   - Each blocker should be actionable (not vague)
   - Examples: "Missing error handling for expired tokens", "Test coverage at 65%, need 80%"
-  
+
 - rejectionNotes (optional, string): Additional context for the person fixing issues
   - Only relevant for "needs_review" outcome
   - Keep it constructive and specific
@@ -302,18 +326,18 @@ Blocked (can't proceed):
     parameters: {
       type: "object",
       properties: {
-        taskId: { 
-          type: "string", 
-          description: "Task ID to complete" 
+        taskId: {
+          type: "string",
+          description: "Task ID to complete"
         },
         outcome: {
           type: "string",
           enum: ["complete", "needs_review", "blocked"],
           description: "Result of your work (default: complete)",
         },
-        summary: { 
-          type: "string", 
-          description: "What you did (optional but recommended)" 
+        summary: {
+          type: "string",
+          description: "What you did (optional but recommended)"
         },
         blockers: {
           type: "array",
@@ -324,17 +348,20 @@ Blocked (can't proceed):
           type: "string",
           description: "Additional context for needs_review",
         },
-        actor: { 
-          type: "string", 
-          description: "Agent ID (usually auto-populated)" 
+        actor: {
+          type: "string",
+          description: "Agent ID (usually auto-populated)"
         },
+        project: { type: "string", description: "Project ID to scope operation to (auto-populated from task context)" },
       },
       required: ["taskId"],
     },
     execute: async (_id: string, params: Record<string, unknown>) => {
       const actor = (params as any).actor;
-      const permissionStore = await getStoreForActor(actor);
-      const result = await aofTaskComplete({ store: permissionStore, logger }, params as any);
+      const projectId = (params as any).project as string | undefined;
+      const projectStore = resolveProjectStore(projectId);
+      const permissionStore = await getStoreForActor(actor, projectStore);
+      const result = await aofTaskComplete({ store: permissionStore, logger, projectId }, params as any);
       return wrapResult(result);
     },
   });
@@ -348,8 +375,8 @@ Blocked (can't proceed):
         taskId: { type: "string", description: "Task ID to edit" },
         title: { type: "string", description: "New task title" },
         description: { type: "string", description: "New task description/body" },
-        priority: { 
-          type: "string", 
+        priority: {
+          type: "string",
           description: "New priority (critical, high, normal, low)",
           enum: ["critical", "high", "normal", "low"]
         },
@@ -360,21 +387,24 @@ Blocked (can't proceed):
             agent: { type: "string", description: "Assigned agent ID" },
             team: { type: "string", description: "Team name" },
             role: { type: "string", description: "Role name" },
-            tags: { 
-              type: "array", 
+            tags: {
+              type: "array",
               items: { type: "string" },
               description: "Task tags"
             },
           },
         },
         actor: { type: "string", description: "Agent performing the edit" },
+        project: { type: "string", description: "Project ID to scope operation to (auto-populated from task context)" },
       },
       required: ["taskId"],
     },
     execute: async (_id: string, params: Record<string, unknown>) => {
       const actor = (params as any).actor;
-      const permissionStore = await getStoreForActor(actor);
-      const result = await aofTaskEdit({ store: permissionStore, logger }, params as any);
+      const projectId = (params as any).project as string | undefined;
+      const projectStore = resolveProjectStore(projectId);
+      const permissionStore = await getStoreForActor(actor, projectStore);
+      const result = await aofTaskEdit({ store: permissionStore, logger, projectId }, params as any);
       return wrapResult(result);
     },
   });
@@ -388,13 +418,16 @@ Blocked (can't proceed):
         taskId: { type: "string", description: "Task ID to cancel" },
         reason: { type: "string", description: "Reason for cancellation (optional but recommended)" },
         actor: { type: "string", description: "Agent performing the cancellation" },
+        project: { type: "string", description: "Project ID to scope operation to (auto-populated from task context)" },
       },
       required: ["taskId"],
     },
     execute: async (_id: string, params: Record<string, unknown>) => {
       const actor = (params as any).actor;
-      const permissionStore = await getStoreForActor(actor);
-      const result = await aofTaskCancel({ store: permissionStore, logger }, params as any);
+      const projectId = (params as any).project as string | undefined;
+      const projectStore = resolveProjectStore(projectId);
+      const permissionStore = await getStoreForActor(actor, projectStore);
+      const result = await aofTaskCancel({ store: permissionStore, logger, projectId }, params as any);
       return wrapResult(result);
     },
   });
@@ -408,13 +441,16 @@ Blocked (can't proceed):
         taskId: { type: "string", description: "Task that will depend on the blocker" },
         blockerId: { type: "string", description: "Task that must complete first" },
         actor: { type: "string", description: "Agent creating the dependency" },
+        project: { type: "string", description: "Project ID to scope operation to (auto-populated from task context)" },
       },
       required: ["taskId", "blockerId"],
     },
     execute: async (_id: string, params: Record<string, unknown>) => {
       const actor = (params as any).actor;
-      const permissionStore = await getStoreForActor(actor);
-      const result = await aofTaskDepAdd({ store: permissionStore, logger }, params as any);
+      const projectId = (params as any).project as string | undefined;
+      const projectStore = resolveProjectStore(projectId);
+      const permissionStore = await getStoreForActor(actor, projectStore);
+      const result = await aofTaskDepAdd({ store: permissionStore, logger, projectId }, params as any);
       return wrapResult(result);
     },
   });
@@ -428,13 +464,16 @@ Blocked (can't proceed):
         taskId: { type: "string", description: "Task to remove dependency from" },
         blockerId: { type: "string", description: "Blocker task to remove" },
         actor: { type: "string", description: "Agent removing the dependency" },
+        project: { type: "string", description: "Project ID to scope operation to (auto-populated from task context)" },
       },
       required: ["taskId", "blockerId"],
     },
     execute: async (_id: string, params: Record<string, unknown>) => {
       const actor = (params as any).actor;
-      const permissionStore = await getStoreForActor(actor);
-      const result = await aofTaskDepRemove({ store: permissionStore, logger }, params as any);
+      const projectId = (params as any).project as string | undefined;
+      const projectStore = resolveProjectStore(projectId);
+      const permissionStore = await getStoreForActor(actor, projectStore);
+      const result = await aofTaskDepRemove({ store: permissionStore, logger, projectId }, params as any);
       return wrapResult(result);
     },
   });
@@ -448,13 +487,16 @@ Blocked (can't proceed):
         taskId: { type: "string", description: "Task ID to block" },
         reason: { type: "string", description: "Why the task is blocked (required, must be clear and actionable)" },
         actor: { type: "string", description: "Agent blocking the task" },
+        project: { type: "string", description: "Project ID to scope operation to (auto-populated from task context)" },
       },
       required: ["taskId", "reason"],
     },
     execute: async (_id: string, params: Record<string, unknown>) => {
       const actor = (params as any).actor;
-      const permissionStore = await getStoreForActor(actor);
-      const result = await aofTaskBlock({ store: permissionStore, logger }, params as any);
+      const projectId = (params as any).project as string | undefined;
+      const projectStore = resolveProjectStore(projectId);
+      const permissionStore = await getStoreForActor(actor, projectStore);
+      const result = await aofTaskBlock({ store: permissionStore, logger, projectId }, params as any);
       return wrapResult(result);
     },
   });
@@ -467,13 +509,16 @@ Blocked (can't proceed):
       properties: {
         taskId: { type: "string", description: "Task ID to unblock" },
         actor: { type: "string", description: "Agent unblocking the task" },
+        project: { type: "string", description: "Project ID to scope operation to (auto-populated from task context)" },
       },
       required: ["taskId"],
     },
     execute: async (_id: string, params: Record<string, unknown>) => {
       const actor = (params as any).actor;
-      const permissionStore = await getStoreForActor(actor);
-      const result = await aofTaskUnblock({ store: permissionStore, logger }, params as any);
+      const projectId = (params as any).project as string | undefined;
+      const projectStore = resolveProjectStore(projectId);
+      const permissionStore = await getStoreForActor(actor, projectStore);
+      const result = await aofTaskUnblock({ store: permissionStore, logger, projectId }, params as any);
       return wrapResult(result);
     },
   });
