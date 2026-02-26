@@ -205,7 +205,8 @@ describe("OpenClawAdapter (embedded agent)", () => {
     expect(params.prompt).toContain("tasks/TASK-001.md");
   });
 
-  it("uses custom timeout from opts", async () => {
+  it("clamps timeout below 300_000ms minimum to 300_000ms", async () => {
+    // The adapter applies Math.max(opts.timeoutMs, 300_000) — anything below 300s is clamped
     mockRunEmbeddedPiAgent.mockResolvedValueOnce({
       meta: { durationMs: 1000, agentMeta: { sessionId: "s4", provider: "a", model: "m" } },
     });
@@ -214,7 +215,7 @@ describe("OpenClawAdapter (embedded agent)", () => {
     await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
 
     const params = mockRunEmbeddedPiAgent.mock.calls[0][0];
-    expect(params.timeoutMs).toBe(60_000);
+    expect(params.timeoutMs).toBe(300_000);
   });
 
   it("returns generated sessionId (not agentMeta sessionId) since dispatch is fire-and-forget", async () => {

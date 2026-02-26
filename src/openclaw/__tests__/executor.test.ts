@@ -38,8 +38,12 @@ describe("OpenClawAdapter", () => {
 
     const result = await executor.spawnSession(context);
 
+    // Fire-and-forget: returns immediately with a generated UUID, not the agent's sessionId
     expect(result.success).toBe(true);
-    expect(result.sessionId).toBe("session-12345");
+    expect(result.sessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+
+    // Wait for background agent call to resolve
+    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
     expect(mockRunEmbeddedPiAgent).toHaveBeenCalledWith(
       expect.objectContaining({
         agentId: "swe-backend",
@@ -48,10 +52,11 @@ describe("OpenClawAdapter", () => {
     );
   });
 
-  it("handles spawn failure gracefully", async () => {
-    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
-      meta: { durationMs: 500, error: { kind: "retry_limit", message: "Agent not found" } },
-    });
+  it("handles setup failure gracefully (ensureAgentWorkspace throws)", async () => {
+    // Fire-and-forget: errors from runEmbeddedPiAgent happen in background.
+    // Only setup-stage errors (before the agent is launched) surface in the return value.
+    // Mock a setup-stage error: ensureAgentWorkspace throwing.
+    mockExtApi.ensureAgentWorkspace.mockRejectedValueOnce(new Error("Agent not found"));
 
     const context: TaskContext = {
       taskId: "TASK-002",
@@ -67,7 +72,8 @@ describe("OpenClawAdapter", () => {
     expect(result.error).toContain("Agent not found");
   });
 
-  it("respects timeout option", async () => {
+  it("clamps timeout to 300_000ms minimum", async () => {
+    // Code applies Math.max(opts.timeoutMs, 300_000) — anything below 300s is clamped
     mockRunEmbeddedPiAgent.mockResolvedValueOnce({
       meta: { durationMs: 1000, agentMeta: { sessionId: "s-t", provider: "a", model: "m" } },
     });
@@ -80,10 +86,32 @@ describe("OpenClawAdapter", () => {
       routing: {},
     };
 
-    await executor.spawnSession(context, { timeoutMs: 60000 });
+    await executor.spawnSession(context, { timeoutMs: 60_000 });
 
+    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
     expect(mockRunEmbeddedPiAgent).toHaveBeenCalledWith(
-      expect.objectContaining({ timeoutMs: 60000 }),
+      expect.objectContaining({ timeoutMs: 300_000 }),
+    );
+  });
+
+  it("passes through timeout above 300_000ms minimum", async () => {
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
+      meta: { durationMs: 1000, agentMeta: { sessionId: "s-t2", provider: "a", model: "m" } },
+    });
+
+    const context: TaskContext = {
+      taskId: "TASK-003b",
+      taskPath: "/path/to/task.md",
+      agent: "swe-qa",
+      priority: "low",
+      routing: {},
+    };
+
+    await executor.spawnSession(context, { timeoutMs: 600_000 });
+
+    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
+    expect(mockRunEmbeddedPiAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ timeoutMs: 600_000 }),
     );
   });
 
@@ -106,7 +134,10 @@ describe("OpenClawAdapter", () => {
     expect(params.prompt).toContain("frontend-engineer");
   });
 
-  it("handles API exceptions", async () => {
+  it("handles background API exceptions without affecting spawn result", async () => {
+    // Fire-and-forget: thrown errors from runEmbeddedPiAgent are caught in
+    // runAgentBackground and logged — they don't surface in spawnSession return.
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockRunEmbeddedPiAgent.mockRejectedValueOnce(new Error("Network error"));
 
     const context: TaskContext = {
@@ -119,8 +150,15 @@ describe("OpenClawAdapter", () => {
 
     const result = await executor.spawnSession(context);
 
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("Network error");
+    // spawnSession returns success — the error happens in background
+    expect(result.success).toBe(true);
+
+    // Background logs the error
+    await vi.waitFor(() => expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Network error"),
+    ));
+
+    errorSpy.mockRestore();
   });
 
   it("includes aof_task_complete instruction with taskId", async () => {

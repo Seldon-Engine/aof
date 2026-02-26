@@ -3,11 +3,12 @@ import { OpenClawAdapter } from "../openclaw-executor.js";
 import type { OpenClawApi } from "../types.js";
 
 const mockRunEmbeddedPiAgent = vi.fn();
+const mockEnsureAgentWorkspace = vi.fn(async (p: { dir: string }) => ({ dir: p.dir }));
 const mockExtApi = {
   runEmbeddedPiAgent: mockRunEmbeddedPiAgent,
   resolveAgentWorkspaceDir: vi.fn(() => "/tmp/ws"),
   resolveAgentDir: vi.fn(() => "/tmp/agent"),
-  ensureAgentWorkspace: vi.fn(async (p: { dir: string }) => ({ dir: p.dir })),
+  ensureAgentWorkspace: mockEnsureAgentWorkspace,
   resolveSessionFilePath: vi.fn((id: string) => `/tmp/s/${id}.jsonl`),
 };
 
@@ -21,8 +22,10 @@ describe("OpenClawAdapter - Platform Limit Detection", () => {
     (executor as any).extensionApi = mockExtApi;
   });
 
-  it("should parse platform limit from thrown error message", async () => {
-    mockRunEmbeddedPiAgent.mockRejectedValueOnce(
+  it("should parse platform limit from setup-stage error", async () => {
+    // Fire-and-forget: only setup-stage errors surface in spawnSession return.
+    // Mock ensureAgentWorkspace to throw with a platform limit message.
+    mockEnsureAgentWorkspace.mockRejectedValueOnce(
       new Error("sessions_spawn has reached max active children for this session (3/2)"),
     );
 
@@ -40,7 +43,8 @@ describe("OpenClawAdapter - Platform Limit Detection", () => {
   });
 
   it("should return undefined platformLimit for non-platform-limit errors", async () => {
-    mockRunEmbeddedPiAgent.mockRejectedValueOnce(new Error("Agent not found"));
+    // Setup-stage error without platform limit message
+    mockEnsureAgentWorkspace.mockRejectedValueOnce(new Error("Agent not found"));
 
     const result = await executor.spawnSession({
       taskId: "test-002",
@@ -56,7 +60,7 @@ describe("OpenClawAdapter - Platform Limit Detection", () => {
   });
 
   it("should handle different number formats in platform limit", async () => {
-    mockRunEmbeddedPiAgent.mockRejectedValueOnce(
+    mockEnsureAgentWorkspace.mockRejectedValueOnce(
       new Error("max active children for this session (10/5)"),
     );
 
@@ -72,7 +76,10 @@ describe("OpenClawAdapter - Platform Limit Detection", () => {
     expect(result.platformLimit).toBe(5);
   });
 
-  it("should handle platform limit in result meta error", async () => {
+  it("should log platform limit from background agent result (fire-and-forget)", async () => {
+    // When runEmbeddedPiAgent returns a meta.error with platform limit,
+    // the error is logged in the background — spawnSession still returns success.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     mockRunEmbeddedPiAgent.mockResolvedValueOnce({
       meta: {
         durationMs: 100,
@@ -91,7 +98,13 @@ describe("OpenClawAdapter - Platform Limit Detection", () => {
       routing: {},
     });
 
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("max active children");
+    // Fire-and-forget: spawn succeeds; error logged in background
+    expect(result.success).toBe(true);
+
+    await vi.waitFor(() => expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("max active children"),
+    ));
+
+    warnSpy.mockRestore();
   });
 });
