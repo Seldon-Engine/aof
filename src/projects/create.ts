@@ -3,7 +3,7 @@
  */
 
 import { join } from "node:path";
-import { mkdir, access } from "node:fs/promises";
+import { mkdir, access, writeFile } from "node:fs/promises";
 import { bootstrapProject } from "./bootstrap.js";
 import { buildProjectManifest, writeProjectManifest } from "./manifest.js";
 import type { ProjectManifest } from "../schemas/project.js";
@@ -23,6 +23,8 @@ export interface CreateProjectOptions {
     lead: string;
   };
   parentId?: string;
+  participants?: string[];
+  template?: boolean;
 }
 
 export interface CreateProjectResult {
@@ -103,13 +105,44 @@ export async function createProject(
     type: opts.type ?? "other",
     owner: opts.owner ?? { team: "system", lead: "system" },
     parentId: opts.parentId,
+    participants: opts.participants,
   });
 
   await writeProjectManifest(projectRoot, manifest);
 
-  // Step 7: Return result
+  // Step 7: Template extras (memory dir + README)
   const directoriesCreated = ["tasks", "artifacts", "state", "views", "cold"];
 
+  if (opts.template) {
+    const memoryDir = join(projectRoot, "memory");
+    await mkdir(memoryDir, { recursive: true });
+    directoriesCreated.push("memory");
+
+    const title = opts.title ?? id;
+    const type = opts.type ?? "other";
+    const participantsList = manifest.participants.length > 0
+      ? manifest.participants.map(p => `- ${p}`).join("\n")
+      : "No participants assigned yet";
+
+    const readme = `# ${title}
+
+**Type:** ${type}
+**Status:** active
+
+## Participants
+${participantsList}
+
+## Tasks
+Tasks for this project live in \`tasks/\`.
+
+## Memory
+Project-isolated memory stored in \`memory/\`.
+`;
+
+    await writeFile(join(projectRoot, "README.md"), readme, "utf-8");
+  }
+
+  // Step 8: Return result
   return {
     projectId: id,
     projectRoot,

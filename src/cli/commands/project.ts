@@ -23,20 +23,40 @@ export function registerProjectCommands(program: Command): void {
     .option("--team <team>", "Owner team (defaults to 'system')", "system")
     .option("--lead <lead>", "Owner lead (defaults to 'system')", "system")
     .option("--parent <id>", "Parent project ID for hierarchical projects")
-    .action(async (id: string, opts: { title?: string; type: string; team: string; lead: string; parent?: string }) => {
+    .option("--template", "Scaffold with memory directory and README template", false)
+    .option("--participants <agents...>", "Initial participant agent IDs")
+    .action(async (id: string, opts: { title?: string; type: string; team: string; lead: string; parent?: string; template: boolean; participants?: string[] }) => {
       const { createProject } = await import("../../projects/create.js");
       const root = program.opts()["root"] as string;
 
       try {
+        // Interactive wizard when --template flag, TTY, and no title provided
+        if (opts.template && process.stdout.isTTY && !opts.title) {
+          const { createInterface } = await import("node:readline/promises");
+          const rl = createInterface({ input: process.stdin, output: process.stdout });
+          try {
+            const name = await rl.question("Project name: ");
+            const participantsStr = await rl.question("Initial participants (comma-separated agent IDs, or empty): ");
+            opts.title = name || id;
+            if (participantsStr.trim()) {
+              opts.participants = participantsStr.split(",").map(s => s.trim()).filter(Boolean);
+            }
+          } finally {
+            rl.close();
+          }
+        }
+
         const result = await createProject(id, {
           vaultRoot: root,
           title: opts.title,
           type: opts.type as "swe" | "ops" | "research" | "admin" | "personal" | "other",
           owner: { team: opts.team, lead: opts.lead },
           parentId: opts.parent,
+          template: opts.template,
+          participants: opts.participants,
         });
 
-        console.log(`✅ Project created: ${id}`);
+        console.log(`Project created: ${id}`);
         console.log(`   Title: ${result.manifest.title}`);
         console.log(`   Type: ${result.manifest.type}`);
         console.log(`   Path: ${result.projectRoot}`);
@@ -44,8 +64,83 @@ export function registerProjectCommands(program: Command): void {
         if (result.manifest.parentId) {
           console.log(`   Parent: ${result.manifest.parentId}`);
         }
+        if (result.manifest.participants.length > 0) {
+          console.log(`   Participants: ${result.manifest.participants.join(", ")}`);
+        }
       } catch (error) {
-        console.error(`❌ Failed to create project: ${(error as Error).message}`);
+        console.error(`Failed to create project: ${(error as Error).message}`);
+        process.exitCode = 1;
+      }
+    });
+
+  // --- project-list ---
+  program
+    .command("project-list")
+    .description("List all projects on this AOF instance")
+    .option("--json", "Output as JSON", false)
+    .action(async (opts: { json: boolean }) => {
+      const { discoverProjects } = await import("../../projects/index.js");
+      const root = program.opts()["root"] as string;
+      const projects = await discoverProjects(root);
+
+      if (opts.json) {
+        console.log(JSON.stringify(projects, null, 2));
+        return;
+      }
+
+      if (projects.length === 0) {
+        console.log("No projects found.");
+        return;
+      }
+
+      console.log(`\nProjects (${projects.length}):\n`);
+      for (const p of projects) {
+        if (p.error) {
+          console.log(`  x ${p.id} -- ERROR: ${p.error}`);
+          continue;
+        }
+        if (p.manifest) {
+          const participants = p.manifest.participants?.length ?? 0;
+          const statusMarker = p.manifest.status === "active" ? "+" : "-";
+          console.log(`  ${statusMarker} ${p.id} -- ${p.manifest.title} (${p.manifest.type}, ${participants} participants)`);
+        } else {
+          console.log(`  ? ${p.id} -- (manifest unreadable)`);
+        }
+      }
+      console.log("");
+    });
+
+  // --- project-add-participant ---
+  program
+    .command("project-add-participant <project> <agent>")
+    .description("Add an agent to a project's participant list")
+    .action(async (projectId: string, agentId: string) => {
+      const { resolveProject } = await import("../../projects/index.js");
+      const { readFile } = await import("node:fs/promises");
+      const { join } = await import("node:path");
+      const { parse } = await import("yaml");
+      const { writeProjectManifest } = await import("../../projects/manifest.js");
+      const root = program.opts()["root"] as string;
+
+      try {
+        const resolution = await resolveProject(projectId, root);
+        const manifestPath = join(resolution.projectRoot, "project.yaml");
+        const content = await readFile(manifestPath, "utf-8");
+        const manifest = parse(content);
+
+        if (!manifest.participants) manifest.participants = [];
+
+        if (manifest.participants.includes(agentId)) {
+          console.log(`Agent "${agentId}" is already a participant in project "${projectId}".`);
+          return;
+        }
+
+        manifest.participants.push(agentId);
+        await writeProjectManifest(resolution.projectRoot, manifest);
+
+        console.log(`Added "${agentId}" to project "${projectId}" (${manifest.participants.length} total participants).`);
+      } catch (error) {
+        console.error(`Failed to add participant: ${(error as Error).message}`);
         process.exitCode = 1;
       }
     });

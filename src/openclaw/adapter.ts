@@ -523,6 +523,83 @@ Blocked (can't proceed):
     },
   });
 
+  // --- Project management tools ---
+  api.registerTool({
+    name: "aof_project_create",
+    description: "Create a new project with standard directory structure and manifest. Use for setting up isolated project spaces.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Project ID (lowercase, hyphens, underscores)" },
+        title: { type: "string", description: "Human-readable project title" },
+        type: { type: "string", enum: ["swe", "ops", "research", "admin", "personal", "other"], description: "Project type" },
+        participants: { type: "array", items: { type: "string" }, description: "Initial participant agent IDs" },
+      },
+      required: ["id"],
+    },
+    execute: async (_id: string, params: Record<string, unknown>) => {
+      const { createProject } = await import("../projects/create.js");
+      const result = await createProject(params.id as string, {
+        vaultRoot: opts.dataDir,
+        title: params.title as string | undefined,
+        type: params.type as "swe" | "ops" | "research" | "admin" | "personal" | "other" | undefined,
+        participants: params.participants as string[] | undefined,
+        template: true,
+      });
+      return wrapResult(result);
+    },
+  });
+
+  api.registerTool({
+    name: "aof_project_list",
+    description: "List all projects on this AOF instance with their status, type, and participant count.",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+    execute: async (_id: string, _params: Record<string, unknown>) => {
+      const { discoverProjects } = await import("../projects/index.js");
+      const projects = await discoverProjects(opts.dataDir);
+      return wrapResult({ projects: projects.map(p => ({ id: p.id, path: p.path, error: p.error })) });
+    },
+  });
+
+  api.registerTool({
+    name: "aof_project_add_participant",
+    description: "Add an agent to a project's participant list. Agents in the participants list have exclusive access to the project's tasks.",
+    parameters: {
+      type: "object",
+      properties: {
+        project: { type: "string", description: "Project ID" },
+        agent: { type: "string", description: "Agent ID to add as participant" },
+      },
+      required: ["project", "agent"],
+    },
+    execute: async (_id: string, params: Record<string, unknown>) => {
+      const { resolveProject } = await import("../projects/index.js");
+      const { readFile } = await import("node:fs/promises");
+      const { join } = await import("node:path");
+      const { parse } = await import("yaml");
+      const { writeProjectManifest } = await import("../projects/manifest.js");
+
+      const resolution = await resolveProject(params.project as string, opts.dataDir);
+      const manifestPath = join(resolution.projectRoot, "project.yaml");
+      const content = await readFile(manifestPath, "utf-8");
+      const manifest = parse(content);
+
+      if (!manifest.participants) manifest.participants = [];
+      if (manifest.participants.includes(params.agent)) {
+        return wrapResult({ success: true, message: "Agent already a participant", participants: manifest.participants });
+      }
+
+      manifest.participants.push(params.agent as string);
+      await writeProjectManifest(resolution.projectRoot, manifest);
+
+      return wrapResult({ success: true, participants: manifest.participants });
+    },
+  });
+
   // --- HTTP routes (use registerHttpRoute for path-based endpoints) ---
   if (typeof api.registerHttpRoute === "function") {
     api.registerHttpRoute({
