@@ -4,21 +4,24 @@
  * `install`   writes an OS service file (launchd plist / systemd unit) and starts the daemon.
  * `uninstall` stops the daemon, removes the service file, and cleans up.
  * `start`     redirects to `install`, or runs in foreground with --foreground.
- * `stop`      sends SIGTERM via PID, with timeout fallback to SIGKILL.
- * `status`    reads PID file and reports daemon state (redesign planned for Plan 03).
+ * `stop`      sends SIGTERM via PID, with timeout fallback to SIGKILL. Shows drain progress.
+ * `status`    queries /status endpoint and displays rich table output (or --json).
  */
 
 import { join } from "node:path";
 import { existsSync, readFileSync, unlinkSync, mkdirSync } from "node:fs";
+import { request as httpRequest } from "node:http";
 import type { Command } from "commander";
 import {
   installService,
   uninstallService,
   getServiceFilePath,
+  AOF_SERVICE_LABEL,
   type ServiceFileConfig,
 } from "../../daemon/service-file.js";
 import { selfCheck } from "../../daemon/server.js";
 import { startAofDaemon } from "../../daemon/daemon.js";
+import type { HealthStatus } from "../../daemon/health.js";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -26,6 +29,18 @@ import { startAofDaemon } from "../../daemon/daemon.js";
 
 export interface DaemonStopOptions {
   timeout: string;
+  force?: boolean;
+}
+
+export interface DaemonStatusOptions {
+  json?: boolean;
+}
+
+/** Optional crash recovery info that may be present in the status response. */
+export interface CrashRecoveryInfo {
+  lastCrashAt: string;
+  previousPid: number;
+  status: string;
 }
 
 function isProcessRunning(pid: number): boolean {
@@ -86,6 +101,129 @@ function formatUptime(seconds: number): string {
   if (minutes > 0) parts.push(`${minutes}m`);
   if (secs > 0 || parts.length === 0) parts.push(`${secs}s`);
   return parts.join(" ");
+}
+
+// ---------------------------------------------------------------------------
+// HTTP query helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Query the daemon /status endpoint via Unix socket.
+ * Returns the parsed HealthStatus JSON on success, or null on failure.
+ */
+export function queryStatusEndpoint(
+  socketPath: string,
+): Promise<(HealthStatus & { lastCrashRecovery?: CrashRecoveryInfo }) | null> {
+  return new Promise((resolve) => {
+    const req = httpRequest(
+      {
+        socketPath,
+        path: "/status",
+        method: "GET",
+        timeout: 3000,
+      },
+      (res) => {
+        let body = "";
+        res.on("data", (chunk: Buffer) => {
+          body += chunk.toString();
+        });
+        res.on("end", () => {
+          try {
+            const parsed = JSON.parse(body);
+            resolve(parsed);
+          } catch {
+            resolve(null);
+          }
+        });
+      },
+    );
+
+    req.on("error", () => resolve(null));
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(null);
+    });
+    req.end();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Status table formatting
+// ---------------------------------------------------------------------------
+
+const SEPARATOR = "\u2500".repeat(37); // thin horizontal rule
+
+/**
+ * Format a HealthStatus object into a human-readable table string.
+ * Pure function -- no side effects, easily testable.
+ */
+export function formatStatusTable(
+  status: HealthStatus & { lastCrashRecovery?: CrashRecoveryInfo },
+  pid: number,
+): string {
+  const lines: string[] = [];
+
+  lines.push("AOF Daemon Status");
+  lines.push(SEPARATOR);
+  lines.push(`Status:         running (${status.status})`);
+  lines.push(`PID:            ${pid}`);
+  lines.push(`Uptime:         ${formatUptime(status.uptime)}`);
+  lines.push(`Version:        ${status.version}`);
+  lines.push("");
+
+  lines.push("Tasks");
+  lines.push(SEPARATOR);
+  lines.push(`Backlog:        ${status.taskCounts.open}`);
+  lines.push(`Ready:          ${status.taskCounts.ready}`);
+  lines.push(`In-Progress:    ${status.taskCounts.inProgress}`);
+  lines.push(`Blocked:        ${status.taskCounts.blocked}`);
+  lines.push(`Done:           ${status.taskCounts.done}`);
+  lines.push("");
+
+  lines.push("Components");
+  lines.push(SEPARATOR);
+  lines.push(`Scheduler:      ${status.components.scheduler}`);
+  lines.push(`Store:          ${status.components.store}`);
+  lines.push(`Logger:         ${status.components.eventLogger}`);
+  lines.push("");
+
+  lines.push("Config");
+  lines.push(SEPARATOR);
+  lines.push(`Data Dir:       ${status.config.dataDir}`);
+  lines.push(`Poll Interval:  ${Math.round(status.config.pollIntervalMs / 1000)}s`);
+  lines.push(`Providers:      ${status.config.providersConfigured}`);
+
+  // Crash recovery section (optional)
+  if (status.lastCrashRecovery) {
+    const cr = status.lastCrashRecovery;
+    lines.push("");
+    lines.push("Recovery");
+    lines.push(SEPARATOR);
+    lines.push(`Last Crash:     ${cr.lastCrashAt}`);
+    lines.push(`Previous PID:   ${cr.previousPid}`);
+    lines.push(`Status:         ${cr.status}`);
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Format a degraded status when health endpoint is unreachable but PID is running.
+ */
+export function formatDegradedStatus(pid: number): string {
+  const lines: string[] = [];
+  lines.push("AOF Daemon Status");
+  lines.push(SEPARATOR);
+  lines.push("Status:         running (health endpoint unreachable)");
+  lines.push(`PID:            ${pid}`);
+  return lines.join("\n");
+}
+
+function cleanupSocketFile(dataDir: string): void {
+  const socketFile = join(dataDir, "daemon.sock");
+  try {
+    if (existsSync(socketFile)) unlinkSync(socketFile);
+  } catch { /* best effort */ }
 }
 
 // ---------------------------------------------------------------------------
@@ -286,7 +424,10 @@ export async function daemonStop(
 // Status
 // ---------------------------------------------------------------------------
 
-export async function daemonStatus(dataDir: string): Promise<void> {
+export async function daemonStatus(
+  dataDir: string,
+  options: DaemonStatusOptions = {},
+): Promise<void> {
   const pid = readPidFile(dataDir);
   const socketPath = join(dataDir, "daemon.sock");
 
@@ -304,17 +445,25 @@ export async function daemonStatus(dataDir: string): Promise<void> {
     return;
   }
 
-  const uptime = await getDaemonUptime(pid);
-  const healthy = await selfCheck(socketPath);
+  // Query the health endpoint
+  const status = await queryStatusEndpoint(socketPath);
 
-  console.log("Daemon running\n");
-  console.log(`   PID:          ${pid}`);
-  if (uptime !== null) {
-    console.log(`   Uptime:       ${formatUptime(uptime)}`);
+  if (!status) {
+    // Health endpoint unreachable but PID is running
+    if (options.json) {
+      console.log(JSON.stringify({ status: "unreachable", pid }, null, 2));
+    } else {
+      console.log(formatDegradedStatus(pid));
+    }
+    return;
   }
-  console.log(`   Health:       ${healthy ? "ok" : "unreachable"}`);
-  console.log(`   Socket:       ${socketPath}`);
-  console.log(`   Data dir:     ${dataDir}`);
+
+  if (options.json) {
+    console.log(JSON.stringify(status, null, 2));
+    return;
+  }
+
+  console.log(formatStatusTable(status, pid));
 }
 
 // ---------------------------------------------------------------------------
@@ -376,8 +525,9 @@ export function registerDaemonCommands(program: Command): void {
   daemon
     .command("status")
     .description("Check daemon status")
-    .action(async () => {
+    .option("--json", "Output raw JSON from /status endpoint")
+    .action(async (opts: { json?: boolean }) => {
       const root = program.opts()["root"] as string;
-      await daemonStatus(root);
+      await daemonStatus(root, { json: opts.json });
     });
 }
