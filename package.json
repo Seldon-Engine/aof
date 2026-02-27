@@ -59,7 +59,8 @@
     "release:major": "GITHUB_TOKEN=$(gh auth token) release-it major"
   },
   "simple-git-hooks": {
-    "commit-msg": "npx --no -- commitlint --edit $1"
+    "commit-msg": "npx --no -- commitlint --edit $1",
+    "pre-commit": "node scripts/check-docs.mjs"
   },
   "keywords": [
     "aof",
