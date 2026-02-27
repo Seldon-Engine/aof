@@ -94,54 +94,14 @@ This creates an isolated OpenClaw instance:
 
 ### 3.1 Test Environment Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  E2E Test Harness (vitest process)                              │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │  Test Orchestrator                                        │  │
-│  │  - Setup/teardown lifecycle                               │  │
-│  │  - Gateway process management                             │  │
-│  │  - Test data seeding                                      │  │
-│  │  - Assertions & verification                              │  │
-│  └───────────────────────────────────────────────────────────┘  │
-│         │                                                         │
-│         │ (HTTP, WebSocket)                                      │
-│         ▼                                                         │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │  OpenClaw Gateway (subprocess)                            │  │
-│  │  - Profile: aof-e2e-test                                  │  │
-│  │  - Port: 19003                                            │  │
-│  │  - Model: mock-test-provider                              │  │
-│  │  - Agents: test-agent-1, test-agent-2, test-agent-3      │  │
-│  └───────────────────────────────────────────────────────────┘  │
-│         │                                                         │
-│         │ (Plugin API)                                           │
-│         ▼                                                         │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │  AOF Plugin (loaded via adapter.ts)                       │  │
-│  │  - TaskStore                                              │  │
-│  │  - AOFService (scheduler)                                 │  │
-│  │  - Tools (aof_task_update, aof_task_complete)            │  │
-│  │  - Gateway endpoints (/metrics, /aof/status)             │  │
-│  └───────────────────────────────────────────────────────────┘  │
-│         │                                                         │
-│         │ (Filesystem)                                           │
-│         ▼                                                         │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │  AOF Test Data Directory                                  │  │
-│  │  ~/.openclaw-aof-e2e-test/aof-test-data/                 │  │
-│  │  ├── tasks/                                               │  │
-│  │  │   ├── inbox/                                           │  │
-│  │  │   ├── ready/                                           │  │
-│  │  │   ├── active/                                          │  │
-│  │  │   ├── review/                                          │  │
-│  │  │   └── done/                                            │  │
-│  │  ├── org/                                                 │  │
-│  │  │   └── org-chart.yaml                                   │  │
-│  │  ├── events/                                              │  │
-│  │  └── views/                                               │  │
-│  └───────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph HARNESS["E2E Test Harness (vitest process)"]
+        ORCH["Test Orchestrator<br>Setup/teardown lifecycle<br>Gateway process management<br>Test data seeding<br>Assertions & verification"]
+        ORCH -->|"HTTP, WebSocket"| GW["OpenClaw Gateway (subprocess)<br>Profile: aof-e2e-test<br>Port: 19003<br>Model: mock-test-provider<br>Agents: test-agent-1, -2, -3"]
+        GW -->|"Plugin API"| PLUGIN["AOF Plugin (adapter.ts)<br>TaskStore, AOFService (scheduler)<br>Tools: aof_task_update, aof_task_complete<br>Endpoints: /metrics, /aof/status"]
+        PLUGIN -->|"Filesystem"| DATA["AOF Test Data Directory<br>~/.openclaw-aof-e2e-test/aof-test-data/<br>tasks/ (inbox, ready, active, review, done)<br>org/org-chart.yaml, events/, views/"]
+    end
 ```
 
 ### 3.2 OpenClaw Test Configuration

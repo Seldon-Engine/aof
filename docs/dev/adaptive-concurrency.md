@@ -20,32 +20,10 @@ This causes:
 
 ### Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Scheduler (scheduler.ts)                                     │
-│                                                               │
-│  maxConcurrentDispatches: 3 (config)                        │
-│  effectiveConcurrencyLimit: null | number (runtime detected) │
-│                                                               │
-│  Effective cap = min(platformLimit, maxConcurrentDispatches) │
-└───────────────────┬─────────────────────────────────────────┘
-                    │
-                    │ spawn() → ExecutorResult
-                    ▼
-┌─────────────────────────────────────────────────────────────┐
-│ OpenClawExecutor (openclaw-executor.ts)                      │
-│                                                               │
-│  Parse error message:                                        │
-│    "max active children for this session (X/Y)"             │
-│                                                               │
-│  Extract Y (platform limit)                                  │
-│                                                               │
-│  Return: ExecutorResult {                                    │
-│    success: false,                                           │
-│    error: string,                                            │
-│    platformLimit?: number  // NEW                            │
-│  }                                                            │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    SCHED["Scheduler<br><i>scheduler.ts</i><br><br>maxConcurrentDispatches: 3 (config)<br>effectiveConcurrencyLimit: null | number<br><br>Effective cap = min(platformLimit, maxConcurrentDispatches)"]
+    SCHED -->|"spawn() → ExecutorResult"| EXEC["OpenClawExecutor<br><i>openclaw-executor.ts</i><br><br>Parse: 'max active children for this session (X/Y)'<br>Extract Y (platform limit)<br><br>Return: ExecutorResult { success, error, platformLimit? }"]
 ```
 
 ### Data Flow

@@ -230,23 +230,10 @@ memoryPools:
 ## Aggregation Engine (v1)
 
 **Architecture:**
-```
-┌─────────────┐
-│  Cold Tier  │  (JSONL event logs)
-└──────┬──────┘
-       │
-       │ (batch aggregation)
-       ▼
-┌─────────────┐
-│ Aggregator  │  (deterministic rules)
-│   Engine    │
-└──────┬──────┘
-       │
-       │ (generate/update)
-       ▼
-┌─────────────┐
-│  Warm Tier  │  (Markdown docs)
-└─────────────┘
+```mermaid
+flowchart TD
+    COLD["Cold Tier<br><i>JSONL event logs</i>"] -->|batch aggregation| AGG["Aggregator Engine<br><i>deterministic rules</i>"]
+    AGG -->|generate / update| WARM["Warm Tier<br><i>Markdown docs</i>"]
 ```
 
 **Aggregator rules (TypeScript):**

@@ -375,10 +375,13 @@ Gates with `when` expressions are evaluated **before** assignment:
 
 **Decision (D4):** All `needs_review` outcomes route back to the **implement** gate (first gate in workflow).
 
-```
-implement ← review ← test ← security ← docs
-   ↑         (needs_review anywhere returns here)
-   └───────────────────────────────────────────
+```mermaid
+flowchart RL
+    docs --> security --> test --> review --> implement
+    security -->|needs_review| implement
+    test -->|needs_review| implement
+    review -->|needs_review| implement
+    docs -->|needs_review| implement
 ```
 
 **Why:** Simpler for agents and covers the majority of real-world cases. V2 may introduce configurable strategies (previous/origin/named) if needed.

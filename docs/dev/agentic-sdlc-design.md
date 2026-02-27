@@ -104,60 +104,22 @@ The pipeline CANNOT stall. If any gate exceeds timeout:
 
 ### Gate Sequence Overview
 
-```
-┌─────────────┐
-│   BACKLOG   │ (PO/PM manage)
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│  READY-CHK  │ (PM validates task is actionable)
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│ IMPLEMENT   │ (Backend/Frontend/etc - TDD mandatory)
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│ CODE-REVIEW │ (Architect - technical quality gate)
-└──────┬──────┘
-       │ reject ─────┐
-       │             │
-       ▼             │
-┌─────────────┐      │
-│     QA      │      │
-└──────┬──────┘      │
-       │ reject ─────┤
-       │             │
-       ▼             │
-┌─────────────┐      │
-│  SECURITY   │ (conditional: security-tagged tasks only)
-└──────┬──────┘      │
-       │ reject ─────┤
-       │             │
-       ▼             │
-┌─────────────┐      │
-│    DOCS     │ (conditional: docs-tagged or API changes)
-└──────┬──────┘      │
-       │ reject ─────┤
-       │             │
-       ▼             │
-┌─────────────┐      │
-│  PO-ACCEPT  │      │
-└──────┬──────┘      │
-       │ reject ─────┘ (all rejections loop to IMPLEMENT with feedback)
-       │
-       ▼
-┌─────────────┐
-│   DEPLOY    │ (conditional: deployable projects only; owned by SRE)
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│    DONE     │
-└─────────────┘
+```mermaid
+flowchart TD
+    BACKLOG["BACKLOG<br><i>PO/PM manage</i>"] --> READY["READY-CHK<br><i>PM validates task is actionable</i>"]
+    READY --> IMPL["IMPLEMENT<br><i>Backend/Frontend/etc — TDD mandatory</i>"]
+    IMPL --> CR["CODE-REVIEW<br><i>Architect — technical quality gate</i>"]
+    CR -->|approve| QA["QA"]
+    CR -->|reject| IMPL
+    QA -->|approve| SEC["SECURITY<br><i>conditional: security-tagged tasks only</i>"]
+    QA -->|reject| IMPL
+    SEC -->|approve| DOCS["DOCS<br><i>conditional: docs-tagged or API changes</i>"]
+    SEC -->|reject| IMPL
+    DOCS -->|approve| PO["PO-ACCEPT"]
+    DOCS -->|reject| IMPL
+    PO -->|approve| DEPLOY["DEPLOY<br><i>conditional: deployable projects only; SRE</i>"]
+    PO -->|reject| IMPL
+    DEPLOY --> DONE["DONE"]
 ```
 
 ### Rejection Loop Behavior
@@ -1392,17 +1354,24 @@ async function canClaimTask(task: Task, agent: Agent): Promise<boolean> {
 **Cumulative Flow Diagram (CFD):**
 PM monitors task distribution across gates:
 
+```mermaid
+---
+config:
+  themeVariables:
+    xyChart:
+      plotColorPalette: "#e74c3c,#f39c12,#2ecc71,#3498db"
+---
+xychart-beta
+    title "Cumulative Flow Diagram"
+    x-axis "Time" [T1, T2, T3, T4, T5, T6]
+    y-axis "Tasks" 0 --> 35
+    line "Backlog" [5, 10, 18, 25, 30, 28]
+    line "Ready" [3, 6, 10, 14, 16, 18]
+    line "Implement" [2, 4, 7, 10, 12, 14]
+    line "Code Review" [1, 2, 3, 4, 4, 5]
 ```
-Tasks
-  │
-30│     ╱╲    Backlog (growing — need to groom)
-  │    ╱  ╲
-20│   ╱    ╲  
-  │  ╱      ╲╱ Ready (stable)
-10│ ╱        ╲ Implement (stable)
-  │╱__________╲Code Review (bottleneck — deep queue)
-0 └────────────────────────────── Time
-```
+
+*Bottleneck visible: Code Review queue grows slower than upstream stages.*
 
 **Action on bottleneck detection:**
 - Add capacity (second reviewer)

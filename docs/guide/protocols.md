@@ -42,24 +42,23 @@ AOF is a **filesystem-first, deterministic task orchestration system**. Protocol
 
 ### How Protocols Fit Into AOF's Task Lifecycle
 
+```mermaid
+stateDiagram-v2
+    backlog --> ready
+    ready --> in_progress: acquireLease, write run.json
+    in_progress --> review: completion.report → run_result.json
+    in_progress --> blocked
+    review --> done: session_end → status transition
+    blocked --> ready
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     AOF Task Lifecycle                       │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  backlog → ready → in-progress → review → done              │
-│                       ↓             ↑                        │
-│                    blocked  ────────┘                        │
-│                                                              │
-│  Protocol touchpoints:                                       │
-│  • ready → in-progress: acquireLease, write run.json        │
-│  • in-progress: heartbeat updates (run_heartbeat.json)      │
-│  • completion.report: write run_result.json                 │
-│  • session_end: apply run_result → status transition        │
-│  • stale heartbeat: consult run_result or reclaim           │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
-```
+
+**Protocol touchpoints:**
+
+- **ready → in-progress:** acquireLease, write `run.json`
+- **in-progress:** heartbeat updates (`run_heartbeat.json`)
+- **completion.report:** write `run_result.json`
+- **session_end:** apply `run_result` → status transition
+- **stale heartbeat:** consult `run_result` or reclaim
 
 **Key integration points:**
 

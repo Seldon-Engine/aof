@@ -6,53 +6,17 @@ This document gives contributors enough context to navigate the AOF codebase, un
 
 ## System Diagram
 
-```
-                        +-----------------+
-                        |  OpenClaw       |
-                        |  Gateway        |
-                        +--------+--------+
-                                 |
-                                 v
-                        +--------+--------+
-                        | OpenClawAdapter |  (src/openclaw/)
-                        | - registers AOF |
-                        |   as plugin     |
-                        | - provides      |
-                        |   gateway tools |
-                        +--------+--------+
-                                 |
-                    +------------+------------+
-                    |                         |
-                    v                         v
-           +-------+-------+        +--------+--------+
-           |  AOFService   |        |  Tool Handlers  |
-           | (poll loop)   |        | (aof_dispatch,  |
-           |  src/service/ |        |  aof_task_*,    |
-           +-------+-------+        |  aof_memory_*)  |
-                   |                 +-----------------+
-                   v
-           +-------+-------+
-           |   Scheduler   |  (src/dispatch/)
-           | - scan tasks  |
-           | - match agents|
-           | - acquire     |
-           |   leases      |
-           +---+-------+---+
-               |       |
-        +------+       +------+
-        v                     v
-+-------+-------+    +--------+--------+
-| TaskStore     |    | GatewayAdapter  |
-| (filesystem)  |    | (dispatch to    |
-| src/store/    |    |  agent)         |
-+-------+-------+    +-----------------+
-        |
-        v
-+-------+-------+    +--------+--------+    +--------+--------+
-| EventLogger   |    | VectorStore     |    | NotificationSvc |
-| (JSONL events)|    | (HNSW + SQLite) |    | (policy engine) |
-| src/events/   |    | src/memory/     |    | src/events/     |
-+---------------+    +-----------------+    +-----------------+
+```mermaid
+graph TD
+    GW[OpenClaw Gateway] --> OCA[OpenClawAdapter<br><i>src/openclaw/</i><br>registers AOF as plugin<br>provides gateway tools]
+    OCA --> SVC[AOFService<br><i>src/service/</i><br>poll loop]
+    OCA --> TOOLS[Tool Handlers<br>aof_dispatch, aof_task_*<br>aof_memory_*]
+    SVC --> SCHED[Scheduler<br><i>src/dispatch/</i><br>scan tasks, match agents<br>acquire leases]
+    SCHED --> TS[TaskStore<br><i>src/store/</i><br>filesystem]
+    SCHED --> GA[GatewayAdapter<br>dispatch to agent]
+    TS --> EL[EventLogger<br><i>src/events/</i><br>JSONL events]
+    TS --> VS[VectorStore<br><i>src/memory/</i><br>HNSW + SQLite]
+    TS --> NS[NotificationSvc<br><i>src/events/</i><br>policy engine]
 ```
 
 ---
@@ -80,10 +44,14 @@ The scheduler is deterministic -- it makes no LLM calls. Routing decisions are b
 
 Tasks are Markdown files with YAML frontmatter, stored in status-based directories. State transitions are atomic filesystem `rename()` calls -- no database, no race conditions beyond the OS.
 
-```
-backlog --> ready --> in-progress --> review --> done
-                         |
-                     blocked --> deadletter (resurrectable)
+```mermaid
+stateDiagram-v2
+    backlog --> ready
+    ready --> in_progress: dispatch
+    in_progress --> review
+    in_progress --> blocked
+    review --> done
+    blocked --> deadletter: resurrectable
 ```
 
 Valid transitions are enforced by `VALID_TRANSITIONS` in `src/schemas/task.ts`. The `ITaskStore` interface (`src/store/interfaces.ts`) defines the contract: `create`, `get`, `list`, `transition`, `update`. The `FilesystemTaskStore` (`src/store/task-store.ts`) implements this with filesystem operations.

@@ -7,25 +7,15 @@
 
 The memory module gives AOF agents persistent, searchable knowledge. It follows a three-tier hot/warm/cold model with hybrid search (vector + full-text).
 
-```
-┌──────────────┐     ┌──────────────┐
-│  Agent Tools │────▶│  Embedding   │
-│  (store/     │     │  Provider    │
-│   search/    │     │  (OpenAI)    │
-│   delete/    │     └──────┬───────┘
-│   list/get)  │            │
-└──────┬───────┘            │
-       │              ┌─────▼───────┐
-       │              │  Vector     │
-       ├─────────────▶│  Store      │
-       │              └─────┬───────┘
-       │              ┌─────▼───────┐
-       ├─────────────▶│  FTS Store  │
-       │              └─────┬───────┘
-       │              ┌─────▼───────┐
-       └─────────────▶│  Hybrid     │
-                      │  Search     │
-                      └─────────────┘
+```mermaid
+graph TD
+    TOOLS["Agent Tools<br>store / search / delete / list / get"] --> EMB["Embedding Provider<br>(OpenAI)"]
+    EMB --> VS["Vector Store"]
+    TOOLS --> VS
+    TOOLS --> FTS["FTS Store"]
+    TOOLS --> HS["Hybrid Search"]
+    VS --> HS
+    FTS --> HS
 ```
 
 ### Tiers

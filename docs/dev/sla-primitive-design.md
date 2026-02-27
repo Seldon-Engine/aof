@@ -22,38 +22,12 @@ Implement Service Level Agreement (SLA) primitives to detect and alert on tasks 
 
 ## Architecture Overview
 
-```
-┌────────────────────────────────────────────────────┐
-│              Task Schema (Frontmatter)             │
-│  ---                                               │
-│  id: AOF-123                                       │
-│  routing:                                          │
-│    agent: swe-backend                              │
-│  sla:                                              │
-│    maxInProgressMs: 3600000  # 1 hour override    │
-│    onViolation: alert        # Phase 1 only       │
-│  ---                                               │
-└──────────────┬─────────────────────────────────────┘
-               │
-┌──────────────▼─────────────────────────────────────┐
-│           org-chart.yaml (Project Defaults)        │
-│  aof:                                              │
-│    projects:                                       │
-│      my-project:                                   │
-│        sla:                                        │
-│          defaultMaxInProgressMs: 3600000  # 1hr   │
-│          researchMaxInProgressMs: 14400000 # 4hr  │
-│          onViolation: alert                        │
-└──────────────┬─────────────────────────────────────┘
-               │
-┌──────────────▼─────────────────────────────────────┐
-│         Scheduler (Poll Cycle Integration)         │
-│  - For each in-progress task:                      │
-│    - Calculate duration: now - task.updatedAt     │
-│    - Get SLA limit (task override or project default) │
-│    - If duration > limit → emit SLA violation event│
-│    - Rate-limit alerts (1 per task per 15min)     │
-└────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    TASK["Task Schema (Frontmatter)<br><br>id: AOF-123<br>routing.agent: swe-backend<br>sla.maxInProgressMs: 3600000<br>sla.onViolation: alert"]
+    ORG["org-chart.yaml (Project Defaults)<br><br>defaultMaxInProgressMs: 3600000 (1hr)<br>researchMaxInProgressMs: 14400000 (4hr)<br>onViolation: alert"]
+    SCHED["Scheduler (Poll Cycle)<br><br>Calculate duration: now − task.updatedAt<br>Get SLA limit (task override or project default)<br>If duration > limit → emit SLA violation event<br>Rate-limit alerts (1 per task per 15min)"]
+    TASK --> ORG --> SCHED
 ```
 
 ### Data Flow

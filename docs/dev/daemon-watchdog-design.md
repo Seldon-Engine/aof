@@ -22,18 +22,9 @@ Implement health monitoring and auto-restart for the AOF daemon to prevent indef
 
 ## Architecture Overview
 
-```
-┌────────────────────────────────────────────────────┐
-│                 External Monitors                  │
-│  (OpenClaw Plugin, systemd, Docker healthcheck)   │
-└──────────────┬─────────────────────────────────────┘
-               │ HTTP GET /health (every 60s)
-               │
-┌──────────────▼─────────────────────────────────────┐
-│            AOF Daemon (Core)                       │
-│  - Health Endpoint: GET /health → 200 OK          │
-│  - No watchdog logic in core (separation)         │
-└────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    MON["External Monitors<br><i>OpenClaw Plugin, systemd, Docker healthcheck</i>"] -->|"HTTP GET /health (every 60s)"| DAEMON["AOF Daemon (Core)<br>Health Endpoint: GET /health → 200 OK<br>No watchdog logic in core (separation)"]
 ```
 
 ### Separation of Concerns
