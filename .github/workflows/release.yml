@@ -18,6 +18,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -41,10 +43,46 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
 
+      - name: Generate changelog
+        id: changelog
+        shell: bash
+        run: |
+          # Find the previous tag
+          PREV_TAG=$(git tag --sort=-v:refname | grep '^v' | sed -n '2p')
+          if [ -z "$PREV_TAG" ]; then
+            RANGE="HEAD"
+          else
+            RANGE="${PREV_TAG}..HEAD"
+          fi
+
+          # Build changelog grouped by conventional-commit type
+          BODY=""
+          for pair in \
+            "feat:Features" \
+            "fix:Bug Fixes" \
+            "perf:Performance" \
+            "refactor:Refactor" \
+            "test:Tests" \
+            "docs:Documentation"; do
+            type="${pair%%:*}"
+            header="${pair#*:}"
+            commits=$(git log --pretty=format:"- %s (%h)" "$RANGE" --grep="^${type}" 2>/dev/null || true)
+            if [ -n "$commits" ]; then
+              BODY="${BODY}## ${header}"$'\n'"${commits}"$'\n\n'
+            fi
+          done
+
+          {
+            echo "body<<CHANGELOG_EOF"
+            echo "$BODY"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build release tarball
         run: node scripts/build-tarball.mjs ${{ steps.version.outputs.version }}
 
       - name: Upload tarball to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          body: ${{ steps.changelog.outputs.body }}
           files: aof-${{ steps.version.outputs.version }}.tar.gz

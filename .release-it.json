@@ -20,14 +20,14 @@
       "preset": {
         "name": "conventionalcommits",
         "types": [
-          { "type": "feat",     "section": "✨ Features" },
-          { "type": "fix",      "section": "🐛 Bug Fixes" },
-          { "type": "perf",     "section": "⚡ Performance" },
-          { "type": "refactor", "section": "♻️  Refactor" },
-          { "type": "test",     "section": "🧪 Tests" },
-          { "type": "docs",     "section": "📚 Documentation" },
-          { "type": "chore",    "section": "🔧 Chores", "hidden": true },
-          { "type": "ci",       "section": "🔄 CI/CD",  "hidden": true }
+          { "type": "feat",     "section": "Features" },
+          { "type": "fix",      "section": "Bug Fixes" },
+          { "type": "perf",     "section": "Performance" },
+          { "type": "refactor", "section": "Refactor" },
+          { "type": "test",     "section": "Tests" },
+          { "type": "docs",     "section": "Documentation" },
+          { "type": "chore",    "section": "Chores", "hidden": true },
+          { "type": "ci",       "section": "CI/CD",  "hidden": true }
         ]
       },
       "infile": "CHANGELOG.md",
