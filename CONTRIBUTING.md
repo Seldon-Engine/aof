@@ -20,14 +20,14 @@ Thank you for your interest in contributing to AOF! This document covers develop
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 22+
 - npm 9+
 - Git
 
 ### Clone and install
 
 ```bash
-git clone https://github.com/demerzel-ops/aof.git
+git clone https://github.com/d0labs/aof.git
 cd aof
 npm install
 npm run build
@@ -39,7 +39,7 @@ npm run build
 npm test
 ```
 
-All 2,195 tests should pass. If any fail on a clean clone, please [open an issue](#reporting-issues).
+All tests should pass. If any fail on a clean clone, please [open an issue](#reporting-issues).
 
 ---
 
@@ -122,6 +122,13 @@ refactor: extract gate-context-builder from scheduler
 2. The scheduler must remain free of I/O side effects beyond the task store and event logger
 3. Protocol messages must be validated against Zod schemas before processing
 4. All filesystem operations on tasks must be atomic (the store handles this)
+
+### Further reading
+
+- [Development Workflow](docs/dev/dev-workflow.md) -- Fast-feedback development loop
+- [Engineering Standards](docs/dev/engineering-standards.md) -- Code quality and module structure rules
+- [Architecture Overview](docs/dev/architecture.md) -- System architecture for contributors
+- [Definition of Done](docs/dev/definition-of-done.md) -- What "complete" means for AOF tasks
 
 ---
 
