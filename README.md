@@ -1,16 +1,16 @@
 # AOF -- Agentic Ops Fabric
 
-**Tasks never get dropped.** AOF is a deterministic orchestration layer for multi-agent systems -- tasks survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
+**Orchestrate teams of agents like you'd orchestrate teams of people.** AOF is a multi-team agent orchestration platform -- define orgs, teams, individual agents, and teams of teams, then enforce gated workflows across any domain: software engineering, RevOps, operations, sales and marketing, research, and more. Agents collaborate through shared memories, tasks, and protocols, with the same organizational primitives a human team would use. Nothing gets dropped -- tasks survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end.
 
 ---
 
 ## What It Does
 
-- **Task orchestration** -- Filesystem-first kanban with atomic state transitions, lease-based locking, and cascading dependencies
-- **Multi-agent dispatch** -- Org chart governance, capability-based routing, and adaptive concurrency control
-- **Workflow gates** -- Enforce multi-stage processes (implement, review, QA, deploy) with rejection loops
-- **Semantic memory** -- HNSW vector search with tiered hot/warm/cold memory pools and hybrid BM25+vector retrieval
-- **Event sourcing** -- Append-only JSONL event log feeding Prometheus metrics, notifications, and audit trails
+- **Multi-team agent orchestration** -- Model orgs, teams, individual agents, and hierarchies of teams with declarative YAML org charts; route work by capability, team, and priority
+- **Domain-agnostic workflows** -- Enforce gated processes for any domain: SWE (implement, review, QA, deploy), RevOps (qualify, enrich, handoff), sales pipelines, marketing campaigns, research workflows -- if it has a process, AOF can govern it
+- **Collaborative primitives** -- Agents share memories, tasks, and context the way human teams do; semantic memory with HNSW vector search and tiered curation lets agents build on each other's knowledge
+- **Workflow enforcement** -- Multi-stage gates with rejection loops ensure agents follow the process; no skipping steps, no dropped handoffs
+- **Resilient task fabric** -- Filesystem-first kanban with atomic state transitions, lease-based locking, deadletter recovery, and event sourcing; tasks survive crashes and always resume
 
 ---
 
@@ -44,7 +44,7 @@ See the **[Getting Started Guide](docs/guide/getting-started.md)** for a complet
 
 | Feature | Description | Docs |
 |---------|-------------|------|
-| Org chart governance | Declarative YAML defines agents, teams, routing rules, memory scopes | [Configuration](docs/guide/configuration.md) |
+| Org chart governance | Declarative YAML defines agents, teams, teams of teams, routing rules, and memory scopes | [Configuration](docs/guide/configuration.md) |
 | Workflow gates | Multi-stage review gates with rejection loops | [Workflow Gates](docs/guide/workflow-gates.md) |
 | Protocol system | Typed inter-agent messages: handoff, resume, status update, completion | [Protocols](docs/guide/protocols.md) |
 | Semantic memory | HNSW vector index with hybrid search and tiered curation | [Memory](docs/guide/memory.md) |
@@ -57,7 +57,7 @@ See the **[Getting Started Guide](docs/guide/getting-started.md)** for a complet
 
 ### For Users
 
-- **[Getting Started](docs/guide/getting-started.md)** -- Install, configure, dispatch your first task
+- **[Getting Started](docs/guide/getting-started.md)** -- Install, configure, and orchestrate your first agent team
 - **[Configuration Reference](docs/guide/configuration.md)** -- Org chart schema, AOF config, OpenClaw plugin wiring
 - **[CLI Reference](docs/guide/cli-reference.md)** -- Complete command reference (auto-generated)
 - **[Full User Guide](docs/README.md)** -- All user-facing docs

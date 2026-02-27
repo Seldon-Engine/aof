@@ -1,6 +1,8 @@
 # Getting Started with AOF
 
-This guide walks you through installing AOF, setting up your first org chart, and dispatching your first task. By the end, you will have a running AOF daemon that automatically assigns and dispatches tasks to agents.
+AOF orchestrates teams of agents the way you would orchestrate teams of people -- with org charts, enforced workflows, shared memory, and collaborative task management. It works for any domain: software engineering, RevOps, operations, sales and marketing, research, or any process that needs governance across multiple agents.
+
+This guide walks you through installing AOF, defining your first agent team, and watching the platform orchestrate work across your agents. By the end, you will have a running AOF daemon that automatically routes, assigns, and dispatches tasks through your team.
 
 ---
 
@@ -11,7 +13,7 @@ Before you begin, make sure you have:
 - **Node.js >= 22.0.0** (LTS recommended)
 - **An OpenClaw gateway** running on your machine or network
 
-AOF is an OpenClaw plugin. It runs inside the OpenClaw gateway process and uses the gateway to dispatch work to agents.
+AOF is an OpenClaw plugin. It runs inside the OpenClaw gateway process and uses the gateway to dispatch work to agents. AOF brings org-chart governance, workflow enforcement, and collaborative memory to agent teams running on OpenClaw -- turning a collection of individual agents into a coordinated organization.
 
 > **Tip:** Check your Node version with `node --version`. If you need to upgrade, use [nvm](https://github.com/nvm-sh/nvm) or your system's package manager.
 
