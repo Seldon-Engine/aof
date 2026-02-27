@@ -89,7 +89,7 @@ export async function buildDispatchActions(
   // AOF-adf: Load org chart for per-team throttling
   let orgChart: Awaited<ReturnType<typeof loadOrgChart>> | null = null;
   try {
-    const orgChartPath = join(store.projectRoot, "org-chart.yaml");
+    const orgChartPath = join(store.projectRoot, "org", "org-chart.yaml");
     const result = await loadOrgChart(orgChartPath);
     if (result.success) {
       orgChart = result;

@@ -37,6 +37,7 @@ describe("Scheduler Throttling (AOF-adf)", () => {
     await store.init();
     const eventsDir = join(tmpDir, "events");
     await mkdir(eventsDir, { recursive: true });
+    await mkdir(join(tmpDir, "org"), { recursive: true });
     logger = new EventLogger(eventsDir);
     executor = new MockAdapter();
     
@@ -195,7 +196,7 @@ describe("Scheduler Throttling (AOF-adf)", () => {
         },
       ],
     };
-    await writeFile(join(tmpDir, "org-chart.yaml"), stringifyYaml(orgChart));
+    await writeFile(join(tmpDir, "org", "org-chart.yaml"), stringifyYaml(orgChart));
 
     const config = {
       dataDir: tmpDir,
@@ -254,7 +255,7 @@ describe("Scheduler Throttling (AOF-adf)", () => {
         },
       ],
     };
-    await writeFile(join(tmpDir, "org-chart.yaml"), stringifyYaml(orgChart));
+    await writeFile(join(tmpDir, "org", "org-chart.yaml"), stringifyYaml(orgChart));
 
     const config = {
       dataDir: tmpDir,
@@ -436,7 +437,7 @@ describe("Scheduler Throttling (AOF-adf)", () => {
         },
       ],
     };
-    await writeFile(join(tmpDir, "org-chart.yaml"), stringifyYaml(orgChart));
+    await writeFile(join(tmpDir, "org", "org-chart.yaml"), stringifyYaml(orgChart));
 
     const config = {
       dataDir: tmpDir,

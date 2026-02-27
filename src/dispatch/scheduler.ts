@@ -423,7 +423,7 @@ export async function poll(
   // Runs after normal dispatch cycle to evaluate triggers and create review tasks
   try {
     // Load org chart to get team configurations
-    const orgChartPath = join(config.dataDir, "org.yaml");
+    const orgChartPath = join(config.dataDir, "org", "org-chart.yaml");
     let orgChartExists = true;
     try {
       await access(orgChartPath);

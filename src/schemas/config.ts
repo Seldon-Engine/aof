@@ -67,7 +67,7 @@ export const AofConfig = z.object({
   /** Root data directory for AOF runtime data. */
   dataDir: z.string().default("~/.openclaw/aof"),
   /** Path to org chart YAML file. */
-  orgChartPath: z.string().default("org-chart.yaml"),
+  orgChartPath: z.string().default("org/org-chart.yaml"),
   /** Root directory for vault (Projects/, Resources/). */
   vaultRoot: z.string().optional(),
   dispatcher: DispatcherConfig.default({}),

@@ -1,0 +1,120 @@
+# AOF Org Chart — Example Configuration
+# =======================================
+# This file defines your agent organization: who they are, what they can do,
+# and how tasks get routed between them.
+#
+# Location:
+#   Development: ./org/org-chart.yaml (relative to repo root)
+#   Runtime:     ~/.openclaw/aof/org/org-chart.yaml (or your configured dataDir)
+#
+# Commands:
+#   aof init          — interactive setup that generates this from your OpenClaw agents
+#   aof org validate  — check this file against the schema
+#   aof org show      — pretty-print the resolved org chart
+#   aof org lint      — check referential integrity
+#
+# Schema: src/schemas/org-chart.ts
+
+schemaVersion: 1
+
+# --- Teams ---
+# Teams group agents. Optional dispatch throttling and murmur orchestration.
+teams:
+  - id: ops
+    name: Operations
+    description: Strategic coordination and task orchestration
+    lead: coordinator
+  - id: engineering
+    name: Engineering
+    description: Implementation, review, and quality assurance
+    lead: tech-lead
+    # Per-team dispatch throttling (optional)
+    dispatch:
+      maxConcurrent: 2
+      minIntervalMs: 10000
+    # Murmur: automated orchestration reviews (optional)
+    murmur:
+      triggers:
+        - kind: queueEmpty
+      context:
+        - taskSummary
+
+# --- Agents ---
+# Each agent maps to an OpenClaw agent profile via openclawAgentId.
+agents:
+  - id: coordinator
+    openclawAgentId: main
+    name: Project Coordinator
+    description: Strategic planning and task delegation
+    team: ops
+    canDelegate: true
+    active: true
+    capabilities:
+      tags: [orchestration, planning, delegation]
+      concurrency: 3
+    comms:
+      preferred: send
+      fallbacks: [send, cli]
+
+  - id: tech-lead
+    openclawAgentId: swe-architect
+    name: Technical Lead
+    description: Architecture decisions and code review
+    team: engineering
+    reportsTo: coordinator
+    canDelegate: true
+    active: true
+    capabilities:
+      tags: [architecture, review, backend, frontend]
+      concurrency: 2
+    comms:
+      preferred: send
+      fallbacks: [send, cli]
+
+  - id: developer
+    openclawAgentId: swe-backend
+    name: Developer
+    description: Implementation and bug fixes
+    team: engineering
+    reportsTo: tech-lead
+    canDelegate: false
+    active: true
+    capabilities:
+      tags: [implementation, backend, testing]
+      concurrency: 2
+    comms:
+      preferred: cli
+      fallbacks: [cli]
+
+  - id: reviewer
+    openclawAgentId: swe-qa
+    name: Quality Reviewer
+    description: Code review and validation
+    team: engineering
+    reportsTo: tech-lead
+    canDelegate: false
+    active: true
+    capabilities:
+      tags: [review, qa, validation]
+      concurrency: 1
+    comms:
+      preferred: cli
+      fallbacks: [cli]
+
+# --- Routing Rules ---
+# Determines which agent handles a task based on tags.
+# Evaluated in weight order (lowest first); first match wins.
+routing:
+  - matchTags: [backend, implementation]
+    targetAgent: developer
+    weight: 10
+  - matchTags: [review, qa]
+    targetAgent: reviewer
+    weight: 10
+  - matchTags: [architecture, design]
+    targetAgent: tech-lead
+    weight: 10
+  # Catch-all: unmatched tasks go to the coordinator
+  - matchTags: []
+    targetAgent: coordinator
+    weight: 100

@@ -38,6 +38,7 @@ describe("Murmur Scheduler Integration", () => {
       },
     });
     await store.init();
+    await mkdir(join(tmpDir, "org"), { recursive: true });
     logger = new EventLogger(join(tmpDir, "events"));
   });
 
@@ -63,9 +64,8 @@ describe("Murmur Scheduler Integration", () => {
       ],
     };
 
-    await mkdir(tmpDir, { recursive: true });
     await writeFile(
-      join(tmpDir, "org.yaml"),
+      join(tmpDir, "org", "org-chart.yaml"),
       stringifyYaml(orgChart),
       "utf-8"
     );
@@ -143,7 +143,7 @@ describe("Murmur Scheduler Integration", () => {
     };
 
     await writeFile(
-      join(tmpDir, "org.yaml"),
+      join(tmpDir, "org", "org-chart.yaml"),
       stringifyYaml(orgChart),
       "utf-8"
     );
@@ -265,7 +265,7 @@ describe("Murmur Scheduler Integration", () => {
     };
 
     await writeFile(
-      join(tmpDir, "org.yaml"),
+      join(tmpDir, "org", "org-chart.yaml"),
       stringifyYaml(orgChart),
       "utf-8"
     );
@@ -328,7 +328,7 @@ describe("Murmur Scheduler Integration", () => {
     };
 
     await writeFile(
-      join(tmpDir, "org.yaml"),
+      join(tmpDir, "org", "org-chart.yaml"),
       stringifyYaml(orgChart),
       "utf-8"
     );
@@ -376,7 +376,7 @@ describe("Murmur Scheduler Integration", () => {
     };
 
     await writeFile(
-      join(tmpDir, "org.yaml"),
+      join(tmpDir, "org", "org-chart.yaml"),
       stringifyYaml(orgChart),
       "utf-8"
     );
