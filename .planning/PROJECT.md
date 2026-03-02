@@ -48,7 +48,15 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 
 ### Active
 
-(No active requirements — planning next milestone)
+- [ ] Per-task workflow DAG schema (templates + ad-hoc agent-composed pipelines)
+- [ ] Hop-based execution model (scheduler dispatches each hop independently)
+- [ ] Scheduler DAG advancement (evaluate graph on completion, dispatch eligible next hops)
+- [ ] Configurable hop behavior (auto-advance vs pause-for-review per hop)
+- [ ] Artifact handoff between hops via task work directory
+- [ ] Conditional branching and parallel execution within workflow DAGs
+- [ ] Pre-defined workflow templates in project config
+- [ ] Agent API for composing ad-hoc workflows at task creation time
+- [ ] Gate system replacement (review gates become review hops)
 
 ### Out of Scope
 
@@ -57,16 +65,16 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 - Multi-host distribution — single-machine deployment for now
 - Non-OpenClaw runtimes — AOF is an OpenClaw plugin specifically
 - OpenTelemetry integration — deferred to v2
-- Self-healing (circuit breaker, dead-letter resurrection, stuck session recovery) — deferred to v1.2
-- Agent-guided org chart setup — deferred to v1.2
-- Standalone daemon executor wiring — deferred to v1.2
-- Memory search reranker — deferred to v1.2
+- Self-healing (circuit breaker, dead-letter resurrection, stuck session recovery) — deferred to v1.3
+- Agent-guided org chart setup — deferred to v1.3
+- Standalone daemon executor wiring — deferred to v1.3
+- Memory search reranker — deferred to v1.3
 - Memory tier auto compaction — deferred to v2
 - Autoupdate mechanism — deferred to v2
 - OpenClaw version compat checks — deferred to v2
 - Basic telemetry collection — deferred to v2
 - Kanban/mailbox view polish — deferred to v2
-- Large task orchestration / agent subtask creation — deferred to v2
+- Large task orchestration / agent subtask creation — partially addressed by v1.2 workflows, full scope deferred to v2
 - npm registry publishing — distribution via GitHub Releases + installer
 
 ## Context
@@ -79,6 +87,8 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 - The org chart (`org/org-chart.yaml`) drives all routing, memory, and agent configuration
 - v1.0 shipped: scheduler is restart-safe, daemon runs under OS supervision, gateway dispatch works via GatewayAdapter
 - v1.1 shipped: memory fixed, CI pipeline live, curl|sh installer, multi-project isolation verified, documentation complete with guardrails
+- v1.2 focus: per-task workflow DAGs — tasks carry pipeline definitions (hops), scheduler executes DAG mechanically, replaces linear gate system
+- OpenClaw constraint: no nested agent sessions — scheduler must advance hops between independent sessions
 - Node 22 pinned as prerequisite (Node 24/25 have better-sqlite3 build failures)
 
 ## Constraints
@@ -113,4 +123,4 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 | Product messaging: "multi-team agent orchestration platform" | Domain-agnostic positioning, not implementation-centric | ✓ Good |
 
 ---
-*Last updated: 2026-02-27 after v1.1 milestone*
+*Last updated: 2026-03-02 after v1.2 milestone start*
