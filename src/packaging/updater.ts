@@ -206,8 +206,7 @@ export async function rollbackUpdate(opts: RollbackOptions): Promise<RollbackRes
   // Get version from backup
   const restoredVersion = await getVersionFromBackup(backupPath);
 
-  // Restore all paths from backup
-  const allPaths = [".aof", ...preservePaths];
+  const allPaths = [...preservePaths];
 
   for (const path of allPaths) {
     const sourcePath = join(backupPath, path);
@@ -281,8 +280,7 @@ async function createBackup(aofRoot: string, paths: string[]): Promise<string> {
 
   await mkdir(backupPath, { recursive: true });
 
-  // Always backup .aof config
-  const allPaths = [".aof", ...paths];
+  const allPaths = [...paths];
 
   for (const path of allPaths) {
     const sourcePath = join(aofRoot, path);

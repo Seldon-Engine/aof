@@ -281,7 +281,7 @@ extract_and_install() {
     BACKUP_DIR="$INSTALL_DIR/.aof-backup/backup-$(date +%s)"
     mkdir -p "$BACKUP_DIR"
 
-    for dir in tasks events memory state data .aof logs; do
+    for dir in tasks events memory state data logs; do
       if [ -d "$INSTALL_DIR/$dir" ]; then
         cp -R "$INSTALL_DIR/$dir" "$BACKUP_DIR/$dir"
       fi
@@ -306,7 +306,7 @@ extract_and_install() {
     err "Failed to extract tarball"
     if [ -n "$IS_UPGRADE" ] && [ -n "$BACKUP_DIR" ]; then
       warn "Restoring from backup..."
-      for dir in tasks events memory state data .aof logs; do
+      for dir in tasks events memory state data logs; do
         if [ -d "$BACKUP_DIR/$dir" ]; then
           rm -rf "$INSTALL_DIR/$dir"
           cp -R "$BACKUP_DIR/$dir" "$INSTALL_DIR/$dir"
@@ -339,13 +339,10 @@ extract_and_install() {
 
   # If upgrade: restore data directories (tarball may have overwritten them)
   if [ -n "$IS_UPGRADE" ] && [ -n "$BACKUP_DIR" ]; then
-    for dir in tasks events memory state data .aof logs; do
+    for dir in tasks events memory state data logs; do
       if [ -d "$BACKUP_DIR/$dir" ]; then
-        # Only restore if tarball did not create these (data dirs should come from backup)
-        if [ ! -d "$INSTALL_DIR/$dir" ] || [ "$dir" = "tasks" ] || [ "$dir" = "events" ] || [ "$dir" = "memory" ] || [ "$dir" = "state" ] || [ "$dir" = "data" ] || [ "$dir" = ".aof" ] || [ "$dir" = "logs" ]; then
-          rm -rf "$INSTALL_DIR/$dir"
-          cp -R "$BACKUP_DIR/$dir" "$INSTALL_DIR/$dir"
-        fi
+        rm -rf "$INSTALL_DIR/$dir"
+        cp -R "$BACKUP_DIR/$dir" "$INSTALL_DIR/$dir"
       fi
     done
     for f in memory.db memory-hnsw.dat; do
