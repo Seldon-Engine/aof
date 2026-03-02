@@ -191,7 +191,9 @@ An agent can't proceed:
 3. When unblocked, task returns to ready and gets re-dispatched
 ```
 
-### Pattern 4: Dependency chains
+### Pattern 4: Dependency chains (The DAG Handoff Method)
+
+**CRITICAL RULE:** To prevent agents from stalling between phases, always pre-seed phase transitions using AOF dependencies. Never rely on implicit knowledge for handoffs.
 
 Coordinator sets up sequential work:
 
