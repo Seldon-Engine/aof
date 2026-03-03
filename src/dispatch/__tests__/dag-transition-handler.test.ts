@@ -28,9 +28,15 @@ vi.mock("../../store/task-store.js", () => ({
   serializeTask: vi.fn().mockReturnValue("---\nmocked: true\n---\n\nbody\n"),
 }));
 
+// Mock node:fs/promises for mkdir
+vi.mock("node:fs/promises", () => ({
+  mkdir: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { handleDAGHopCompletion, dispatchDAGHop } from "../dag-transition-handler.js";
 import { evaluateDAG } from "../dag-evaluator.js";
 import writeFileAtomic from "write-file-atomic";
+import { mkdir } from "node:fs/promises";
 
 // ---------------------------------------------------------------------------
 // Test Helpers
@@ -535,6 +541,142 @@ describe("dispatchDAGHop", () => {
 
     // After successful dispatch, hop is dispatched
     expect(task.frontmatter.workflow!.state.hops.implement.status).toBe("dispatched");
+  });
+
+  it("creates artifact directory at work/<hopId>/ before spawning session", async () => {
+    const task = makeTask({
+      definition: {
+        name: "test-workflow",
+        hops: [
+          { id: "implement", role: "swe", dependsOn: [], joinType: "all", autoAdvance: true, canReject: false },
+        ],
+      },
+      state: {
+        status: "running",
+        hops: {
+          implement: { status: "ready" },
+        },
+      },
+    });
+
+    const executor = makeExecutor(true);
+    const logger = makeLogger();
+    const store = makeStore();
+    const config = { spawnTimeoutMs: 30_000 };
+
+    await dispatchDAGHop(store, logger, config, executor, task, "implement");
+
+    // mkdir should have been called with recursive: true
+    const mockedMkdir = vi.mocked(mkdir);
+    expect(mockedMkdir).toHaveBeenCalledOnce();
+    expect(mockedMkdir).toHaveBeenCalledWith(
+      "/tmp/tasks/work/implement",
+      { recursive: true },
+    );
+  });
+
+  it("uses recursive directory creation (mkdir -p equivalent)", async () => {
+    const task = makeTask({
+      definition: {
+        name: "test-workflow",
+        hops: [
+          { id: "deep-hop", role: "swe", dependsOn: [], joinType: "all", autoAdvance: true, canReject: false },
+        ],
+      },
+      state: {
+        status: "running",
+        hops: {
+          "deep-hop": { status: "ready" },
+        },
+      },
+    });
+
+    const executor = makeExecutor(true);
+    const logger = makeLogger();
+    const store = makeStore();
+    const config = { spawnTimeoutMs: 30_000 };
+
+    await dispatchDAGHop(store, logger, config, executor, task, "deep-hop");
+
+    const mockedMkdir = vi.mocked(mkdir);
+    // Verify recursive flag is set
+    expect(mockedMkdir.mock.calls[0]![1]).toEqual({ recursive: true });
+  });
+
+  it("derives directory path from task.path: join(dirname(task.path!), 'work', hopId)", async () => {
+    const task = makeTask(
+      {
+        definition: {
+          name: "test-workflow",
+          hops: [
+            { id: "build", role: "swe", dependsOn: [], joinType: "all", autoAdvance: true, canReject: false },
+          ],
+        },
+        state: {
+          status: "running",
+          hops: {
+            build: { status: "ready" },
+          },
+        },
+      },
+      { path: "/projects/myapp/tasks/TASK-2026-03-03-001.md" },
+    );
+
+    const executor = makeExecutor(true);
+    const logger = makeLogger();
+    const store = makeStore();
+    const config = { spawnTimeoutMs: 30_000 };
+
+    await dispatchDAGHop(store, logger, config, executor, task, "build");
+
+    const mockedMkdir = vi.mocked(mkdir);
+    // dirname of /projects/myapp/tasks/TASK-2026-03-03-001.md is /projects/myapp/tasks
+    expect(mockedMkdir).toHaveBeenCalledWith(
+      "/projects/myapp/tasks/work/build",
+      { recursive: true },
+    );
+  });
+
+  it("calls mkdir BEFORE spawnSession", async () => {
+    const callOrder: string[] = [];
+
+    const task = makeTask({
+      definition: {
+        name: "test-workflow",
+        hops: [
+          { id: "implement", role: "swe", dependsOn: [], joinType: "all", autoAdvance: true, canReject: false },
+        ],
+      },
+      state: {
+        status: "running",
+        hops: {
+          implement: { status: "ready" },
+        },
+      },
+    });
+
+    const mockedMkdir = vi.mocked(mkdir);
+    mockedMkdir.mockImplementation(async () => {
+      callOrder.push("mkdir");
+      return undefined;
+    });
+
+    const executor = {
+      spawnSession: vi.fn().mockImplementation(async () => {
+        callOrder.push("spawnSession");
+        return { success: true, sessionId: "session-123" };
+      }),
+      getSessionStatus: vi.fn(),
+      forceCompleteSession: vi.fn(),
+    } as unknown as GatewayAdapter;
+
+    const logger = makeLogger();
+    const store = makeStore();
+    const config = { spawnTimeoutMs: 30_000 };
+
+    await dispatchDAGHop(store, logger, config, executor, task, "implement");
+
+    expect(callOrder).toEqual(["mkdir", "spawnSession"]);
   });
 });
 
