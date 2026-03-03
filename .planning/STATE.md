@@ -4,12 +4,12 @@ milestone: v1.3
 milestone_name: Seamless Upgrade
 status: active
 stopped_at: null
-last_updated: "2026-03-03T22:00:00.000Z"
-last_activity: 2026-03-03 -- Milestone v1.3 started
+last_updated: "2026-03-03T23:00:00.000Z"
+last_activity: 2026-03-03 -- Roadmap created (4 phases, 20 requirements)
 progress:
-  total_phases: 0
+  total_phases: 4
   completed_phases: 0
-  total_plans: 0
+  total_plans: 8
   completed_plans: 0
   percent: 0
 ---
@@ -21,18 +21,26 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-03)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** v1.3 Seamless Upgrade -- Defining requirements
+**Current focus:** v1.3 Seamless Upgrade -- Phase 17 ready to plan
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 17 of 20 (Migration Foundation & Framework Hardening)
 Plan: --
-Status: Defining requirements
-Last activity: 2026-03-03 -- Milestone v1.3 started
+Status: Ready to plan
+Last activity: 2026-03-03 -- Roadmap created (4 phases, 20 requirements mapped)
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
 **Prior milestones:** v1.0 (7 plans), v1.1 (16 plans), v1.2 (16 plans) -- 39 plans total across 16 phases
+
+**By Phase:**
+
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| - | - | - | - |
 
 ## Accumulated Context
 
@@ -45,6 +53,7 @@ All prior decisions logged in PROJECT.md Key Decisions table.
 - v1.0: Phases 1-3 (Foundation, Daemon, Gateway)
 - v1.1: Phases 4-9 (Memory, CI, Installer, Projects, Dependency Fix, Documentation)
 - v1.2: Phases 10-16 (Schema, Evaluator, Scheduler, Safety, Templates, Migration, Integration)
+- v1.3: Phases 17-20 (Migration Framework, DAG-as-Default, Verification, Release)
 
 ### Pending Todos
 
@@ -56,6 +65,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-03T22:00:00.000Z
-Stopped at: null
+Last session: 2026-03-03T23:00:00.000Z
+Stopped at: Roadmap created, ready to plan Phase 17
 Resume file: None

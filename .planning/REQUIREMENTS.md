@@ -1,7 +1,7 @@
 # Requirements: AOF v1.3 Seamless Upgrade
 
 **Defined:** 2026-03-03
-**Core Value:** Tasks never get dropped — they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
+**Core Value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
 
 ## v1.3 Requirements
 
@@ -69,7 +69,7 @@ Deferred to v1.4+. Tracked but not in current roadmap.
 | Backward gate-from-DAG conversion | Rollback restores from backup instead |
 | Multi-version coexistence | Rollback is the mechanism |
 | Interactive migration wizard | Migrations must be automatic and deterministic |
-| Dynamic workflow template variables | Deferred to v2 — adds complexity for marginal value |
+| Dynamic workflow template variables | Deferred to v2 -- adds complexity for marginal value |
 
 ## Traceability
 
@@ -77,32 +77,32 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| MIGR-01 | — | Pending |
-| MIGR-02 | — | Pending |
-| MIGR-03 | — | Pending |
-| MIGR-04 | — | Pending |
-| MIGR-05 | — | Pending |
-| CONF-01 | — | Pending |
-| CONF-02 | — | Pending |
-| CONF-03 | — | Pending |
-| CONF-04 | — | Pending |
-| BUGF-01 | — | Pending |
-| BUGF-02 | — | Pending |
-| DAGD-01 | — | Pending |
-| DAGD-02 | — | Pending |
-| DAGD-03 | — | Pending |
-| VERF-01 | — | Pending |
-| VERF-02 | — | Pending |
-| VERF-03 | — | Pending |
-| RELS-01 | — | Pending |
-| RELS-02 | — | Pending |
-| RELS-03 | — | Pending |
+| MIGR-01 | Phase 17 | Pending |
+| MIGR-02 | Phase 17 | Pending |
+| MIGR-03 | Phase 17 | Pending |
+| MIGR-04 | Phase 17 | Pending |
+| MIGR-05 | Phase 17 | Pending |
+| CONF-01 | Phase 17 | Pending |
+| CONF-02 | Phase 17 | Pending |
+| CONF-03 | Phase 17 | Pending |
+| CONF-04 | Phase 17 | Pending |
+| BUGF-01 | Phase 17 | Pending |
+| BUGF-02 | Phase 17 | Pending |
+| DAGD-01 | Phase 18 | Pending |
+| DAGD-02 | Phase 18 | Pending |
+| DAGD-03 | Phase 18 | Pending |
+| VERF-01 | Phase 19 | Pending |
+| VERF-02 | Phase 19 | Pending |
+| VERF-03 | Phase 19 | Pending |
+| RELS-01 | Phase 20 | Pending |
+| RELS-02 | Phase 20 | Pending |
+| RELS-03 | Phase 20 | Pending |
 
 **Coverage:**
 - v1.3 requirements: 20 total
-- Mapped to phases: 0
-- Unmapped: 20 ⚠️
+- Mapped to phases: 20
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-03*
-*Last updated: 2026-03-03 after initial definition*
+*Last updated: 2026-03-03 after roadmap creation*
