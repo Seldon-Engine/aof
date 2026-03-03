@@ -118,7 +118,7 @@ Plans:
   2. An agent can compose an ad-hoc workflow DAG inline when creating a task, without requiring a pre-defined template
   3. Both template-referenced and ad-hoc inline workflows resolve to the same runtime WorkflowDAG schema at dispatch time
   4. Each hop writes output to a per-hop subdirectory in the task work directory, and downstream hops can read upstream outputs via documented directory conventions
-**Plans:** 3 plans
+**Plans:** 2/3 plans executed
 
 Plans:
 - [ ] 14-01-PLAN.md -- Template schema in ProjectManifest + templateName on TaskWorkflow + lint validation
@@ -155,5 +155,5 @@ Plans:
 | 11. DAG Evaluator | 2/2 | Complete    | 2026-03-03 | - |
 | 12. Scheduler Integration | 2/2 | Complete    | 2026-03-03 | - |
 | 13. Timeout, Rejection, and Safety | 3/3 | Complete   | 2026-03-03 | - |
-| 14. Templates, Ad-Hoc API, and Artifacts | v1.2 | 0/3 | Planned | - |
+| 14. Templates, Ad-Hoc API, and Artifacts | 2/3 | In Progress|  | - |
 | 15. Migration and Documentation | v1.2 | 0/? | Not started | - |
