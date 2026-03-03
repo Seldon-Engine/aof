@@ -4,12 +4,13 @@
  * updated immutable state and a change summary.
  *
  * Pipeline ordering:
- * 1. Apply primary hop event
- * 2. Cascade skips downstream (if hop failed/skipped)
- * 3. Evaluate conditions on newly eligible hops, cascade any new skips
- * 4. Determine newly ready hops (AND-join vs OR-join)
- * 5. Check DAG completion
- * 6. Return new state + change summary
+ * 1. If rejected: handle rejection cascade (origin/predecessors) or circuit-breaker
+ * 2. Apply primary hop event (complete/failed/skipped)
+ * 3. Cascade skips downstream (if hop failed/skipped)
+ * 4. Evaluate conditions on newly eligible hops, cascade any new skips
+ * 5. Determine newly ready hops (AND-join vs OR-join)
+ * 6. Check DAG completion
+ * 7. Return new state + change summary
  *
  * Design decisions (from CONTEXT.md):
  * - Input state is NEVER mutated (structuredClone)
