@@ -1,445 +1,425 @@
-# Domain Pitfalls: Per-Task Workflow DAG Execution
+# Pitfalls Research: v1.3 Seamless Upgrade
 
-**Domain:** Adding DAG-based workflow execution to filesystem-backed agent orchestration (AOF v1.2)
-**Researched:** 2026-03-02
-**Confidence:** HIGH (all pitfalls derived from direct source code analysis of existing scheduler, gate system, task store, and protocol router + domain expertise in DAG execution engines)
+**Domain:** CLI tool upgrade/migration/release pipeline for filesystem-based agent orchestration
+**Researched:** 2026-03-03
+**Confidence:** HIGH (based on direct codebase analysis + domain research)
 
 ---
 
 ## Critical Pitfalls
 
-Mistakes that cause state corruption, data loss, or require architectural rewrites.
+### Pitfall 1: Migration History Records Success But Filesystem Is Partially Written
 
-### Pitfall 1: Parallel Hop Dispatch Race in Poll-Based Scheduler
+**What goes wrong:**
+The migration framework in `src/packaging/migrations.ts` records each migration to `migrations.json` *after* the `up()` function completes, but the `up()` function itself may perform multiple filesystem operations. If the process crashes mid-migration (after some files are written but before all are), the migration is NOT recorded in history. On next run, the migration re-executes from the top, but now some files already exist in their new format. The migration either fails (file already exists), silently overwrites partial state, or produces duplicated/corrupted data.
 
-**What goes wrong:** When a DAG hop completes and enables two or more parallel successor hops, the scheduler's single `poll()` cycle detects all eligible hops and dispatches them. The current scheduler dispatches actions sequentially within `executeActions()` (line 62 of `action-executor.ts`: `for (const action of actions)`). If two parallel hops target the same task's work directory for artifact handoff, or if one hop's dispatch failure triggers a rollback that corrupts the other hop's already-running state, the task enters an inconsistent state.
+This is especially dangerous for AOF because:
+- Task files are YAML frontmatter with markdown bodies -- partial YAML writes corrupt the entire file
+- The `writeFile` calls in `migrations.ts` are NOT atomic (plain `fs.writeFile`, not `write-file-atomic`)
+- Task store uses `writeFileAtomic` but the migration framework does not
 
-**Why it happens:** The current scheduler was designed for one-task-one-dispatch. It has no concept of "dispatch group" where multiple hops belong to the same DAG instance and must be tracked together. The `buildDispatchActions()` function in `task-dispatcher.ts` builds a flat list of `SchedulerAction[]` with no grouping metadata. The `SchedulerAction` type (line 71 of `scheduler.ts`) has a single `taskId` field -- it cannot represent "dispatch hop B of task X."
+**Why it happens:**
+Developers test migrations on clean data and assume `up()` is atomic. Filesystem operations are not transactional -- there is no rollback if step 3 of 5 fails.
 
-**Consequences:**
-- Partial DAG execution: hop A dispatched, hop B fails, no awareness that they're related
-- Artifact directory contention: parallel hops writing to the same task's `work/` directory
-- State divergence: task frontmatter says "hop B failed" but hop A is still running with an active lease
-- Impossible recovery: scheduler cannot determine which hops succeeded vs. failed without per-hop state tracking
+**How to avoid:**
+1. Use `write-file-atomic` for ALL writes inside migration `up()` functions (the codebase already depends on this package)
+2. Make each migration idempotent: check current state before acting, skip already-applied changes
+3. Add a per-migration checkpoint within `up()` for multi-step migrations: write a breadcrumb file at each step so partial re-runs skip completed steps
+4. Record migration as "in-progress" before starting, then "complete" after -- so a re-run of a partially applied migration knows it needs cleanup, not fresh application
 
-**Prevention:**
-- Model parallel hops as **independent sub-dispatches** with their own tracking, NOT as mutations to the parent task's status. Each hop gets its own lease, its own correlation ID, its own state entry in the task frontmatter.
-- Add a `hopStatus` map to the task frontmatter (e.g., `hops: { "build": { status: "in-progress", lease: {...} }, "lint": { status: "in-progress", lease: {...} }, "test": { status: "waiting" } }`) so the scheduler can track parallel hop progress independently.
-- Dispatch parallel hops in a "best-effort" mode: if hop B fails to dispatch, hop A continues. The DAG advancement logic on the next poll re-evaluates and retries hop B. Do NOT require atomic all-or-nothing dispatch of parallel hops -- this would block working hops when one has a transient failure.
-- Give each hop its own subdirectory under the task's `work/` dir (e.g., `work/build/`, `work/lint/`) to eliminate filesystem contention.
+**Warning signs:**
+- Migration `up()` function has more than one `writeFile` call
+- No idempotency checks inside `up()` (e.g., "if file already has new format, skip")
+- Tests only run migrations on clean state, never on partially-migrated state
 
-**Detection:** Integration test where two parallel hops are dispatched and one spawn fails. Verify the other hop completes and the failed hop is retried on next poll without corrupting shared state.
-
-**Phase to address:** DAG schema design phase (first). The hop tracking data model must be correct before any execution logic is written.
-
----
-
-### Pitfall 2: Non-Atomic DAG State Updates on Filesystem
-
-**What goes wrong:** The current task store uses `rename()` for atomic status transitions (line 182 of `task-mutations.ts`). DAG state is richer than a single status -- a hop completion may require updating: (1) the hop's entry in the hops map, (2) the task's routing to point to the next hop's agent, (3) the gate/hop history, (4) condition evaluation results for successor hops, (5) possibly the task-level status (if all hops are done). If the process crashes between writing the hop status update and the routing update, the task is in an inconsistent state: the hop is marked complete but the next hop's agent was never assigned.
-
-**Why it happens:** The existing gate system performs all updates in a single `writeFileAtomic()` call in `applyGateTransition()` (gate-transition-handler.ts line 107). This works because the gate system is linear -- conceptually one thing changes at a time. The temptation with DAG state is to break updates across multiple writes for clarity or because different parts of the state are managed by different functions.
-
-**Consequences:**
-- Task file says hop A is "done" but routing still points to hop A's agent
-- Scheduler re-dispatches hop A (already complete) because routing was not updated
-- Orphaned state: hop A marked done, hop B never started, task stuck forever
-- Manual intervention required (editing YAML frontmatter by hand)
-
-**Prevention:**
-- **All DAG state updates for a single hop completion MUST happen in one `writeFileAtomic()` call.** This is the existing pattern in `applyGateTransition()` -- extend it, do not replace it.
-- Design the DAG evaluator as a pure function (following the pattern of `evaluateGateTransition()` in `gate-evaluator.ts` lines 104-177) that returns ALL updates as a single result object. The handler function applies them atomically.
-- Never update hop status in one write and routing in another write.
-- The DAG evaluator should compute the complete new frontmatter state and return it. The handler writes once.
-
-**Detection:** Crash-injection test: kill the process during `writeFileAtomic()` and verify the task file is either fully updated or fully unchanged. `write-file-atomic` guarantees this on POSIX via rename-of-temp-file, but only if ALL changes go through a single call.
-
-**Phase to address:** Hop execution handler phase. The `applyGateTransition()` pattern MUST be preserved and extended.
+**Phase to address:** Phase 1 (Config Migration) -- harden migration framework before writing any real migrations
 
 ---
 
-### Pitfall 3: Cycle Detection That Misses DAG-Internal Cycles
+### Pitfall 2: Lazy Gate-to-DAG Migration Silently Fails for Tasks Without Workflow Config
 
-**What goes wrong:** The existing scheduler has O(n+e) DFS cycle detection at lines 169-209 of `scheduler.ts` that checks `task.frontmatter.dependsOn`. This operates on **inter-task** dependencies. The new per-task workflow DAG introduces **intra-task** hop dependencies (hop A -> hop B within one task). If the DAG schema allows hop-level edges or conditional branching that can create cycles (e.g., hop A -> hop B -> hop A via a loopback condition), the existing cycle detector will not catch it because it only examines task-level dependencies.
+**What goes wrong:**
+The lazy migration in `task-store.ts` (lines 248-254, 328-337) converts gate-format tasks to DAG format on read. It requires a `WorkflowConfig` from `project.yaml` to know the gate definitions. But the migration silently logs a warning and returns the task unchanged when:
+- `project.yaml` does not exist (fresh project directory, moved files)
+- `project.yaml` exists but has no `workflow.gates` field (config was updated to DAG format but old tasks remain)
+- `project.yaml` has a different workflow than the one the task was created with
 
-**Why it happens:** Two separate dependency graphs coexist: (1) task-to-task deps (existing `dependsOn` array in frontmatter), (2) hop-to-hop deps (new DAG edges within a task). Teams forget to validate the second graph because the first graph already "has cycle detection."
+The task retains its gate fields, the scheduler's dual gate/DAG paths continue to diverge, and the deprecated gate evaluator (`@deprecated Since v1.2. Will be removed in v1.3.`) is still being called. When v1.3 removes the gate evaluator as promised, these un-migrated tasks will break silently -- the scheduler will not know how to advance them.
 
-**Consequences:**
-- Infinite loop: scheduler dispatches hop A, which completes, advances to hop B, which completes, advances back to hop A
-- Scheduler CPU spike on every poll as it re-evaluates the stuck DAG
-- Task never reaches terminal state, consumes concurrency slots forever
-- The existing `maxHops` or similar safety valve does not exist yet
+**Why it happens:**
+Lazy migration defers work to "whenever the task is next accessed." But the migration depends on external config state (`project.yaml`) that can change independently from the task. If the config is updated first and the tasks are not accessed before the gate code is removed, there is a window where migration becomes impossible.
 
-**Prevention:**
-- Validate the hop DAG at **template registration time** (when `project.yaml` is loaded) and at **task creation time** (when ad-hoc workflows are composed by agents). Reject any workflow that contains a cycle.
-- Use topological sort to validate: if the sort cannot produce a complete ordering, the DAG has a cycle. Store the topological order in the workflow definition for efficient advancement.
-- Add a `maxHopTransitions` safety limit per task (e.g., 50). If a task has executed more than `maxHopTransitions` hop completions, deadletter it with a "suspected cycle or runaway workflow" reason. This catches both true cycles and accidental infinite retry loops.
-- Keep the existing inter-task cycle detection completely untouched. It operates on a different graph and should not be aware of hop-level dependencies.
+**How to avoid:**
+1. Before removing gate evaluator code, run an eager scan: iterate ALL tasks across ALL projects and verify none still have `gate` fields
+2. Add a startup health check that counts tasks with `gate` fields and warns/blocks if any remain
+3. The v1.3 upgrade migration should eagerly migrate all remaining gate tasks (not rely on lazy path)
+4. If `project.yaml` lacks workflow config but tasks have gate fields, reconstruct a default config from the gate fields themselves (the gate data is self-describing: `gate.current` tells you which gates exist)
 
-**Detection:** Unit test: create a workflow with hop A -> hop B -> hop A. Schema validation must reject it at creation time. Integration test: create a workflow with conditional branches that, under all possible condition combinations, cannot cycle -- verify execution completes.
+**Warning signs:**
+- Tasks in `tasks/in-progress/` or `tasks/blocked/` still have `gate` field after upgrade
+- Console warnings: `[gate-to-dag] Task X has gate fields but no workflow config provided`
+- `getByPrefix()` in task-store.ts (line 276-292) does NOT run the lazy migration -- tasks accessed via prefix search skip migration entirely
 
-**Phase to address:** DAG schema validation phase (first phase, alongside schema design).
-
----
-
-### Pitfall 4: Condition Evaluation Security with Agent-Composed Workflows
-
-**What goes wrong:** The existing `evaluateGateCondition()` in `gate-conditional.ts` uses `new Function()` to evaluate `when` clauses (line 94). This was designed for admin-authored conditions in `project.yaml`. The v1.2 feature introduces **agent-composed ad-hoc workflows** -- agents create workflow DAGs at task creation time via the `aof_dispatch` tool. If agents can inject arbitrary JavaScript expressions into hop conditions, the `Function` constructor sandbox can be escaped (it prevents direct `require()` but allows access to `this`, constructor chains, and prototype pollution).
-
-**Why it happens:** The existing condition evaluator was designed for a trust model where conditions come from `project.yaml`, which is human-reviewed. Agent-composed workflows change the trust model -- conditions now come from potentially untrusted agent output.
-
-**Consequences:**
-- Agent-injected condition like `this.constructor.constructor("return process")().exit()` crashes the scheduler daemon
-- Prototype pollution: `metadata.__proto__.polluted = true` taints all subsequent evaluations in the process
-- Information leak: conditions can read scheduler process environment variables via constructor chain
-- Denial of service: infinite loop in condition expression (the timeout check at line 113 runs AFTER execution, so it cannot stop a while(true) loop)
-
-**Prevention:**
-- **Do NOT allow arbitrary JavaScript in agent-composed workflow conditions.** Use a restricted condition format:
-  - **Recommended:** JSON-based condition DSL (e.g., `{"op": "has_tag", "value": "security"}` or `{"op": "metadata_gt", "key": "dealSize", "value": 50000}`). This is safe, extensible, and easy to validate at schema level with Zod discriminated unions.
-  - Keep the existing `evaluateGateCondition()` JavaScript eval ONLY for template workflows loaded from `project.yaml` (admin-authored, trusted).
-  - Agent-composed workflows validate conditions against the JSON DSL schema at creation time. Reject any condition that does not match.
-- The existing timeout check (line 113 of `gate-conditional.ts`) is post-hoc -- it cannot stop infinite loops. Fix this independently by wrapping evaluation in a `vm.createContext()` with `vm.runInContext()` and a real timeout, or by moving to the JSON DSL which has no eval at all.
-- Freeze context objects before passing to eval: `Object.freeze(context.tags)`, `Object.freeze(context.metadata)`.
-
-**Detection:** Security test: attempt to break out of condition sandbox with known payloads (constructor chain, prototype pollution, process access, infinite loop). All must return `false` without side effects. Test the JSON DSL rejects arbitrary strings.
-
-**Phase to address:** Schema design phase (define the condition format) AND hop execution phase (enforce restrictions at runtime).
+**Phase to address:** Phase 1 (Config Migration) -- eager scan + migration as part of upgrade, not left to lazy path
 
 ---
 
-### Pitfall 5: Backward Compatibility -- Linear Gates to DAG Migration
+### Pitfall 3: YAML Config Writes Destroy Comments and Reformat User Files
 
-**What goes wrong:** Existing tasks in production have `gate`, `gateHistory`, and `reviewContext` fields in their frontmatter (defined in `schemas/task.ts` lines 115-118). The existing gate evaluation system is deeply wired into the codebase:
-- `gate-evaluator.ts` reads `task.frontmatter.gate.current` (line 108)
-- `gate-transition-handler.ts` orchestrates gate transitions and calls `evaluateGateTransition()`
-- `gate-context-builder.ts` builds context for agents using gate fields
-- `assign-executor.ts` injects `gateContext` into `TaskContext` (lines 148-166)
-- `scheduler.ts` calls `checkGateTimeouts()` (line 244)
-- The protocol router processes completion reports by calling `handleGateTransition()`
+**What goes wrong:**
+AOF's config manager (`src/config/manager.ts` line 72) uses `stringifyYaml(raw, { lineWidth: 120 })` to write YAML. The `yaml` npm package (eemeli/yaml) does preserve comments when using its `Document` API, but AOF parses with `parseYaml()` (which returns a plain JS object) and then stringifies back. This round-trip through plain objects **destroys all YAML comments, reorders keys, changes quoting style, and normalizes whitespace**.
 
-If the new DAG system replaces gate fields with hop fields, in-flight tasks (currently mid-workflow with `gate.current = "review"`) will break: the scheduler tries to advance them using DAG logic, but they have no `hops` field, causing a crash or silent drop.
+For the org chart (`org-chart.yaml`) -- which is the primary human-edited config file in AOF -- this means:
+- Developer comments explaining team configurations are lost
+- Custom formatting/grouping of agents is destroyed
+- String quoting changes (single vs double quotes) make diffs noisy
+- Users who carefully organized their config file find it rewritten into a different style
 
-**Why it happens:** A naive replacement that removes gate-related code and adds hop-related code will crash on any task that still has the old format. Even if no tasks are mid-workflow at migration time, the gate schemas, validation functions, and evaluators are embedded in the Zod schemas, the scheduler, and the protocol router.
+This is a known problem across the YAML ecosystem. Discourse [sponsored a fix](https://blog.discourse.org/2026/02/how-we-fixed-yaml-comment-preservation-in-ruby-and-why-we-sponsored-it/) for Ruby's Psych library. The `yaml` npm package supports comment preservation via `parseDocument()` + `Document.toString()`, but AOF does not use this API.
 
-**Consequences:**
-- In-flight tasks stuck: mid-gate tasks cannot advance because the gate evaluator was removed or modified incompatibly
-- Schema validation failures: old tasks fail Zod parse if gate fields are removed from the schema
-- Data loss: gateHistory (audit trail) lost if not preserved during migration
-- Silent failures: scheduler skips tasks it cannot evaluate, they rot in `in-progress` forever with active leases
+**Why it happens:**
+Developers parse YAML to JS objects (the natural API) without realizing the round-trip is lossy. Comment preservation requires using the AST/Document API, which is more complex.
 
-**Prevention:**
-- **Phase 1: Make the DAG schema a superset of the gate schema.** Keep `gate`, `gateHistory`, `reviewContext` as valid (optional) fields in `TaskFrontmatter`. Add new `workflow` (inline DAG definition), `hopStatus` (per-hop state map), and `currentHops` (active hop IDs) fields alongside them. Zod validates both old and new formats.
-- **Phase 2: Dual-mode evaluator.** The scheduler and protocol router check: if task has inline `workflow` with `hopStatus`, use DAG evaluator. If task has `gate` field but no `workflow`, use existing `evaluateGateTransition()`. If neither, use simple completion (task -> done). This is a simple if/else at the callsite, not a complex abstraction.
-- **Phase 3: Migration tool (optional, deferred).** A CLI command `aof migrate-gates` that converts linear gate workflows to equivalent DAG workflows (each gate becomes a sequential hop). Run manually after confirming no tasks are mid-flight. Not required for v1.2 -- the dual-mode evaluator handles coexistence.
-- **Never delete the gate evaluator code during v1.2.** Mark it as legacy with JSDoc annotations but keep it fully functional.
-- The existing `WorkflowConfig` schema (schemas/workflow.ts) defines the PROJECT-level workflow template. The new per-task inline workflow is a DIFFERENT thing -- a task-level DAG definition. Use a different field name to avoid confusion (`workflow` vs the existing `routing.workflow` string reference).
+**How to avoid:**
+1. For config migration, use `yaml.parseDocument()` instead of `yaml.parse()` -- the Document API preserves comments, formatting, and key order
+2. For surgical changes (adding a `workflowTemplates` key), use the Document API to append to the existing AST rather than rebuilding from scratch
+3. Existing `config set` command should also be migrated to Document API (but that is separate from v1.3)
+4. If full Document API migration is too costly, use a "patch" approach: read file as string, locate insertion point via regex/AST, splice in new YAML block, never rewrite the whole file
 
-**Detection:** Integration test: create a task with old-format gate fields, run the new scheduler, verify it evaluates correctly using the legacy path. Create a task with new DAG fields, verify it uses the new path. Create both types, run scheduler, verify both advance correctly in the same poll cycle.
+**Warning signs:**
+- `git diff` on `org-chart.yaml` after upgrade shows changes to lines that were not logically modified
+- Users report "my config was reformatted" or "my comments disappeared"
+- Config validation passes but the file looks different
 
-**Phase to address:** MUST be addressed in the schema design phase (first phase) by making schemas backward-compatible. The dual-mode evaluator goes in the scheduler integration phase.
+**Phase to address:** Phase 1 (Config Migration) -- use Document API for any config file modifications during upgrade
 
 ---
 
-## Moderate Pitfalls
+### Pitfall 4: `schemaVersion: 1` Is Hardcoded Everywhere With No Bump Mechanism
 
-Issues that cause bugs, performance problems, or significant rework but not data loss.
+**What goes wrong:**
+The AOF config schema (`src/schemas/config.ts` line 66) uses `z.literal(1)` for `schemaVersion`. The org chart also uses `schemaVersion: 1`. Task frontmatter uses `schemaVersion: 1`. There is no mechanism to:
+- Detect which schema version a file was written with (always 1)
+- Bump the schema version when the schema changes
+- Reject files with an unknown schema version
+- Run version-specific parsing logic
 
-### Pitfall 6: Poll-Based Advancement Latency for Multi-Hop DAGs
+When v1.3 adds `workflowTemplates` to `project.yaml` or changes task frontmatter to require `workflow` instead of `gate`, the schema version should bump. Without a bump, there is no way to distinguish "pre-v1.3 file that needs migration" from "v1.3 file that is just missing the new field."
 
-**What goes wrong:** The current scheduler polls at 30-second intervals. In a linear gate workflow, a task with 3 gates takes at minimum 3 poll cycles to complete (90 seconds) even if each gate's agent completes instantly. A DAG with 5 sequential hops takes 5 poll cycles (2.5 minutes minimum). For complex DAGs with 10+ sequential hops, the minimum end-to-end latency becomes unacceptable.
+**Why it happens:**
+Schema version was introduced as a future-proofing measure but was never actually used for anything. The literal `1` makes it impossible to increment without breaking validation of existing files.
 
-**Why it happens:** The poll-based scheduler was designed for task lifecycle management (backlog -> ready -> in-progress -> done), where each transition happens at human timescales (hours between stages). Workflow hops happen at agent timescales (seconds to minutes per hop). The 30-second poll interval was appropriate for the original use case but creates artificial latency when hops should chain immediately.
+**How to avoid:**
+1. Change `z.literal(1)` to `z.union([z.literal(1), z.literal(2)])` or `z.number().int().min(1)` to allow version progression
+2. Write the new schema version into files during migration
+3. Use schema version to branch parsing logic: version 1 files get lazy migration, version 2 files are parsed directly
+4. The migration itself should bump schema version as its LAST step (so incomplete migrations leave version at 1, signaling "needs re-migration")
 
-**Consequences:**
-- A 5-sequential-hop workflow takes 2.5+ minutes even when all agents complete in seconds
-- Users perceive the system as slow and unresponsive
-- Agents idle waiting for the next poll to dispatch them their next piece of work
-- Temptation to reduce poll interval globally, increasing filesystem I/O for ALL tasks
+**Warning signs:**
+- Zod validation fails on files that have been upgraded (because `schemaVersion: 2` does not match `z.literal(1)`)
+- All files say `schemaVersion: 1` even after upgrade, making it impossible to audit migration completeness
 
-**Prevention:**
-- **Do NOT reduce the global poll interval.** It would increase filesystem scan load for all tasks, including ones with no DAG at all.
-- Implement **completion-triggered advancement**: when an agent completes a hop (calls `aof_task_complete` or the protocol router processes a completion report), the completion handler immediately evaluates the DAG and dispatches the next hop(s) without waiting for the next poll. The poll cycle becomes a **fallback safety net** that catches missed advancements.
-- This is architecturally straightforward: `handleGateTransition()` in `gate-transition-handler.ts` is already called synchronously on completion (not during poll). The new `handleHopCompletion()` function can follow the same pattern: evaluate DAG -> determine next hops -> dispatch immediately.
-- Keep the poll as a safety net: it catches cases where the completion-triggered path fails (e.g., process crash between hop completion write and next hop dispatch).
-- The `executeAssignAction()` function in `assign-executor.ts` is already callable outside the poll cycle -- it just needs to be wired into the completion handler.
-
-**Detection:** Latency test: measure end-to-end time for a 5-hop sequential workflow. With poll-only advancement, expect ~150s. With completion-triggered advancement, expect ~5-10s (agent processing time only).
-
-**Phase to address:** Hop execution/advancement phase. Design the completion handler to do immediate advancement, with poll as fallback.
-
----
-
-### Pitfall 7: Template vs. Ad-Hoc Workflow Schema Divergence
-
-**What goes wrong:** Templates (defined in `project.yaml` via the existing `WorkflowConfig` schema) and ad-hoc workflows (composed by agents at task creation time, stored inline in task frontmatter) use different code paths for validation and storage. Over time, templates get features that ad-hoc workflows don't support (or vice versa), creating a behavioral split. Agents composing ad-hoc workflows hit validation errors that templates don't, or templates support condition types that ad-hoc workflows silently ignore.
-
-**Why it happens:** Templates are validated at project load time via `validateWorkflow()` (schemas/workflow.ts line 77). Ad-hoc workflows would be validated at task creation time via the `aof_dispatch` tool. Different validation timing + different code paths + different storage locations = different behavior over time.
-
-**Consequences:**
-- Agent creates an ad-hoc workflow that works, then someone creates a template with the same structure that fails validation (or vice versa)
-- Bug reports about "inconsistent workflow behavior" that are actually validation differences
-- Feature additions require updating two validation paths and two storage paths
-
-**Prevention:**
-- **One Zod schema, one validation function.** Both templates and ad-hoc workflows MUST use the identical Zod schema (a new `WorkflowDAG` schema) and the same validation function.
-- Templates are stored in `project.yaml` and referenced by name in `routing.workflow`. Ad-hoc workflows are stored inline in the task's frontmatter. But the schema is the same.
-- The `aof_dispatch` tool should accept a `workflow` parameter that is either: (a) a string template name (resolved from project.yaml), or (b) an inline workflow DAG object (validated against the same `WorkflowDAG` schema).
-- At dispatch time, if a template name is provided, resolve it to the full DAG definition and embed it in the task frontmatter. The scheduler only ever reads the embedded definition -- it never goes back to `project.yaml` to resolve templates. This means template changes don't affect in-flight tasks.
-
-**Detection:** Schema conformance test: generate valid workflow DAG objects, verify they pass validation whether used as a template or as an inline definition. Verify error messages are identical.
-
-**Phase to address:** Schema design phase. Define one schema used for both paths.
+**Phase to address:** Phase 1 (Config Migration) -- schema version bump should be part of the migration design
 
 ---
 
-### Pitfall 8: Artifact Handoff Filesystem Contention Between Hops
+### Pitfall 5: Release Pipeline Builds Tarball Without Testing the Tarball Itself
 
-**What goes wrong:** The design specifies "artifact handoff via task work directory." The existing task store creates `inputs/`, `work/`, `outputs/` subdirectories per task (task-store.ts lines 138-142 in `ensureTaskDirs()`). Teams assume hop B can read hop A's outputs by reading files from the shared `work/` directory. Problems: (1) parallel hops share the same `work/` directory, causing filename collisions, (2) hop A might still be writing when hop B starts reading, (3) there is no convention for which subdirectory each hop uses, (4) large artifacts accumulate in the task directory across all hops.
+**What goes wrong:**
+The release workflow (`.github/workflows/release.yml`) runs typecheck, build, and test BEFORE building the tarball. The tarball is then built by `scripts/build-tarball.mjs` which copies specific files into a staging directory and tars them. But nobody tests the tarball contents:
+- The tarball is not extracted and verified
+- `npm ci --production` is not run against the staged package.json
+- The CLI entry point is not executed from the tarball
+- There is no SHA256 checksum for integrity verification
 
-**Why it happens:** The current `inputs/`/`work/`/`outputs/` convention was designed for a single agent working on a single task. It has no concept of per-hop artifact namespacing. The `ensureTaskDirs()` function creates flat directories with no hop-scoped structure.
+The `build-tarball.mjs` script strips `scripts.prepare` and `simple-git-hooks` from package.json (line 49-50) which is correct, but if a new script or field is added that breaks production install, it will not be caught. The installer (`install.sh`) runs `npm ci --production` on the extracted tarball -- if the tarball's package.json is subtly wrong, every user's install fails.
 
-**Consequences:**
-- Race conditions: hop B reads partial files that hop A is still writing
-- Name collisions: parallel hops A and B both write `results.json` to `work/`, last writer wins
-- Wrong directory: hop B looks in `work/` but hop A wrote to `outputs/`
-- Directory bloat: every hop's artifacts accumulate forever
+Additionally, the release-it config (`.release-it.json`) has `before:init` hooks that run typecheck and test, but the GitHub Actions workflow ALSO runs these -- the tarball build happens after both, creating a false sense of security ("tests passed, so the release is good").
 
-**Prevention:**
-- Define a clear artifact contract per hop:
-  - Each hop writes to `work/<hop-id>/outputs/`
-  - The DAG advancement logic (not the agent) copies or symlinks predecessor outputs to successor's `work/<hop-id>/inputs/`
-  - Each hop reads from `work/<hop-id>/inputs/`
-- Alternative simpler approach: pass artifacts by reference, not by value. The task body includes file paths; agents read/write to those paths. The DAG advancement logic does not copy files, it just updates the task body with the paths from the previous hop's outputs. This avoids filesystem management complexity.
-- Either way: the task's top-level `outputs/` directory receives the final hop's outputs only. Intermediate hop outputs stay in `work/<hop-id>/`.
+**Why it happens:**
+Testing the artifact (tarball) rather than the source is an often-overlooked step. It is natural to assume "if the source passes tests, the packaged version will work too."
 
-**Detection:** Integration test: parallel hops A and B each write to `work/<hop-id>/outputs/`. Verify no filename collision. Successor hop C reads from `work/C/inputs/` and finds artifacts from both A and B.
+**How to avoid:**
+1. After `build-tarball.mjs`, extract the tarball to a clean temp directory
+2. Run `npm ci --production` in that temp directory
+3. Run `node dist/cli/index.js --version` to verify the CLI boots
+4. Run a minimal smoke test (e.g., `node dist/cli/index.js config validate` against a fixture)
+5. Generate SHA256 checksum and attach to the GitHub release alongside the tarball
+6. Consider a separate `verify-tarball` job that downloads the release artifact and tests it
 
-**Phase to address:** Artifact handoff design (sub-phase of execution logic).
+**Warning signs:**
+- Tarball size changes dramatically between releases (missing or extra files)
+- Users report `npm ci` failures after download
+- `install.sh` fails at the `npm ci --production` step
 
----
-
-### Pitfall 9: DAG Deadlock from Skipped Conditional Hops
-
-**What goes wrong:** A DAG with conditional branches can create implicit deadlocks. Example: hop C depends on both hop A and hop B. Hop A has condition `when: metadata.type === 'backend'`. Hop B has condition `when: metadata.type === 'frontend'`. For a task where `metadata.type === 'backend'`, hop B's condition is false so it is skipped. But hop C still waits for both A and B to complete. Since B will never run, hop C deadlocks.
-
-**Why it happens:** Cycle detection (topological sort) verifies there are no circular dependencies, but it does NOT verify that all dependency paths are satisfiable under all condition combinations. This is a **reachability problem**, not a cycle problem. The existing gate system avoids this because gates are linear -- a skipped gate just advances to the next one (gate-evaluator.ts lines 205-220). DAGs with parallel branches and join points introduce this new failure mode.
-
-**Consequences:**
-- Task permanently stuck: hop C waits for hop B which was skipped and will never complete
-- Scheduler reports no errors (no cycle detected, no timeout yet)
-- Only discovered after SLA violation fires hours later
-- Manual intervention: someone must edit the task frontmatter to mark hop B as "skipped"
-
-**Prevention:**
-- When a hop is skipped (condition evaluates to false), the DAG advancement logic MUST **propagate the skip through the dependency graph**. If hop B is skipped, all downstream hops that depend on B should treat B's dependency as satisfied (skipped = done for dependency purposes).
-- Implement this rule: a hop is eligible for dispatch when all of its predecessors are either "done" or "skipped".
-- Document this clearly in the workflow spec: "Skipped hops are treated as completed for dependency resolution."
-- Add a "stuck DAG" detector in the scheduler: if a task has active hops but no hop has advanced in the last N poll cycles, and no hop is currently in-progress, emit an alert. This catches deadlocks that the skip-propagation logic misses.
-- For template validation: verify that for each possible condition combination, at least one path from start to end is satisfiable. This is exponential in the number of conditions, so limit to templates with fewer than 12 conditional hops (covers practical use cases).
-
-**Detection:** Unit test: DAG with a conditional skip that creates a dependency deadlock. Verify the advancement logic resolves it by treating the skipped hop as satisfied. Test both direct dependency (C depends on skipped B) and transitive dependency (D depends on C which depends on skipped B).
-
-**Phase to address:** DAG advancement logic phase. The skip-propagation rule is core to correct DAG execution.
+**Phase to address:** Phase 3 (Release Pipeline) -- add tarball verification step before upload
 
 ---
 
-### Pitfall 10: Scheduler Poll Scan Cost Scaling with DAG Complexity
+### Pitfall 6: Installer Backup/Restore Does Not Cover All State Directories
 
-**What goes wrong:** The current `poll()` function calls `store.list()` which scans ALL status directories and reads + parses EVERY `.md` task file (task-store.ts lines 241-288, full directory scan with `readdir()` + `readFile()` per file). For each task with a DAG workflow, the scheduler must now also evaluate the DAG to determine which hops are eligible for dispatch. With 100 tasks, each having a 10-hop DAG, the scheduler is potentially evaluating 1000 hop eligibility checks per poll cycle, on top of the filesystem I/O.
+**What goes wrong:**
+The shell installer (`scripts/install.sh` lines 284-295) backs up: `tasks events memory state data logs memory.db memory-hnsw.dat .version`. But AOF's actual state includes:
+- `Projects/` directory (the v1.1 multi-project layout with per-project tasks, events, memory)
+- `org/org-chart.yaml` (the primary config file)
+- `.aof/migrations.json` (migration history)
+- Per-project `project.yaml` files
+- Run artifacts in `state/` (lease files, heartbeat files)
+- Views directory (`views/`)
 
-**Why it happens:** `store.list()` has no caching, no indexing, no incremental scanning. The current system works because task counts are modest (dozens). DAG evaluation adds per-task compute overhead on top of per-task I/O.
+If a user has migrated to the Projects layout (v1.1+), the installer backs up the old flat `tasks/` directory but NOT the `Projects/` tree. The tarball extraction overwrites the install directory, and the restore step only restores the listed directories -- everything else is lost.
 
-**Consequences:**
-- Poll cycles exceed 30s, causing overlapping polls (the daemon does not have a guard against this)
-- Filesystem I/O spikes every 30 seconds
-- Scheduler latency increases linearly with (number of tasks * average hops per task)
-- On slow filesystems (network mounts, encrypted volumes), severe degradation
+**Why it happens:**
+The installer was written for v1.0's flat directory structure. The v1.1 Projects migration added a new layout, but the installer's backup list was not updated.
 
-**Prevention:**
-- **Do NOT evaluate DAGs inside the hot poll path for tasks that have not changed.** Only evaluate DAGs for tasks whose `updatedAt` timestamp changed since last poll evaluation. Cache the last-seen `updatedAt` per task ID across poll cycles.
-- The existing `allTasks` list is fetched once at the top of `poll()` (line 130). Use this cached list for all DAG evaluations within the cycle. Do not call additional `store.get()` calls during DAG evaluation.
-- For the completion-triggered advancement path (Pitfall 6 mitigation), most DAG evaluations happen outside the poll cycle entirely, dramatically reducing poll-time work.
-- Do not evaluate DAGs for tasks in terminal states (`done`, `cancelled`, `deadletter`). These are scanned by `store.list()` but should be filtered out before DAG evaluation.
-- Long-term (v2): consider a filesystem watcher (fsevents/inotify) for incremental change detection instead of full directory scans. But this is out of scope for v1.2.
+**How to avoid:**
+1. Back up the ENTIRE data directory, not a hardcoded list of subdirectories
+2. Use an exclusion list instead of an inclusion list: back up everything except `node_modules/`, `dist/`, and other build artifacts
+3. Extract the tarball to a SEPARATE staging directory, then selectively copy code files over the existing install (never overwrite the data root)
+4. Add a `--dry-run` flag to the installer that shows what would be backed up and what would be overwritten
 
-**Detection:** Performance benchmark: create 100 tasks with 10-hop DAGs in various states. Measure poll cycle duration. Target: under 5 seconds (leaving 25s headroom within the 30s interval).
+**Warning signs:**
+- User reports "my projects disappeared after upgrade"
+- `Projects/` directory is missing after upgrade
+- `org-chart.yaml` reverted to a default template
 
-**Phase to address:** Scheduler integration phase. Efficiency must be designed in from the start.
-
----
-
-### Pitfall 11: Lease System Is Per-Task, Not Per-Hop
-
-**What goes wrong:** The current lease system tracks a single lease per task: `lease?: TaskLease` in the TaskFrontmatter schema (schemas/task.ts line 100). `TaskLease` has one `agent` field (line 41). When parallel hops run, multiple agents work on the same task simultaneously. Each agent needs its own lease to prevent the scheduler from reclaiming the task, but the schema only allows one lease.
-
-**Why it happens:** The lease system was designed for the one-task-one-agent model. `acquireLease()` in `store/lease.ts` transitions the task to `in-progress` and sets a single lease. `isLeaseActive()` in `lease-manager.ts` checks the single lease. `startLeaseRenewal()` renews the single lease. None of these functions are hop-aware.
-
-**Consequences:**
-- When parallel hop B's agent acquires a lease, it overwrites hop A's lease. Hop A's heartbeat renewal fails because the lease agent no longer matches.
-- When the scheduler checks for expired leases, it sees hop B's lease and considers hop A's agent as having no lease. Hop A gets reclaimed (requeued to ready) while still running.
-- `isLeaseActive()` returns true for hop B's agent but false for hop A's, causing duplicate dispatches.
-
-**Prevention:**
-- Extend the lease model to support per-hop leases. Two options:
-  - **Option A (recommended):** Add a `hopId` field to `TaskLease` and change `lease?: TaskLease` to `leases?: TaskLease[]` (array). Each hop dispatch creates a lease entry with the hop ID. Lease renewal, expiry, and cleanup all filter by hop ID. This is a schema change but preserves the existing lease infrastructure.
-  - **Option B:** Do not modify the task-level lease at all. Instead, store hop leases in the task's `metadata` field (e.g., `metadata.hopLeases: { "build": { agent: "swe-backend", expiresAt: "..." } }`). This avoids a schema change but puts lease state in an untyped bag.
-- **Option A is cleaner** because it keeps lease operations type-safe and avoids scattering lease logic across metadata. The existing `acquireLease()` / `releaseLease()` / `isLeaseActive()` functions get a `hopId` parameter (optional for backward compatibility -- omitting it means task-level lease, matching current behavior).
-- The task-level `status` should only transition to `in-progress` when the FIRST hop is dispatched, and only transition out of `in-progress` when ALL active hops are complete or the task is explicitly blocked/cancelled.
-
-**Detection:** Integration test: dispatch two parallel hops for the same task. Verify both agents have active leases. Verify neither agent's lease expiry triggers reclaim of the other agent's hop.
-
-**Phase to address:** Schema design phase (lease model extension) and hop execution phase (lease function modifications).
+**Phase to address:** Phase 2 (Upgrade Path) -- fix installer backup scope before shipping v1.3
 
 ---
 
-## Minor Pitfalls
+### Pitfall 7: DAG-as-Default Breaks Existing Workflows That Rely on No-Workflow Behavior
 
-Issues that cause developer friction, test failures, or minor user-facing bugs.
+**What goes wrong:**
+Currently, new tasks do NOT get workflows unless explicitly requested (`workflow` parameter in `create()`). Making DAG workflows the default means every new task gets a workflow definition. But existing users have:
+- Agents that create tasks without workflow awareness (they do not know about hop completion)
+- Custom tooling that reads task frontmatter and does not expect a `workflow` field
+- Automation scripts that check task status directly (not hop status)
+- CLI workflows where tasks go `backlog -> ready -> in-progress -> done` without any hop advancement
 
-### Pitfall 12: Event Schema Bloat in JSONL Logs
+If a task has a workflow, the scheduler tries to dispatch hops and expects agents to complete hops via the DAG protocol. An agent that simply marks a task "done" without completing the current hop will leave the workflow in an inconsistent state (task is done, but the DAG says "running" with a dispatched hop).
 
-**What goes wrong:** Each hop transition emits a `gate_transition` event (gate-transition-handler.ts line 194). A 10-hop DAG emits 10+ transition events per task execution. With 50 tasks/day, that is 500+ events/day just for hop transitions, on top of existing `scheduler.poll`, `dispatch.matched`, `sla.violation`, and other events. Daily JSONL files grow significantly, and event replay for state recovery becomes slower.
+**Why it happens:**
+"Default on" changes are the most dangerous kind of breaking change because they affect users who take no action. The change is invisible until something breaks.
 
-**Prevention:**
-- Use compact event payloads for hop transitions. Include only the delta (`fromHop`, `toHop`, `outcome`), not the full DAG state.
-- Emit a single `workflow.completed` summary event when the entire DAG finishes, with the full hop execution history embedded. Individual `hop.transition` events are operational detail; the summary is the semantic record.
-- Use new event type names (`hop.transition`, `hop.dispatched`, `workflow.completed`, `workflow.failed`) to distinguish from the existing gate events (`gate_transition`). Do not reuse gate event names for different semantics.
+**How to avoid:**
+1. Make the default workflow opt-in at the project level, not at the task level: `project.yaml` gets a `defaultWorkflow: "standard-sdlc"` field that project owners explicitly set
+2. Tasks created without a workflow continue to work as before (no hops, direct status transitions)
+3. The upgrade documentation explicitly tells users "to enable DAG workflows for new tasks, add `defaultWorkflow` to your project.yaml"
+4. Add a `--no-workflow` flag to task creation for users who want to override the project default
+5. If a task has a workflow and an agent completes it without hop advancement, auto-advance the workflow (graceful degradation) rather than leaving it in an inconsistent state
 
-**Phase to address:** Event design (part of schema phase). Define event shapes before implementing handlers.
+**Warning signs:**
+- Tasks stuck in `in-progress` with workflow status "running" but no hop ever completing
+- Agents creating tasks and immediately completing them, bypassing the workflow entirely
+- User complaints about "extra steps" in what used to be simple task flows
 
----
-
-### Pitfall 13: Test Explosion from DAG Execution Path Combinatorics
-
-**What goes wrong:** A DAG with N hops and C conditional hops has O(2^C) possible execution paths. Writing explicit test cases for every path is infeasible for DAGs with more than 5 conditions. Teams either (a) under-test and miss edge cases in condition/skip logic, or (b) spend excessive time writing repetitive tests.
-
-**Prevention:**
-- Use property-based testing (vitest has no built-in property testing, but `fast-check` integrates easily): generate random valid DAGs, execute them through the evaluator, verify invariants:
-  - No hop can be "in-progress" without a lease
-  - No hop can be "done" without all predecessors "done" or "skipped"
-  - All hops eventually reach a terminal state (done, skipped, or failed)
-  - The DAG completes in at most N hop transitions (where N is the total number of hops)
-- Test the DAG evaluator (pure function, no I/O) exhaustively with property-based tests. Test the handler (I/O integration) with a handful of representative DAGs (linear, diamond, wide-parallel, deep-conditional).
-- Define core invariants as runtime assertions that run in the DAG evaluator during development/testing mode but are no-ops in production.
-
-**Phase to address:** Testing strategy, defined alongside schema design, implemented alongside execution phases.
+**Phase to address:** Phase 2 (Upgrade Path) -- define opt-in mechanism, not silent default change
 
 ---
 
-### Pitfall 14: OpenClaw No-Nested-Sessions Constraint Leaks Into DAG Design
+### Pitfall 8: Rollback Cannot Undo Lazy Migrations That Were Written Back to Disk
 
-**What goes wrong:** OpenClaw does not support nested agent sessions. The scheduler must advance hops between **independent, sequential sessions** (one session per hop dispatch). Teams designing the DAG system may inadvertently assume agents can spawn sub-agents or call into other agents' sessions to do hop handoffs. This creates a dependency on functionality that does not exist in the OpenClaw gateway.
+**What goes wrong:**
+The lazy gate-to-DAG migration in `task-store.ts` writes the migrated task back to disk atomically (line 252: `await writeFileAtomic(filePath, serializeTask(task))`). Once a task is lazily migrated, the original gate-format data is gone from the task file. If a user needs to roll back to a pre-v1.3 version:
+- The task files now have `workflow` fields that old code does not understand
+- The `gate` field has been set to `undefined` and `gateHistory` cleared to `[]`
+- The old gate evaluator code (which was deprecated) may have been removed in the v1.3 release
+- There is no backup of the pre-migration task content
 
-**Prevention:**
-- Treat each hop as a completely independent agent session. The ONLY communication channel between hops is the task file (frontmatter + body + work directory). No in-session IPC, no agent-to-agent calls, no shared session state.
-- The scheduler (not any agent) is responsible for hop advancement. Agents call `aof_task_complete` with their hop outcome. The scheduler evaluates the DAG and dispatches the next hop.
-- Document this constraint prominently in the workflow design spec and in the agent-facing API documentation.
-- The `GatewayAdapter.spawnSession()` interface (executor.ts) spawns exactly one session for one hop. The DAG advancement logic calls `spawnSession()` once per eligible hop.
+The migration module (`src/projects/migration.ts`) creates backups for the vault migration, but the lazy gate-to-DAG migration creates NO backup of individual task files.
 
-**Phase to address:** Architecture design (documented constraint) and execution phase (enforced in protocol router).
+**Why it happens:**
+Lazy migrations are designed for convenience ("migrate on next access") but they make rollback nearly impossible because:
+1. There is no central record of which files were migrated
+2. The migration happens during normal read operations -- no user action triggers it
+3. Each migrated file overwrites its own previous state
 
----
+**How to avoid:**
+1. Before any lazy migration write-back, save the original task content to a `.migration-backup/` directory within the project
+2. Record migrated task IDs in a manifest file (`.aof/migrated-tasks.json`) so rollback knows what to restore
+3. Add a `aof rollback --to-version 1.2` command that:
+   a. Checks the migration backup directory
+   b. Restores original task files from backup
+   c. Updates migration history
+4. Alternatively, make the migration non-destructive: keep `gate` fields alongside `workflow` fields during a transition period, remove them only in v1.4
 
-### Pitfall 15: Workflow Name Collision Between Templates and Inline Definitions
+**Warning signs:**
+- User rolls back to v1.2 and sees Zod validation errors on task files ("unrecognized key: workflow")
+- Tasks with workflow fields fail to parse in older versions
+- No way to determine which tasks were migrated vs. which were created as DAG-native
 
-**What goes wrong:** A template in `project.yaml` is named "deploy-pipeline". An agent creates an ad-hoc inline workflow and the task's `routing.workflow` field says `"deploy-pipeline"`. When the scheduler resolves the workflow, which definition wins -- the project template or the inline definition?
-
-**Prevention:**
-- Clear resolution rule: **inline workflow definitions in task frontmatter always take precedence over template references.** If a task has both an inline workflow and a `routing.workflow` string, the inline definition is used.
-- Template resolution happens at dispatch time, not at execution time. When `aof_dispatch` is called with a template name, the template is resolved from `project.yaml`, expanded into the full DAG definition, and embedded inline in the task frontmatter. After that point, the task carries its own workflow definition and the template name is metadata only.
-- This means template changes do NOT affect in-flight tasks (a task created with template v1 keeps v1 even if the template is updated to v2).
-
-**Phase to address:** Schema design phase. Define the resolution rule in the schema spec.
-
----
-
-## Phase-Specific Warnings
-
-| Phase Topic | Likely Pitfall | Mitigation | Severity |
-|-------------|---------------|------------|----------|
-| DAG schema design | Pitfall 3 (cycle detection), Pitfall 5 (backward compat), Pitfall 7 (schema divergence), Pitfall 11 (lease model) | Validate DAG at creation; superset schema; one schema for all; per-hop leases | CRITICAL |
-| Hop execution handler | Pitfall 2 (non-atomic writes), Pitfall 1 (parallel dispatch race) | Single writeFileAtomic per hop completion; per-hop state tracking in frontmatter | CRITICAL |
-| Scheduler DAG advancement | Pitfall 6 (poll latency), Pitfall 9 (deadlock from skipped hops), Pitfall 10 (scan cost) | Completion-triggered advancement; skip = done for deps; cache task state across polls | MODERATE |
-| Condition evaluation | Pitfall 4 (security with agent-composed conditions) | JSON DSL for agent conditions; keep JS eval only for admin templates | CRITICAL |
-| Artifact handoff | Pitfall 8 (directory contention) | Per-hop subdirectories under work/; explicit input/output contract | MODERATE |
-| Backward compatibility | Pitfall 5 (gate-to-DAG migration) | Dual-mode evaluator; keep gate code as legacy; CLI migration tool (optional) | CRITICAL |
-| Event logging | Pitfall 12 (JSONL bloat) | Compact hop events; summary event on DAG completion; new event type names | MINOR |
-| Testing | Pitfall 13 (combinatorial explosion) | Property-based testing with fast-check; invariant assertions | MINOR |
+**Phase to address:** Phase 2 (Upgrade Path) -- add backup mechanism before lazy migration writes
 
 ---
 
-## AOF-Specific Integration Concerns
+### Pitfall 9: `getByPrefix()` Skips Lazy Migration, Creating Phantom Gate Tasks
 
-These are specific to how the DAG system must integrate with AOF's existing modules.
+**What goes wrong:**
+The `get()` method in task-store.ts (line 240) runs the lazy gate-to-DAG migration, but `getByPrefix()` (line 276) does NOT. This means:
+- Tasks accessed via prefix search retain their gate fields
+- The same task can appear as gate-format or DAG-format depending on which method reads it
+- If `getByPrefix()` is used to list tasks for a CLI view, users see stale gate fields
+- If the scheduler uses `get()` to dispatch but the CLI uses `getByPrefix()` to display, the displayed state is inconsistent with actual state
 
-### Concern A: ITaskStore Contract Does Not Model Hop State
+**Why it happens:**
+`getByPrefix()` was likely a convenience method added before the migration was implemented. The migration code was added to `get()` and `list()` but the prefix search was overlooked.
 
-The `ITaskStore` interface (store/interfaces.ts) has no methods for hop-level operations. All state changes go through `update()` (metadata patch), `transition()` (status change), or raw `writeFileAtomic()` in handlers.
+**How to avoid:**
+1. Add the same lazy migration logic to `getByPrefix()` (simple fix)
+2. Better: extract the migration-on-read logic into a shared `ensureMigrated(task)` helper and call it from all read paths
+3. Add a test that verifies all public read methods produce identical task objects for the same task
 
-**Mitigation:** Hop state lives in the task frontmatter, managed via `update()` or direct writes in the hop transition handler. Do NOT add hop-specific methods to `ITaskStore` -- this would expand the interface for a feature-specific concern. Instead, the DAG handler reads the task, computes new state, and writes the full task atomically. The store is a dumb persistence layer.
+**Warning signs:**
+- Task appears differently in `aof task show TASK-xxx` (uses `get()`) vs `aof task show TASK` (uses `getByPrefix()`)
+- Gate fields visible in some views but not others
 
-### Concern B: VALID_TRANSITIONS State Machine vs. Hop States
-
-The `VALID_TRANSITIONS` map in `schemas/task.ts` (lines 137-146) defines task-level status transitions. Hop states (waiting, in-progress, done, skipped, failed) are a SEPARATE state machine that should NOT be conflated with task-level status.
-
-**Mitigation:** Hop status lives in the task's frontmatter `hopStatus` map, NOT in the filesystem directory structure. Task-level directory moves (`rename()`) only happen for task-level transitions:
-- First hop dispatched: `ready -> in-progress` (directory move)
-- All hops complete: `in-progress -> done` (directory move, or `in-progress -> review` if there's a review hop)
-- Task blocked: `in-progress -> blocked` (directory move)
-- Hop-level state changes: frontmatter write only (NO directory move)
-
-This preserves the existing state machine and filesystem layout while adding DAG state as frontmatter metadata.
-
-### Concern C: Protocol Router Completion Path Needs Hop Awareness
-
-The protocol router in `src/protocol/router.ts` processes completion reports from agents. Currently it calls `handleGateTransition()` for gate-enabled tasks. For DAG-enabled tasks, it must call a new `handleHopCompletion()` function. The router needs to distinguish between the two.
-
-**Mitigation:** In the protocol router's completion handling:
-1. Read the task
-2. If task has `hopStatus` field (inline DAG), call `handleHopCompletion()`
-3. Else if task has `gate` field, call `handleGateTransition()` (existing legacy path)
-4. Else, call simple completion (task -> done)
-
-The completion report from the agent must include the `hopId` so the handler knows which hop completed. Add `hopId?: string` to the completion report schema.
-
-### Concern D: GatewayAdapter.spawnSession TaskContext Needs Hop Metadata
-
-The `TaskContext` interface in `executor.ts` currently has `taskId`, `taskPath`, `agent`, `priority`, `routing`, `projectId`, `projectRoot`, `taskRelpath`, and `gateContext`. For DAG hops, the spawned agent needs to know which hop it's executing and what the hop's specific instructions/role are.
-
-**Mitigation:** Add `hopId?: string` and `hopContext?: { role: string; description?: string; predecessors: string[] }` to `TaskContext`. The `assign-executor.ts` code that builds `TaskContext` (lines 136-145) adds this when dispatching a hop. The `gateContext` field is preserved for backward compatibility with the legacy gate path.
-
-### Concern E: The `routing.workflow` Field Already Exists
-
-The `TaskRouting` schema (schemas/task.ts line 67) already has `workflow: z.string().optional()` which is used to reference a template workflow name from `project.yaml`. The new inline DAG definition needs a DIFFERENT field name.
-
-**Mitigation:** Use `workflowDef` (or `pipeline`, or `dag`) for the inline DAG definition in the task frontmatter. Keep `routing.workflow` as the template name reference. At dispatch time, if `routing.workflow` is set and `workflowDef` is not, resolve the template and populate `workflowDef`. After dispatch, the scheduler only reads `workflowDef`.
+**Phase to address:** Phase 1 (Config Migration) -- fix before any migration work begins
 
 ---
+
+### Pitfall 10: Smoke Tests That Only Test Happy Path Miss the Real Upgrade Failures
+
+**What goes wrong:**
+Smoke tests for the upgrade path typically verify:
+- Fresh install works
+- Clean upgrade works (v1.2 with no tasks -> v1.3)
+- Version file is written correctly
+
+But the real failures happen in edge cases:
+- Upgrade from v1.0 (pre-Projects layout) directly to v1.3
+- Upgrade with in-flight tasks (tasks in `in-progress` with active leases)
+- Upgrade with corrupted task files (partial YAML, missing frontmatter)
+- Upgrade when `project.yaml` does not exist
+- Upgrade when daemon is running (PID file exists, Unix socket active)
+- Upgrade on a system where `npm ci` fails (network issues, native module build failures)
+- Upgrade when disk space is low (backup succeeds, extraction fills disk)
+
+**Why it happens:**
+Smoke tests are written by developers who know the expected state. Real users have messy state accumulated over months of usage.
+
+**How to avoid:**
+1. Create a fixture set of "dirty" installation states:
+   - v1.0 layout (flat `tasks/`, no `Projects/`)
+   - v1.1 layout with gate-format tasks in every status
+   - Mixed layout (some projects migrated, some not)
+   - Tasks with malformed YAML frontmatter
+   - Active leases and heartbeat files
+2. Test upgrade against each fixture
+3. Test rollback after upgrade against each fixture
+4. Test upgrade with daemon running (should warn and stop, or fail gracefully)
+5. Test upgrade with insufficient disk space (should fail before corrupting state)
+6. Test the installer's `detect_existing_install()` function against all legacy paths
+
+**Warning signs:**
+- All smoke tests pass but first real user upgrade fails
+- Tests use `beforeEach` cleanup that removes the messy state that causes real failures
+- No test covers the v1.0-to-v1.3 skip-version upgrade path
+
+**Phase to address:** Phase 4 (Smoke Tests) -- but fixture design should start in Phase 1
+
+---
+
+## Technical Debt Patterns
+
+| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
+|----------|-------------------|----------------|-----------------|
+| Lazy-only migration (no eager pass) | Zero-cost upgrade for users who never access old tasks | Orphaned gate-format tasks when gate code is removed | Never acceptable for v1.3 if gate evaluator is being removed |
+| Hardcoded backup directory list in installer | Simple shell script, easy to understand | Every new directory type requires installer update; missed directories lose data | Acceptable for v1.0-v1.1, must be fixed for v1.3 |
+| `schemaVersion: z.literal(1)` | Simple validation, no version branching | Cannot distinguish file versions, cannot drive migration logic | Must be changed before v1.3 ships |
+| Non-atomic config writes in migrations | Simpler migration code, fewer dependencies | Partial config writes on crash leave unrecoverable state | Never -- use `write-file-atomic` always |
+| Migration history as flat JSON | Simple to read/write, human-inspectable | No locking, concurrent migrations can corrupt history file | Acceptable for v1.x (single-machine, single-process upgrades) |
+| Dual gate/DAG code paths in scheduler | Backward compatibility during transition | Doubled maintenance surface, twice the bug surface, harder testing | Must converge to DAG-only in v1.3 |
+
+## Integration Gotchas
+
+| Integration | Common Mistake | Correct Approach |
+|-------------|----------------|------------------|
+| Shell installer + Node.js setup | Installer assumes Node.js setup script exists at fixed path, but tarball layout might change | Pin the setup entry point path in a manifest file inside the tarball; installer reads it |
+| GitHub Actions release + `release-it` | Both `.release-it.json` and `release.yml` have independent quality gates (`before:init` hooks vs. workflow steps) -- they can diverge | Single source of truth: let `release.yml` do all gating, or let `release-it` do all gating, not both |
+| `write-file-atomic` + filesystem backups | Atomic write creates temp file then renames; if backup copies the temp file mid-write, backup contains incomplete data | Backup before upgrade, not during -- take snapshot when system is quiescent |
+| OpenClaw plugin wiring + version upgrade | Plugin entry point path (`dist/plugin.js`) is hardcoded in `openclaw.plugin.json`; if build output structure changes, plugin loading breaks | Verify plugin loading as part of release smoke test |
+| `yaml` npm package + config round-trips | `parse()` returns JS objects that lose comments/formatting; `parseDocument()` preserves them | Use `parseDocument()` for ANY file that users edit manually (org-chart.yaml, project.yaml) |
+| Migration framework + concurrent scheduler | If scheduler is running during migration, it reads tasks via lazy migration while eager migration is also running -- race condition | Stop daemon before upgrade; installer should check for running daemon PID |
+
+## Performance Traps
+
+| Trap | Symptoms | Prevention | When It Breaks |
+|------|----------|------------|----------------|
+| Eager migration scans all tasks at startup | Upgrade takes minutes on large installations (thousands of tasks) | Show progress bar; allow background migration with "migrating..." task status | >500 tasks |
+| Lazy migration writes back on every read | Each `get()` call for an unmigrated task incurs a write; under scheduler polling this means write-per-poll for each gate task | Mark task as "migration checked" in memory (not disk) to avoid re-checking on subsequent reads within same process | >50 unmigrated gate tasks with frequent scheduler polls |
+| Tarball extraction overwrites entire directory | On systems with slow disk I/O (NFS, remote mounts), extraction + npm install can take 5+ minutes during which the system is in a broken state | Extract to staging directory, then atomic swap via rename; or use rsync-style incremental copy | Any network-attached storage |
+| Migration history JSON grows unbounded | After many versions and many migrations, `migrations.json` becomes large | Not a real concern for AOF (expect <100 migrations over product lifetime) | Never for this project |
+
+## Security Mistakes
+
+| Mistake | Risk | Prevention |
+|---------|------|------------|
+| Tarball downloaded over HTTP without integrity check | Man-in-the-middle could replace tarball with malicious payload | Add SHA256 checksum to GitHub release; installer verifies checksum before extraction |
+| Migration scripts run with user permissions | If migration script has a bug that `rm -rf` wrong path, user data is destroyed | Migrations should NEVER delete data -- only copy/transform; original data stays in backup |
+| Backup directories accumulate indefinitely | Old backups fill disk; backup names are predictable (`tasks.backup-<timestamp>`) | Auto-prune backups older than N days; limit to K most recent backups |
+| `.version` file is world-readable | Minor: leaks installed version, could help attackers target known vulnerabilities | Not a real concern for local CLI tool; note for future multi-user deployments |
+
+## UX Pitfalls
+
+| Pitfall | User Impact | Better Approach |
+|---------|-------------|-----------------|
+| Silent migration with no user feedback | User runs `aof` after upgrade, sees no confirmation that migration happened; worries about data integrity | Print "Migrated X tasks from gate format to DAG format" on first run after upgrade |
+| Upgrade requires daemon restart but does not prompt | Scheduler still running old code after code is updated; behavior is unpredictable | Installer checks for running daemon, stops it, restarts after upgrade (or warns user) |
+| Rollback documentation exists but rollback command does not | User reads "rollback is safe" but has to manually restore files from backup directory | Provide `aof upgrade rollback` command that automates backup restoration |
+| Version mismatch between CLI and daemon | User upgrades CLI but daemon was installed under OS supervisor (launchd/systemd) pointing to old path | After upgrade, automatically re-register daemon service file with updated paths |
+| Config migration adds new required fields without defaults | `project.yaml` validation fails after upgrade because new field `workflowTemplates` is required | All new fields must have defaults or be optional; migration adds them with sensible defaults |
+
+## "Looks Done But Isn't" Checklist
+
+- [ ] **Config migration:** Often missing comment preservation -- verify `org-chart.yaml` diff shows ONLY logical changes, not reformatting
+- [ ] **Gate-to-DAG migration:** Often missing `getByPrefix()` path -- verify all read methods return identical task objects
+- [ ] **Installer backup:** Often missing new directory types -- verify `Projects/` tree is backed up on upgrade
+- [ ] **Release tarball:** Often missing production install test -- verify `npm ci --production` succeeds on extracted tarball
+- [ ] **Rollback:** Often missing lazy-migrated task restoration -- verify tasks can be read by v1.2 code after rollback
+- [ ] **Schema version:** Often missing version bump in migration -- verify files have `schemaVersion: 2` after migration
+- [ ] **Daemon lifecycle:** Often missing service file update -- verify launchd/systemd plist/unit points to new binary path after upgrade
+- [ ] **Smoke tests:** Often missing dirty-state fixtures -- verify tests cover v1.0 layout, in-flight tasks, and corrupted files
+- [ ] **Default workflow:** Often missing opt-in mechanism -- verify tasks created without explicit workflow still work as before
+- [ ] **Migration history:** Often missing atomicity -- verify `migrations.json` is not corrupted if process crashes mid-migration
+
+## Recovery Strategies
+
+| Pitfall | Recovery Cost | Recovery Steps |
+|---------|---------------|----------------|
+| Partial migration (crash mid-`up()`) | MEDIUM | 1. Check migration history for last successful migration. 2. Manually inspect filesystem for partially-written files. 3. Re-run migration (must be idempotent). 4. If not idempotent, restore from backup. |
+| Lost YAML comments after config migration | LOW | 1. Restore `org-chart.yaml` from backup. 2. Re-apply migration using Document API. 3. Comments are recoverable from git history if backup was not taken. |
+| Orphaned gate-format tasks after gate code removal | HIGH | 1. Must re-add gate migration code temporarily. 2. Run eager migration pass. 3. Verify all tasks converted. 4. Remove gate code again. **Prevention is far cheaper than recovery.** |
+| Tarball missing critical files | LOW | 1. Delete extracted files. 2. Download correct tarball. 3. Re-run installer. Only affects time, not data. |
+| Installer overwrites Projects/ directory | HIGH | 1. Check backup directory for Projects/ tree. 2. If not backed up, check OS-level snapshots (Time Machine, etc.). 3. If no backup exists, data is lost. **Prevention is essential.** |
+| DAG-as-default breaks existing agents | MEDIUM | 1. Set `defaultWorkflow: null` in project.yaml to disable. 2. Tasks already created with unwanted workflows: manually remove `workflow` field from frontmatter. 3. Restart daemon. |
+| Daemon running old code after upgrade | LOW | 1. `aof daemon stop`. 2. Re-install service: `aof daemon install`. 3. `aof daemon start`. Installer should automate this. |
+| Migration history corrupted (invalid JSON) | LOW | 1. Delete `.aof/migrations.json`. 2. Manually verify which migrations are applied by inspecting file state. 3. Reconstruct history file. 4. Future: add migration state introspection command. |
+
+## Pitfall-to-Phase Mapping
+
+| Pitfall | Prevention Phase | Verification |
+|---------|------------------|--------------|
+| Partial migration writes | Phase 1 (Config Migration) | Unit test: kill process mid-migration, re-run succeeds without data loss |
+| Lazy migration silent failure | Phase 1 (Config Migration) | Integration test: task with gate fields + missing workflow config -> warning + explicit handling |
+| YAML comment destruction | Phase 1 (Config Migration) | Diff test: migrate config file, verify only expected lines changed |
+| Schema version stagnation | Phase 1 (Config Migration) | Schema test: v1.3 files have schemaVersion >= 2; old files with version 1 trigger migration |
+| Tarball untested | Phase 3 (Release Pipeline) | CI step: extract tarball, `npm ci --production`, run CLI `--version` |
+| Installer backup gaps | Phase 2 (Upgrade Path) | Integration test: create v1.1 layout with Projects/, upgrade, verify Projects/ preserved |
+| DAG-as-default breakage | Phase 2 (Upgrade Path) | Behavior test: task created without workflow param still works with direct status transitions |
+| Rollback impossible for lazy-migrated tasks | Phase 2 (Upgrade Path) | Round-trip test: upgrade, create tasks, rollback, verify v1.2 can read all tasks |
+| `getByPrefix()` migration gap | Phase 1 (Config Migration) | Unit test: gate-format task accessed via prefix returns DAG-format task |
+| Smoke test blind spots | Phase 4 (Smoke Tests) | Fixture matrix: v1.0 layout, v1.1 layout, mixed, corrupted, in-flight tasks |
 
 ## Sources
 
-All pitfalls derived from direct source code analysis of the AOF codebase at `/Users/xavier/Projects/AOF/src/`:
-
-- `dispatch/scheduler.ts` -- poll cycle, cycle detection, gate timeout checks (HIGH confidence)
-- `dispatch/gate-evaluator.ts` -- pure gate evaluation, role enforcement, condition skip logic (HIGH confidence)
-- `dispatch/gate-transition-handler.ts` -- gate I/O orchestration, atomic writes (HIGH confidence)
-- `dispatch/gate-conditional.ts` -- condition evaluation via Function constructor, timeout model (HIGH confidence)
-- `dispatch/gate-context-builder.ts` -- gate context injection for agents (HIGH confidence)
-- `dispatch/task-dispatcher.ts` -- dispatch action building, throttle checks (HIGH confidence)
-- `dispatch/action-executor.ts` -- sequential action execution loop (HIGH confidence)
-- `dispatch/assign-executor.ts` -- agent session spawning, lease acquisition, correlation IDs (HIGH confidence)
-- `store/task-store.ts` -- filesystem task CRUD, ensureTaskDirs, directory layout (HIGH confidence)
-- `store/task-mutations.ts` -- atomic transition via rename(), writeFileAtomic pattern (HIGH confidence)
-- `store/interfaces.ts` -- ITaskStore contract (HIGH confidence)
-- `schemas/task.ts` -- task frontmatter schema, valid transitions, gate/lease fields (HIGH confidence)
-- `schemas/gate.ts` -- gate types, history entries, review context (HIGH confidence)
-- `schemas/workflow.ts` -- workflow config schema, validation function (HIGH confidence)
-
-Domain expertise on DAG execution engines, filesystem atomicity guarantees, and workflow scheduler design patterns (MEDIUM confidence -- training data, not verified against external sources for this specific combination of constraints).
+- Direct codebase analysis of `src/packaging/migrations.ts`, `src/store/task-store.ts`, `src/migration/gate-to-dag.ts`, `src/config/manager.ts`, `scripts/install.sh`, `.github/workflows/release.yml`, `scripts/build-tarball.mjs`
+- [Discourse: How We Fixed YAML Comment Preservation in Ruby](https://blog.discourse.org/2026/02/how-we-fixed-yaml-comment-preservation-in-ruby-and-why-we-sponsored-it/) -- demonstrates YAML comment loss is a widespread, recognized problem
+- [Oh My Posh: Config migration messes up things for YAML](https://github.com/JanDeDobbeleer/oh-my-posh/issues/5862) -- real-world example of YAML config migration destroying user files
+- [Lazy Migration Pattern](https://softwarepatternslexicon.com/102/3/23/) -- tradeoff analysis of lazy vs eager migration strategies
+- [CircleCI: Smoke testing in CI/CD pipelines](https://circleci.com/blog/smoke-tests-in-cicd-pipelines/) -- guidance on where smoke tests fit in release pipelines
+- [The Hard Truth about GitOps and Database Rollbacks](https://atlasgo.io/blog/2024/11/14/the-hard-truth-about-gitops-and-db-rollbacks) -- partial migration failure modes and recovery strategies
+- [The YAML Document from Hell](https://ruudvanasseldonk.com/2023/01/11/the-yaml-document-from-hell) -- YAML type coercion and format pitfalls
 
 ---
-
-*Pitfalls research for: AOF v1.2 per-task workflow DAG execution*
-*Researched: 2026-03-02*
-*Supersedes: v1.1 pitfalls (those remain valid for their respective subsystems; this document covers v1.2 DAG-specific pitfalls)*
+*Pitfalls research for: AOF v1.3 Seamless Upgrade -- upgrade/migration/release pipeline for filesystem-based CLI tool*
+*Researched: 2026-03-03*

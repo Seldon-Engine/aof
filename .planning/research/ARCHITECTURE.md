@@ -1,987 +1,879 @@
-# Architecture Patterns: Per-Task Workflow DAGs
+# Architecture Patterns: Seamless Upgrade Integration (v1.3)
 
-**Domain:** DAG-based workflow execution for multi-agent orchestration (AOF v1.2)
-**Researched:** 2026-03-02
+**Domain:** Upgrade path, config migration, DAG-as-default, release pipeline for AOF
+**Researched:** 2026-03-03
 **Confidence:** HIGH (direct source code analysis of all integration points)
 
 ## Executive Summary
 
-AOF currently has a linear gate-based workflow system: tasks progress through an ordered sequence of gates defined in `project.yaml`, with the gate evaluator advancing tasks on completion. The v1.2 milestone replaces this with per-task workflow DAGs -- directed acyclic graphs where hops (the DAG equivalent of gates) can branch, run in parallel, and converge. The critical architectural constraint is that OpenClaw has no nested agent sessions: each hop must be an independent spawn, with the scheduler advancing the DAG between hops.
+AOF v1.2 shipped per-task workflow DAGs but left them as opt-in. The migration from gates to DAGs is lazy (on-load in task-store.ts) and the migration registry in setup.ts returns an empty array. v1.3 must make DAGs the default for new tasks, formalize the upgrade path from pre-v1.2, cut a release, and add smoke tests that validate the entire flow.
 
-This document maps every integration point, defines the new components needed, specifies how DAG state persists on tasks, and provides a build order that respects dependency chains and maintains backward compatibility.
+The architecture challenge is that the upgrade surface area is split across three layers that must coordinate:
 
----
+1. **Shell layer** (install.sh): detects existing install, backs up data dirs, extracts tarball, calls Node.js setup
+2. **Node.js setup layer** (setup.ts): branches on fresh/upgrade/legacy, runs migration registry, wires OpenClaw plugin
+3. **Runtime layer** (task-store.ts): lazy gate-to-DAG migration on individual task load
 
-## 1. Current Architecture (What Exists)
-
-### 1.1 Component Map
-
-```
-Scheduler Poll Cycle (src/dispatch/scheduler.ts)
-  |
-  +-- store.list() --> all tasks
-  |
-  +-- checkExpiredLeases()
-  +-- checkStaleHeartbeats()
-  +-- checkGateTimeouts() ---- loads project manifest, finds gate timeout violations
-  +-- checkBacklogPromotion()
-  |
-  +-- buildDispatchActions() -- for ready tasks:
-  |     +-- dependency gating (dependsOn check)
-  |     +-- resource serialization
-  |     +-- throttle checks
-  |     +-- builds "assign" actions
-  |
-  +-- checkBlockedTaskRecovery()
-  |
-  +-- executeActions() ------- for each action:
-        +-- "assign" --> executeAssignAction():
-        |     +-- acquireLease()
-        |     +-- build TaskContext (with gateContext if workflow task)
-        |     +-- executor.spawnSession()
-        |     +-- startLeaseRenewal()
-        |
-        +-- "expire_lease" --> transition back to ready/blocked
-        +-- "stale_heartbeat" --> readRunResult, apply transitions
-        +-- "promote" --> backlog -> ready
-        +-- other action types...
-```
-
-### 1.2 Workflow Flow (Current Linear Gates)
-
-```
-Task Created (routing.workflow: "standard-sdlc")
-  |
-  v
-Task enters first gate: gate: { current: "implement", entered: "..." }
-  |
-  v
-Scheduler dispatches to role specified by gate
-  |
-  v
-Agent completes --> completion.report via ProtocolRouter
-  |
-  v
-ProtocolRouter.handleCompletionReport():
-  applyCompletionOutcome() --> resolveCompletionTransitions()
-    --> transitions to "review" (or "done" if no review)
-  |
-  v
-[Note: Gate advancement currently happens via the gate evaluator,
- invoked when an agent completes with a gate outcome]
-```
-
-### 1.3 Key Existing Data Structures
-
-**Task frontmatter (relevant fields):**
-```typescript
-{
-  routing: {
-    role?: string;          // Current gate's role
-    workflow?: string;      // Workflow name from project.yaml
-    agent?: string;
-  };
-  gate: {                   // Current gate state
-    current: string;        // Gate ID
-    entered: string;        // ISO timestamp
-  };
-  gateHistory: GateHistoryEntry[];  // Audit trail
-  reviewContext?: ReviewContext;      // Rejection feedback
-  metadata: Record<string, unknown>; // Extensible
-}
-```
-
-**WorkflowConfig (project.yaml):**
-```typescript
-{
-  name: string;
-  rejectionStrategy: "origin";
-  gates: Gate[];           // Ordered sequence
-  outcomes?: Record<string, string>;
-}
-```
-
-**Gate:**
-```typescript
-{
-  id: string;
-  role: string;
-  canReject: boolean;
-  when?: string;           // Conditional expression
-  timeout?: string;
-  escalateTo?: string;
-}
-```
-
-### 1.4 Integration Points to Modify
-
-| Component | File | Current Role | DAG Impact |
-|-----------|------|-------------|------------|
-| WorkflowConfig schema | `schemas/workflow.ts` | Linear gate sequence | Add DAG definition schema |
-| Task schema | `schemas/task.ts` | `gate`, `gateHistory` fields | Add `dag`, `dagState`, `hopHistory` fields |
-| ProjectManifest | `schemas/project.ts` | `workflow: WorkflowConfig` | Add `workflows: Record<string, WorkflowConfig>` (named templates) |
-| Gate evaluator | `dispatch/gate-evaluator.ts` | Linear next-gate logic | Replace with DAG evaluator |
-| Gate context builder | `dispatch/gate-context-builder.ts` | Builds context for current gate | Adapt for hop context |
-| Gate conditional | `dispatch/gate-conditional.ts` | `when` expression evaluation | Reuse for hop conditions |
-| Assign executor | `dispatch/assign-executor.ts` | Injects gateContext on dispatch | Inject hopContext instead |
-| Escalation | `dispatch/escalation.ts` | Gate timeout checks | Adapt for hop timeouts |
-| Completion utils | `protocol/completion-utils.ts` | Status transition mapping | Add DAG-aware transitions |
-| Protocol router | `protocol/router.ts` | `handleCompletionReport()` | Add DAG advancement on completion |
-| Scheduler | `dispatch/scheduler.ts` | Gate timeout checking | Add DAG hop dispatch evaluation |
-| Action executor | `dispatch/action-executor.ts` | Executes assign actions | No change needed (action types unchanged) |
+This document maps every integration point, specifies exactly where new code goes, what modifications existing code needs, and provides a dependency-ordered build sequence.
 
 ---
 
-## 2. Recommended Architecture
+## 1. Current Architecture (As-Is State)
 
-### 2.1 DAG Schema Design
+### 1.1 Install/Upgrade Flow
 
-The DAG is defined as a set of hops with explicit dependency edges. This replaces the implicit ordering of the linear gate array.
-
-```typescript
-// NEW: src/schemas/workflow-dag.ts
-
-/** A hop is the DAG equivalent of a gate -- one unit of work at one stage. */
-const Hop = z.object({
-  /** Unique hop ID within the workflow (e.g., "implement", "review", "test"). */
-  id: z.string().min(1),
-  /** Role responsible for this hop (from org chart). */
-  role: z.string().min(1),
-  /** Hop IDs that must complete before this hop can start. Empty = root hop. */
-  dependsOn: z.array(z.string()).default([]),
-  /** Conditional activation expression (same as gate.when). */
-  when: z.string().optional(),
-  /** Human-readable description. */
-  description: z.string().optional(),
-  /** Whether this hop can reject (send back to predecessors). */
-  canReject: z.boolean().default(false),
-  /** Rejection target: "origin" (first hop) or specific hop ID. */
-  rejectTo: z.string().optional(),
-  /** Maximum time before escalation. */
-  timeout: z.string().optional(),
-  /** Escalation target role. */
-  escalateTo: z.string().optional(),
-  /** Whether this hop requires human approval. */
-  requireHuman: z.boolean().optional(),
-  /**
-   * Hop behavior on completion of predecessor:
-   * - "auto": Scheduler dispatches automatically (default)
-   * - "pause": Task pauses in ready, awaiting manual trigger
-   */
-  trigger: z.enum(["auto", "pause"]).default("auto"),
-});
-type Hop = z.infer<typeof Hop>;
-
-/** DAG workflow definition. */
-const WorkflowDAG = z.object({
-  /** Workflow name (unique within project). */
-  name: z.string().min(1),
-  /** Schema version for migration. */
-  version: z.literal(2).default(2),
-  /** Hop definitions (the nodes of the DAG). */
-  hops: z.array(Hop).min(1),
-  /** Default rejection strategy for hops without explicit rejectTo. */
-  rejectionStrategy: z.enum(["origin", "predecessors"]).default("origin"),
-  /** Optional outcome descriptions. */
-  outcomes: z.record(z.string(), z.string()).optional(),
-});
-type WorkflowDAG = z.infer<typeof WorkflowDAG>;
+```
+User runs: curl -fsSL <url>/install.sh | sh
+  |
+  +-- parse_args()                    # --prefix, --version, --channel
+  +-- check_prerequisites()           # Node >= 22, tar, curl/wget
+  +-- detect_existing_install()       # .version file -> upgrade, ~/.openclaw/aof -> legacy
+  +-- determine_version()             # GitHub API /releases/latest
+  +-- download_tarball()              # GitHub Releases tarball
+  +-- extract_and_install()           # tar -xzf + npm ci + data backup/restore
+  +-- run_node_setup()                # node dist/cli/index.js setup --auto [--upgrade] [--legacy]
+  +-- write_version_file()            # echo $VERSION > .version
+  +-- print_summary()
 ```
 
-**Why this shape:**
-- `dependsOn` on each hop makes the DAG explicit and self-documenting in YAML
-- Root hops (no `dependsOn`) are entry points -- the scheduler knows where to start
-- Fan-out: multiple hops can depend on the same predecessor
-- Fan-in: a hop with multiple `dependsOn` waits for all to complete (join)
-- Conditional hops (`when`) are evaluated at dispatch time -- if skipped, downstream hops treat them as complete
+### 1.2 Node.js Setup Flow (setup.ts)
 
-**Example YAML:**
+```
+runSetup(opts)
+  |
+  +-- if (legacy)  -> migrateLegacyData()     # cp ~/.openclaw/aof/* -> dataDir
+  +-- if (upgrade || legacy) -> runMigrations()  # getAllMigrations() -> EMPTY ARRAY
+  +-- if (fresh)   -> runWizard()              # scaffold dirs + org chart + .gitignore
+  +-- wireOpenClawPlugin()                      # register plugin, configure memory, set paths
+```
+
+**Critical observation:** `getAllMigrations()` returns `[]`. No formal migrations have ever run. The entire gate-to-DAG conversion is lazy (on-load in task-store.ts get/list).
+
+### 1.3 Lazy Gate-to-DAG Migration (task-store.ts)
+
+Both `get()` and `list()` contain identical logic:
+
+```typescript
+// Lazy gate-to-DAG migration: convert on load, write back atomically
+if ((task.frontmatter as any).gate && !task.frontmatter.workflow) {
+  const workflowConfig = await this.loadWorkflowConfig();
+  migrateGateToDAG(task, workflowConfig);
+  if (task.frontmatter.workflow) {
+    await writeFileAtomic(filePath, serializeTask(task));
+  }
+}
+```
+
+This reads `project.yaml` for the gate definitions, converts to DAG hops, and writes back atomically. It is idempotent (skip if workflow already set) but:
+- Requires project.yaml to still have the old `workflow.gates` config
+- Silently skips tasks without gate fields (no-op, which is correct)
+- Occurs on every load cycle, adding overhead until all tasks are converted
+
+### 1.4 Task Creation Path
+
+```
+store.create(opts)
+  |
+  +-- opts.workflow? -> validateDAG() + initializeWorkflowState()
+  +-- TaskFrontmatter.parse({ ..., workflow: resolvedWorkflow })
+  +-- writeFileAtomic(filePath, serializeTask(task))
+```
+
+Tasks are created with workflow **only if** `opts.workflow` is explicitly provided. Without it, tasks are "taskless" (no workflow field at all). The scheduler handles both: taskless tasks dispatch directly, workflow tasks go through DAG hop dispatch.
+
+### 1.5 Release Pipeline
+
+```
+Git tag v* push -> .github/workflows/release.yml
+  |
+  +-- npm ci + typecheck + build + test
+  +-- node scripts/build-tarball.mjs $VERSION
+  |     +-- stages: dist/, prompts/, skills/, index.ts, openclaw.plugin.json, package.json, package-lock.json
+  |     +-- strips dev-only fields from package.json
+  |     +-- tar -czf aof-$VERSION.tar.gz
+  +-- softprops/action-gh-release (upload tarball + changelog)
+```
+
+### 1.6 Version Tracking
+
+Three separate version sources exist:
+- `.version` file (written by install.sh, read by install.sh for upgrade detection)
+- `package.json` version field (canonical, read by setup.ts `readPackageVersion()`)
+- `.aof/channel.json` version field (written by updater.ts, read by channels.ts for update checks)
+
+### 1.7 Existing Backup/Rollback Mechanisms
+
+**install.sh backup:**
+- On upgrade: copies `tasks/events/memory/state/data/logs` + `memory.db/memory-hnsw.dat/.version` to `.aof-backup/backup-<timestamp>/`
+- On extract failure: restores from backup
+- After extract: restores data dirs from backup (tarball may overwrite)
+
+**updater.ts rollback:**
+- `selfUpdate()`: backup before update, rollback on failure
+- `rollbackUpdate()`: restore from backup path, then delete backup
+- `preservePaths` default: `["config", "data", "tasks", "events"]`
+
+**channels.ts rollback:**
+- `createBackup()`: copies specified paths to `.aof-backup/backup-<timestamp>/`
+- `rollback()`: restores from backup, deletes backup
+
+---
+
+## 2. Integration Analysis: Where Each Feature Belongs
+
+### 2.1 Config Migration: Migration Registry (Not Lazy)
+
+**Question:** Where should config migration live -- migration registry vs setup command vs lazy on-load?
+
+**Answer:** In the **migration registry** (`getAllMigrations()` in setup.ts), not in the lazy task-store path.
+
+**Rationale:**
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| **Migration registry** (in setup.ts) | Runs once at upgrade time; has access to full filesystem; can transform project.yaml, org chart, and metadata files; tracked in migrations.json history; reversible via `down()` | Requires setup command to be run |
+| **Lazy on-load** (in task-store.ts) | Automatic, no setup required | Only sees individual tasks; cannot transform project config; runs on every load; no history; not reversible |
+| **Setup command inline** (hardcoded in runSetup) | Simple | Not version-tracked; not reversible; not testable in isolation |
+
+**The migration registry is the correct home because:**
+
+1. Config migration touches `project.yaml` (converting `workflow` to `workflowTemplates`, or adding a default template) -- this is project-level, not task-level.
+2. The migration framework already supports `up()/down()`, version constraints, idempotency (skip if applied), and history tracking via `.aof/migrations.json`.
+3. The lazy gate-to-DAG migration in task-store.ts was appropriate for v1.2 (gradual conversion during normal operation) but is not appropriate for v1.3's goal of a clean cutover.
+4. `install.sh` already calls `node dist/cli/index.js setup --auto --upgrade` which runs `runMigrations()`. The plumbing is wired; it just needs actual migrations.
+
+**Specific migrations to register:**
+
+```typescript
+function getAllMigrations(): Migration[] {
+  return [
+    {
+      id: "001-default-workflow-template",
+      version: "1.3.0",
+      description: "Add default workflow template to project.yaml if none exists",
+      up: async (ctx) => { /* read project.yaml, add workflowTemplates if missing */ },
+      down: async (ctx) => { /* remove workflowTemplates added by this migration */ },
+    },
+    {
+      id: "002-deprecate-gate-config",
+      version: "1.3.0",
+      description: "Convert workflow.gates to workflowTemplates, remove deprecated workflow field",
+      up: async (ctx) => { /* transform project.yaml */ },
+      down: async (ctx) => { /* restore workflow.gates from backup */ },
+    },
+    {
+      id: "003-version-metadata",
+      version: "1.3.0",
+      description: "Write .aof/channel.json with version info for update tracking",
+      up: async (ctx) => { /* ensure .aof/channel.json has version and channel */ },
+    },
+  ];
+}
+```
+
+**Relationship to lazy migration:** The lazy gate-to-DAG migration in task-store.ts can remain for tasks that have not been loaded since v1.2. It handles the per-task conversion. The registry migration handles the project-level config. They are complementary.
+
+### 2.2 DAG-as-Default: Default Workflow at Task Creation
+
+**Question:** How to make workflows default without breaking taskless workflows?
+
+**Answer:** Make DAG workflows **opt-out** instead of opt-in, using a project-level default template.
+
+**Current state:**
+- `store.create()` accepts optional `workflow` parameter
+- Without it, tasks have no workflow field
+- Scheduler handles both: taskless tasks dispatch directly, workflow tasks go through DAG hops
+
+**Proposed integration point:** The `store.create()` method, with a project manifest lookup.
+
+**Architecture:**
+
+```
+store.create(opts)
+  |
+  +-- opts.workflow provided?
+  |     YES -> use it (existing behavior, unchanged)
+  |     NO  -> opts.skipDefaultWorkflow?
+  |             YES -> create taskless (existing behavior)
+  |             NO  -> loadDefaultTemplate()
+  |                     -> found? -> apply it
+  |                     -> not found? -> create taskless (graceful degradation)
+  +-- ... rest of create flow unchanged
+```
+
+**Key decisions:**
+
+1. **Default template source:** `project.yaml` `workflowTemplates` with a reserved key like `"default"`. Migration 001 adds this.
+
+2. **Opt-out mechanism:** A `skipDefaultWorkflow: true` flag on `store.create()`. This preserves backward compatibility for:
+   - Quick one-off tasks (`aof task create "quick fix" --no-workflow`)
+   - Subtasks that don't need full DAG pipelines
+   - Tests that create simple tasks
+
+3. **No hardcoded workflow in code:** The default workflow is defined in `project.yaml`, not hardcoded. Different projects can have different defaults.
+
+4. **CLI integration:** The `bd create` / `aof task create` command adds `--no-workflow` flag. Without flag, it resolves the default template from project.yaml and passes it to `store.create()`.
+
+5. **Scheduler unchanged:** The scheduler already handles both workflow and taskless tasks. No changes needed to dispatch logic.
+
+**What constitutes a "default" template:**
+
 ```yaml
-workflows:
-  standard-sdlc:
-    name: standard-sdlc
-    version: 2
+# project.yaml
+workflowTemplates:
+  default:
+    name: default
     hops:
-      - id: implement
-        role: swe-backend
-        description: "Initial implementation"
-      - id: test
-        role: swe-qa
-        dependsOn: [implement]
-        canReject: true
+      - id: execute
+        role: "${routing.role}"   # Dynamic: uses task's routing.role
+        dependsOn: []
       - id: review
-        role: swe-architect
-        dependsOn: [implement]
+        role: "${routing.team}-lead"  # Dynamic: team lead reviews
+        dependsOn: [execute]
         canReject: true
-      - id: security
-        role: security
-        dependsOn: [implement]
-        when: "tags.includes('security')"
-      - id: deploy
-        role: swe-ops
-        dependsOn: [test, review, security]
-        description: "Deploy to staging"
+        rejectionStrategy: origin
 ```
 
-### 2.2 DAG State on Task (Persisted in Frontmatter)
+Note: Dynamic role resolution would require either:
+- A. Template variable substitution at task creation time (adds complexity)
+- B. Literal roles in the template, with the understanding that projects customize their default
 
-The DAG execution state lives on the task frontmatter. This is the single source of truth for where the task is in its workflow.
+**Recommendation:** Option B (literal roles). Keep it simple. The project owner defines a default template with real role names from their org chart. Variable substitution is a v2 feature.
+
+### 2.3 Smoke Tests: Position in Release Pipeline
+
+**Question:** Where do smoke tests fit in the release pipeline?
+
+**Answer:** Smoke tests run **after build, before release upload** in the GitHub Actions release workflow, AND as a standalone test suite runnable locally.
+
+**Current release pipeline steps:**
+1. Checkout
+2. Setup Node.js 22
+3. npm ci
+4. Typecheck
+5. Build
+6. Test (unit tests)
+7. Extract version
+8. Generate changelog
+9. Build release tarball
+10. Upload tarball to GitHub Release
+
+**Proposed insertion:**
+
+```yaml
+# After step 9 (build tarball), before step 10 (upload):
+- name: Smoke test - fresh install
+  run: |
+    mkdir -p /tmp/aof-smoke-fresh
+    tar -xzf aof-${{ steps.version.outputs.version }}.tar.gz -C /tmp/aof-smoke-fresh
+    cd /tmp/aof-smoke-fresh && npm ci --production
+    node dist/cli/index.js setup --auto --data-dir /tmp/aof-smoke-fresh
+    node dist/cli/index.js --version
+
+- name: Smoke test - upgrade from fixture
+  run: |
+    node scripts/smoke-upgrade.mjs ${{ steps.version.outputs.version }}
+```
+
+**Smoke test categories:**
+
+| Category | What it validates | Runs in |
+|----------|-------------------|---------|
+| Fresh install | Tarball extracts, npm ci works, setup scaffolds dirs, OpenClaw plugin detection | CI release + local |
+| Upgrade | Pre-v1.2 fixture -> v1.3, migrations apply, data preserved, taskless tasks still work | CI release + local |
+| DAG default | New task gets default workflow, task with --no-workflow stays taskless | CI release + local |
+| Rollback | Upgrade, then rollback restores previous state | Local only (too slow for CI) |
+| Config migration | project.yaml transforms correctly (gates -> templates) | Unit test (fast) |
+
+**Test fixture strategy:**
+
+Create `tests/fixtures/upgrade/` containing:
+- `pre-v1.2/` -- simulated pre-v1.2 install (tasks with gate fields, project.yaml with workflow.gates)
+- `v1.2-clean/` -- v1.2 install with DAG tasks and templates
+- Each fixture includes: `.version`, `project.yaml`, `org/org-chart.yaml`, sample tasks in `tasks/<status>/`
+
+**Smoke test implementation:** A Node.js script (not shell) because:
+- Can use the actual migration framework
+- Can assert on task file contents (Zod parsing)
+- Can run setup programmatically via `runSetup()`
+- Integrates with vitest for local runs
+
+### 2.4 Rollback with Filesystem-Based State
+
+**Question:** How does rollback work with filesystem-based state?
+
+**Answer:** Filesystem-based state makes rollback simpler than database-based systems, but the v1.3 migration story requires explicit backup/restore around migrations.
+
+**Current rollback mechanisms (3 independent implementations):**
+
+1. **install.sh** (shell-level): copies data dirs to `.aof-backup/`, restores on failure
+2. **updater.ts** (selfUpdate): preserves paths, restores on health check failure
+3. **channels.ts** (rollback): backup + restore for update channel management
+
+**Problem:** These are all "binary rollback" -- restore everything or nothing. There is no per-migration rollback. If migration 002 fails after 001 succeeded, the system has partial state.
+
+**Proposed rollback architecture:**
+
+```
+Level 1: Pre-migration snapshot (NEW)
+  - Before ANY migration runs, copy entire data dir to .aof-backup/pre-migration-<timestamp>/
+  - If ANY migration fails, restore from snapshot
+  - This is the "nuclear option" -- guaranteed clean rollback
+
+Level 2: Per-migration down() (EXISTS in framework, needs implementations)
+  - Each migration provides a down() function
+  - runMigrations(direction: "down") reverses applied migrations
+  - Used for intentional rollback (user wants to go back to v1.2)
+
+Level 3: install.sh data preservation (EXISTS, unchanged)
+  - Shell-level backup of data dirs during tarball extraction
+  - Handles the "new code, old data" scenario
+
+Level 4: Task-level idempotency (EXISTS)
+  - Lazy gate-to-DAG migration is idempotent
+  - Tasks that were already converted are untouched
+  - Tasks that were not converted are converted on next load
+```
+
+**Integration points:**
+
+1. **setup.ts modification:** Before calling `runMigrations()`, snapshot the data dir:
 
 ```typescript
-// NEW: Added to TaskFrontmatter schema
-
-/** State of a single hop in the DAG execution. */
-const HopState = z.object({
-  /** Hop ID. */
-  id: z.string(),
-  /** Hop execution status. */
-  status: z.enum([
-    "pending",       // Not yet eligible (predecessors incomplete)
-    "ready",         // All predecessors complete, eligible for dispatch
-    "dispatched",    // Scheduler has dispatched this hop
-    "complete",      // Hop completed successfully
-    "rejected",      // Hop rejected work back to predecessors
-    "blocked",       // Hop hit external blocker
-    "skipped",       // Conditional evaluated to false
-  ]),
-  /** Agent assigned to this hop (set on dispatch). */
-  agent: z.string().optional(),
-  /** ISO timestamp when hop became ready. */
-  readyAt: z.string().datetime().optional(),
-  /** ISO timestamp when hop was dispatched. */
-  dispatchedAt: z.string().datetime().optional(),
-  /** ISO timestamp when hop completed/blocked/rejected. */
-  completedAt: z.string().datetime().optional(),
-  /** Completion outcome (if completed). */
-  outcome: z.enum(["complete", "needs_review", "blocked"]).optional(),
-  /** Summary from the completing agent. */
-  summary: z.string().optional(),
-  /** Blockers if rejected or blocked. */
-  blockers: z.array(z.string()).default([]),
-  /** Rejection notes. */
-  rejectionNotes: z.string().optional(),
-});
-type HopState = z.infer<typeof HopState>;
-
-/** DAG execution state -- the full runtime state of a workflow on a task. */
-const DAGState = z.object({
-  /** Workflow name (references workflow template). */
-  workflow: z.string(),
-  /** Current hops state map (hop ID -> HopState). */
-  hops: z.record(z.string(), HopState),
-  /** The hop currently being dispatched/executed (for routing). */
-  activeHop: z.string().optional(),
-  /** ISO timestamp when DAG execution started. */
-  startedAt: z.string().datetime(),
-  /** ISO timestamp when DAG completed (all terminal hops done). */
-  completedAt: z.string().datetime().optional(),
-  /** Number of rejection cycles (for circuit breaker). */
-  rejectionCount: z.number().int().nonnegative().default(0),
-});
-type DAGState = z.infer<typeof DAGState>;
+if (upgrade || legacy) {
+  // NEW: Pre-migration snapshot
+  const snapshotPath = await createPreMigrationSnapshot(dataDir);
+  try {
+    const result = await runMigrations({ ... });
+    say(`Migrations: ${result.applied.length} applied`);
+  } catch (e) {
+    warn(`Migration failed, restoring from snapshot...`);
+    await restoreFromSnapshot(snapshotPath, dataDir);
+    throw e;
+  }
+}
 ```
 
-**Why on the task (not in a separate file):**
-1. **Atomic transitions**: Task file rename (status directory change) and DAG state update happen in one write -- no cross-file consistency issues
-2. **Human-readable**: `cat task.md` shows the complete picture including DAG progress
-3. **Existing pattern**: Gate state already lives in frontmatter (`gate`, `gateHistory`)
-4. **Store interface unchanged**: No new file types to manage
-5. **Crash recovery**: DAG state survives gateway restarts because it is on the task file
+2. **Version tracking after migration:** After successful migration, update `.aof/channel.json` with the new version. This ensures `checkForUpdates()` knows the current version.
 
-**Frontmatter size concern**: A workflow with 10 hops adds approximately 2-4KB to frontmatter. This is acceptable for the filesystem store. The existing `gateHistory` array can grow much larger (one entry per gate traversal including rejection loops).
+3. **Rollback CLI command:** A new `aof system rollback` command that:
+   - Lists available backups in `.aof-backup/`
+   - Restores from a selected backup
+   - Re-runs migrations for the restored version
 
-### 2.3 DAG Evaluator (New Component)
+### 2.5 Build Order (Dependency Graph)
 
-```
-NEW: src/dispatch/dag-evaluator.ts
+**Question:** What is the right build order considering dependencies?
 
-Purpose: Pure function that evaluates DAG state and returns next actions.
-No I/O, deterministic, easy to test.
-
-Input:
-  - task: Task (with dagState)
-  - workflow: WorkflowDAG definition
-  - event: { type: "hop_completed" | "hop_rejected" | "hop_blocked" | "init", hopId: string, ... }
-
-Output:
-  - hopUpdates: Record<string, Partial<HopState>>  // State changes to apply
-  - readyHops: string[]                              // Hops newly eligible for dispatch
-  - taskStatus?: TaskStatus                          // If DAG complete: "review"/"done"
-  - rejectionTargets?: string[]                      // Hops to reset on rejection
-```
-
-**Evaluation algorithm:**
+**Analysis of dependencies:**
 
 ```
-function evaluateDAG(task, workflow, event):
-
-  1. Apply event to current hop state:
-     - "hop_completed": mark hop as complete, record outcome
-     - "hop_rejected": mark hop as rejected, increment rejectionCount
-     - "hop_blocked": mark hop as blocked
-     - "init": initialize all hops to "pending"
-
-  2. Evaluate conditional hops:
-     For each hop with `when` expression and status "pending":
-       If all predecessors are complete/skipped AND condition evaluates false:
-         Mark hop as "skipped"
-
-  3. Propagate readiness:
-     For each hop with status "pending":
-       If ALL predecessors are in {complete, skipped}:
-         Mark hop as "ready"
-
-  4. Handle rejection:
-     If event is "hop_rejected":
-       Determine rejection targets (based on rejectTo or rejectionStrategy)
-       Reset target hops to "pending" (or "ready" if they have no pending predecessors)
-       Reset all hops downstream of targets to "pending"
-
-  5. Check DAG completion:
-     If ALL terminal hops (no dependents) are in {complete, skipped}:
-       DAG is complete -> return taskStatus: "review" (or "done" if no review needed)
-
-  6. Return:
-     - Updated hop states
-     - List of newly "ready" hops (for scheduler to dispatch)
-     - Optional task status change
+                     +-----------------------+
+                     |  project.yaml schema  |  (schemas/project.ts)
+                     |  + default template   |
+                     +-----------+-----------+
+                                 |
+              +------------------+-------------------+
+              |                                      |
+   +----------v-----------+           +--------------v-----------+
+   | Migration 001:       |           | Migration 002:           |
+   | Add default template |           | Convert gates->templates |
+   +----------+-----------+           +--------------+-----------+
+              |                                      |
+              +------------------+-------------------+
+                                 |
+                     +-----------v-----------+
+                     | Migration framework   |  (setup.ts getAllMigrations)
+                     | wiring + rollback     |
+                     +-----------+-----------+
+                                 |
+              +------------------+-------------------+
+              |                                      |
+   +----------v-----------+           +--------------v-----------+
+   | store.create()       |           | Smoke tests              |
+   | default workflow     |           | (needs migrations + store)|
+   +----------+-----------+           +--------------+-----------+
+              |                                      |
+              +------------------+-------------------+
+                                 |
+                     +-----------v-----------+
+                     | CLI: --no-workflow    |
+                     | flag + template       |
+                     | resolution default    |
+                     +-----------+-----------+
+                                 |
+                     +-----------v-----------+
+                     | Release pipeline      |
+                     | (smoke test step)     |
+                     +-----------+-----------+
+                                 |
+                     +-----------v-----------+
+                     | Documentation +       |
+                     | upgrade guide         |
+                     +-----------+-----------+
+                                 |
+                     +-----------v-----------+
+                     | Tag + cut release     |
+                     +------------------------+
 ```
 
-**Key properties:**
-- **Pure function**: No I/O, no side effects -- takes state and event, returns new state
-- **Idempotent**: Same input always produces same output
-- **Deterministic**: No LLM calls (maintains control plane guarantee)
-- **Testable**: Easy to unit test with fixture DAGs
+---
 
-### 2.4 Scheduler Integration
+## 3. Component Boundaries: New vs. Modified
 
-The scheduler poll cycle gains a new step: evaluating DAG hops for dispatch.
+### 3.1 New Components
 
-```
-Modified Scheduler Poll Cycle:
+| Component | Path | Purpose |
+|-----------|------|---------|
+| Migration: default-workflow-template | `src/packaging/migrations/001-default-workflow-template.ts` | Adds default workflowTemplate to project.yaml |
+| Migration: deprecate-gate-config | `src/packaging/migrations/002-deprecate-gate-config.ts` | Converts workflow.gates -> workflowTemplates |
+| Migration: version-metadata | `src/packaging/migrations/003-version-metadata.ts` | Writes .aof/channel.json with version + channel |
+| Pre-migration snapshot | `src/packaging/snapshot.ts` | Full data dir backup before migrations |
+| Smoke test: fresh install | `tests/smoke/fresh-install.test.ts` | End-to-end fresh install validation |
+| Smoke test: upgrade | `tests/smoke/upgrade.test.ts` | Pre-v1.2 fixture -> v1.3 upgrade validation |
+| Smoke test: DAG default | `tests/smoke/dag-default.test.ts` | Default workflow assignment validation |
+| Upgrade fixtures | `tests/fixtures/upgrade/pre-v1.2/` | Simulated pre-v1.2 install for testing |
+| Upgrade fixtures | `tests/fixtures/upgrade/v1.2-clean/` | Simulated v1.2 install for testing |
+| CI smoke step | `.github/workflows/release.yml` (new step) | Smoke test before release upload |
 
-  1. List all tasks
-  2. [existing] Check expired leases, stale heartbeats, SLA violations
-  3. [existing] Check gate timeouts --> EXTEND to check hop timeouts
-  4. [NEW] Evaluate DAG tasks:
-     For each task with dagState where activeHop is NOT dispatched:
-       Scan dagState.hops for hops in "ready" status
-       For each ready hop:
-         If hop.trigger === "auto":
-           Build assign action with routing from hop definition
-         Else (pause):
-           Skip (manual trigger required)
-  5. [existing] Build dispatch actions for non-DAG ready tasks
-  6. [existing] Execute actions (assign, expire_lease, etc.)
-```
+### 3.2 Modified Components
 
-**Critical insight**: DAG tasks do NOT use the regular `ready` task status for hop dispatch. A DAG task stays in `in-progress` status throughout its DAG execution. Individual hops go through ready -> dispatched -> complete within the task's `dagState`. The scheduler dispatches hops by reading `dagState.hops`, not by looking at task status.
+| Component | Path | Change | Risk |
+|-----------|------|--------|------|
+| `setup.ts` | `src/cli/commands/setup.ts` | Populate `getAllMigrations()`, add pre-migration snapshot | LOW -- additive, existing flow preserved |
+| `store.create()` | `src/store/task-store.ts` | Load default template from project.yaml when no workflow provided | MEDIUM -- must handle missing template gracefully |
+| Task CLI | `src/cli/commands/task.ts` | Add `--no-workflow` flag | LOW -- additive flag |
+| `build-tarball.mjs` | `scripts/build-tarball.mjs` | Include migration files and fixtures in tarball | LOW |
+| `release.yml` | `.github/workflows/release.yml` | Add smoke test step after tarball build | LOW |
+| `project.ts` schema | `src/schemas/project.ts` | Add `defaultWorkflow` field or convention for "default" template key | LOW -- additive |
+| `workflow.ts` | `src/schemas/workflow.ts` | Update deprecation notice with removal timeline | LOW -- comment only |
 
-**Task status lifecycle for DAG tasks:**
-```
-backlog -> ready -> in-progress (DAG starts, stays here during all hops)
-                      |
-                      +-- hop1: ready -> dispatched -> complete
-                      +-- hop2: ready -> dispatched -> complete
-                      +-- hop3: ready -> dispatched -> complete
-                      |
-                   -> review (all terminal hops complete)
-                   -> done
-```
+### 3.3 Unchanged Components (Explicitly)
 
-**Why keep the task in-progress during DAG execution:**
-- The task is actively being worked on (by multiple agents across hops)
-- Lease management applies to the currently active hop, not the task overall
-- SLA tracking starts at task `in-progress` and includes total DAG execution time
-- The task only leaves `in-progress` when the entire DAG completes
+| Component | Why Unchanged |
+|-----------|---------------|
+| `scheduler.ts` | Already handles both workflow and taskless tasks |
+| `dag-evaluator.ts` | Pure function, no upgrade concerns |
+| `dag-transition-handler.ts` | Works with whatever workflow state is on the task |
+| `gate-to-dag.ts` | Lazy migration stays as-is (complementary to registry migration) |
+| `task-store.ts` lazy migration | Stays for edge cases (tasks never loaded during upgrade) |
+| `install.sh` shell script | Already has upgrade detection + data backup |
+| `updater.ts` | Self-update engine, separate from install-time upgrade |
+| `channels.ts` | Channel management, no changes needed |
 
-### 2.5 Hop Dispatch Flow
+---
 
-When the scheduler identifies a ready hop:
+## 4. Data Flow Changes
+
+### 4.1 Upgrade Data Flow (New)
 
 ```
-1. Scheduler finds task with dagState.hops["test"].status === "ready"
-
-2. Scheduler builds assign action:
-   {
-     type: "assign",
-     taskId: task.id,
-     agent: resolve(hop.role),  // From org chart
-     reason: "DAG hop 'test' ready for dispatch",
-   }
-
-3. executeAssignAction():
-   a. Update dagState.hops["test"].status = "dispatched"
-   b. Update dagState.hops["test"].dispatchedAt = now
-   c. Update dagState.activeHop = "test"
-   d. Update task.routing.role = hop.role
-   e. Build TaskContext with hopContext (replaces gateContext)
-   f. acquireLease() for this hop
-   g. executor.spawnSession(context)
-
-4. Agent works, sends completion.report
-
-5. ProtocolRouter.handleCompletionReport():
-   a. Detect task has dagState (new check)
-   b. Map completion outcome to hop outcome
-   c. Call evaluateDAG(task, workflow, { type: "hop_completed", hopId: activeHop })
-   d. Apply returned hop state updates
-   e. If readyHops returned: update dagState, clear activeHop, release lease
-   f. If taskStatus returned: transition task to review/done
-   g. If no ready hops and DAG not complete: clear activeHop, wait for next poll
+install.sh detects upgrade (.version exists)
+  |
+  +-- backup data dirs to .aof-backup/
+  +-- extract tarball (overwrite code, preserve data)
+  +-- restore data dirs from backup
+  +-- run_node_setup --upgrade
+      |
+      +-- runSetup(upgrade: true)
+          |
+          +-- createPreMigrationSnapshot(dataDir)       # NEW: full snapshot
+          +-- runMigrations(getAllMigrations(), "1.3.0")
+          |     |
+          |     +-- 001: read project.yaml
+          |     |     +-- if no workflowTemplates -> add default template
+          |     |     +-- write project.yaml
+          |     |
+          |     +-- 002: read project.yaml
+          |     |     +-- if workflow.gates exists -> convert to workflowTemplates entry
+          |     |     +-- remove workflow.gates field
+          |     |     +-- write project.yaml
+          |     |
+          |     +-- 003: write .aof/channel.json with version + channel
+          |
+          +-- wireOpenClawPlugin()
+  |
+  +-- write_version_file()
 ```
 
-### 2.6 Completion Report Handling (Modified)
+### 4.2 Task Creation Data Flow (Modified)
 
-The `handleCompletionReport` in `ProtocolRouter` needs the most significant change:
+```
+aof task create "My Task" --routing.role backend
+  |
+  +-- store.create({ title, routing, ... })
+      |
+      +-- workflow provided?  NO
+      +-- skipDefaultWorkflow? NO (default)
+      +-- loadDefaultTemplate(projectRoot)       # NEW
+      |     +-- read project.yaml
+      |     +-- look up workflowTemplates["default"]
+      |     +-- found? -> validateDAG() -> return definition
+      |     +-- not found? -> return undefined (taskless)
+      |
+      +-- template found? -> initializeWorkflowState()
+      |                   -> resolvedWorkflow = { definition, state, templateName: "default" }
+      +-- TaskFrontmatter.parse({ ..., workflow: resolvedWorkflow })
+      +-- writeFileAtomic()
+```
 
+### 4.3 Release Data Flow (Modified)
+
+```
+git push tag v1.3.0
+  |
+  +-- release.yml
+      +-- npm ci + typecheck + build + test
+      +-- build-tarball.mjs v1.3.0
+      +-- smoke-test-fresh-install                  # NEW
+      |     +-- extract tarball to temp dir
+      |     +-- npm ci --production
+      |     +-- node setup --auto
+      |     +-- assert: dirs created, org chart valid
+      |
+      +-- smoke-test-upgrade                        # NEW
+      |     +-- copy pre-v1.2 fixture to temp dir
+      |     +-- write .version with old version
+      |     +-- extract tarball over fixture
+      |     +-- node setup --auto --upgrade
+      |     +-- assert: migrations applied, tasks preserved, default template added
+      |
+      +-- softprops/action-gh-release (upload if smoke tests pass)
+```
+
+---
+
+## 5. Patterns to Follow
+
+### Pattern 1: Migration as Idempotent Transform
+
+**What:** Each migration reads current state, transforms only if needed, writes atomically.
+
+**When:** Every migration in the registry.
+
+**Example:**
 ```typescript
-// In protocol/router.ts handleCompletionReport():
+const migration001: Migration = {
+  id: "001-default-workflow-template",
+  version: "1.3.0",
+  description: "Add default workflow template to project.yaml if none exists",
+  up: async (ctx) => {
+    const manifestPath = join(ctx.aofRoot, "project.yaml");
+    const yaml = await readFile(manifestPath, "utf-8");
+    const manifest = parse(yaml);
 
-// After existing authorization and run result handling:
+    // Idempotent: skip if already has workflowTemplates with "default"
+    if (manifest.workflowTemplates?.default) return;
 
-if (task.frontmatter.dagState) {
-  // DAG task: advance the DAG instead of linear gate progression
-  const workflow = await loadWorkflowDAG(store, task);
-  const activeHop = task.frontmatter.dagState.activeHop;
+    // Add default template
+    manifest.workflowTemplates = manifest.workflowTemplates ?? {};
+    manifest.workflowTemplates.default = {
+      name: "default",
+      hops: [
+        { id: "execute", role: "executor", dependsOn: [] },
+        { id: "review", role: "reviewer", dependsOn: ["execute"], canReject: true },
+      ],
+    };
 
-  if (!activeHop) {
-    // Error: completion report with no active hop
-    return;
+    await writeFile(manifestPath, stringify(manifest), "utf-8");
+  },
+  down: async (ctx) => {
+    // Only remove if it matches what we added (don't remove user modifications)
+    const manifestPath = join(ctx.aofRoot, "project.yaml");
+    const yaml = await readFile(manifestPath, "utf-8");
+    const manifest = parse(yaml);
+
+    if (manifest.workflowTemplates?.default?.name === "default") {
+      delete manifest.workflowTemplates.default;
+      if (Object.keys(manifest.workflowTemplates).length === 0) {
+        delete manifest.workflowTemplates;
+      }
+      await writeFile(manifestPath, stringify(manifest), "utf-8");
+    }
+  },
+};
+```
+
+### Pattern 2: Graceful Degradation for Default Workflow
+
+**What:** If the default template cannot be loaded (no project.yaml, no default template), create a taskless task instead of failing.
+
+**When:** `store.create()` without explicit workflow.
+
+**Example:**
+```typescript
+// In store.create(), after resolving opts.workflow:
+if (!resolvedWorkflow && !opts.skipDefaultWorkflow) {
+  try {
+    const defaultDef = await this.loadDefaultWorkflowTemplate();
+    if (defaultDef) {
+      const dagErrors = validateDAG(defaultDef);
+      if (dagErrors.length === 0) {
+        const state = initializeWorkflowState(defaultDef);
+        resolvedWorkflow = { definition: defaultDef, state, templateName: "default" };
+      }
+    }
+  } catch {
+    // Graceful degradation: create taskless task
+  }
+}
+```
+
+### Pattern 3: Snapshot-Restore for Migration Safety
+
+**What:** Full data dir snapshot before any migrations run. Restore on any failure.
+
+**When:** During `runSetup()` upgrade path.
+
+**Example:**
+```typescript
+async function createPreMigrationSnapshot(dataDir: string): Promise<string> {
+  const snapshotDir = join(dataDir, ".aof-backup", `pre-migration-${Date.now()}`);
+  await mkdir(snapshotDir, { recursive: true });
+
+  const dataPaths = ["tasks", "events", "memory", "state", "data", "project.yaml", "org"];
+  for (const p of dataPaths) {
+    const src = join(dataDir, p);
+    try {
+      await access(src);
+      await cp(src, join(snapshotDir, p), { recursive: true });
+    } catch { /* skip missing */ }
   }
 
-  const hopOutcome = mapCompletionToHopOutcome(envelope.payload.outcome);
-  const result = evaluateDAG(task, workflow, {
-    type: hopOutcome === "complete" ? "hop_completed"
-        : hopOutcome === "needs_review" ? "hop_rejected"
-        : "hop_blocked",
-    hopId: activeHop,
-    summary: envelope.payload.notes,
-    blockers: envelope.payload.blockers,
+  return snapshotDir;
+}
+```
+
+### Pattern 4: Fixture-Based Smoke Tests
+
+**What:** Use pre-built filesystem fixtures representing specific install states, run actual migration/setup code against them, assert outcomes.
+
+**When:** Smoke tests for upgrade paths.
+
+**Example:**
+```typescript
+describe("upgrade from pre-v1.2", () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "aof-smoke-"));
+    // Copy fixture to temp dir
+    await cp("tests/fixtures/upgrade/pre-v1.2", tempDir, { recursive: true });
+    // Write .version to simulate existing install
+    await writeFile(join(tempDir, ".version"), "1.1.0");
   });
 
-  // Apply hop state updates
-  applyDAGUpdates(task, result);
-
-  // Release lease for completed hop
-  task.frontmatter.lease = undefined;
-  task.frontmatter.dagState.activeHop = undefined;
-
-  // If DAG complete, transition task
-  if (result.taskStatus) {
-    await store.transition(task.frontmatter.id, result.taskStatus, {
-      reason: "dag_complete",
+  it("applies migrations and preserves tasks", async () => {
+    await runSetup({
+      dataDir: tempDir,
+      auto: true,
+      upgrade: true,
+      legacy: false,
+      template: "minimal",
     });
-  }
 
-  // Ready hops will be picked up by next scheduler poll
-  await store.save(task);
-}
-else if (task.frontmatter.gate) {
-  // Legacy linear gate task: existing behavior
-  // ... existing gate evaluation code ...
-}
-else {
-  // Non-workflow task: existing behavior
-  await applyCompletionOutcome(task, ...);
-}
-```
+    // Assert migrations applied
+    const history = await getMigrationHistory(tempDir);
+    expect(history.migrations.length).toBeGreaterThan(0);
 
-### 2.7 Backward Compatibility Strategy
+    // Assert tasks preserved
+    const tasks = await readdir(join(tempDir, "tasks", "backlog"));
+    expect(tasks.length).toBeGreaterThan(0);
 
-**Coexistence period**: v1.2 supports BOTH linear gate tasks and DAG tasks simultaneously.
-
-| Aspect | Linear Gate Tasks | DAG Tasks |
-|--------|------------------|-----------|
-| Schema | `gate` + `gateHistory` fields | `dagState` field |
-| Workflow source | `project.yaml` `workflow:` (single) | `project.yaml` `workflows:` (named map) |
-| Dispatch routing | `routing.workflow` + `gate.current` | `dagState.activeHop` + hop definition |
-| Evaluator | `gate-evaluator.ts` | `dag-evaluator.ts` |
-| Timeout checking | `escalation.ts` (gate timeouts) | Extended to check hop timeouts |
-| Completion handling | `applyCompletionOutcome()` | `evaluateDAG()` + `applyDAGUpdates()` |
-
-**Detection**: The presence of `dagState` on a task frontmatter indicates it is a DAG task. The absence means it uses the legacy gate system (or no workflow at all).
-
-**Migration path**: Existing linear workflows can be automatically converted to DAGs:
-```yaml
-# Linear gates:                    # Equivalent DAG:
-workflow:                          workflows:
-  name: standard                     standard:
-  gates:                               name: standard
-    - id: implement                    version: 2
-      role: backend                    hops:
-    - id: review                         - id: implement
-      role: architect                      role: backend
-      canReject: true                    - id: review
-                                           role: architect
-                                           dependsOn: [implement]
-                                           canReject: true
-```
-
-Each gate becomes a hop that `dependsOn` the previous gate. The ordering is preserved.
-
-### 2.8 Artifact Handoff Between Hops
-
-Hops share artifacts via the task's work directory (already exists: `tasks/<status>/<taskId>/outputs/`).
-
-```
-tasks/in-progress/TASK-2026-03-02-001/
-  TASK-2026-03-02-001.md          # Task file with DAG state
-  outputs/
-    implement/                     # Hop-scoped artifact directory
-      summary.md
-      code-changes.patch
-    test/
-      test-results.json
-    review/
-      review-notes.md
-```
-
-**Convention**: Each hop writes to `outputs/<hopId>/`. The hop context injected at dispatch time tells the agent where to find predecessor outputs:
-
-```typescript
-interface HopContext {
-  hop: string;                    // Current hop ID
-  role: string;                   // Expected role
-  expectations: string[];         // What to do
-  outcomes: Record<string, string>; // What outcomes mean
-  predecessorOutputs: string[];   // Paths to predecessor hop outputs
-  tips?: string[];
-}
-```
-
-The `ITaskStore.writeTaskOutput` method already supports writing to `outputs/`. A minor extension scopes it to `outputs/<hopId>/`.
-
----
-
-## 3. New Components
-
-### 3.1 Files to Create
-
-| File | Purpose | Complexity | Dependencies |
-|------|---------|-----------|--------------|
-| `src/schemas/workflow-dag.ts` | `Hop`, `WorkflowDAG` Zod schemas | Low | `zod` only |
-| `src/schemas/dag-state.ts` | `HopState`, `DAGState` Zod schemas | Low | `zod` only |
-| `src/dispatch/dag-evaluator.ts` | Pure DAG evaluation function | Medium | Schemas only |
-| `src/dispatch/dag-validator.ts` | DAG validation (cycles, missing refs) | Low | Schemas only |
-| `src/dispatch/hop-context-builder.ts` | Build agent context for hops | Low | Schemas, gate-conditional.ts |
-| `src/dispatch/dag-dispatcher.ts` | Scheduler integration for DAG dispatch | Medium | dag-evaluator, store, executor |
-| `src/dispatch/dag-completion-handler.ts` | Handle completion reports for DAG tasks | Medium | dag-evaluator, store, protocol |
-| `src/dispatch/dag-timeout-checker.ts` | Hop timeout detection and escalation | Low | dag-state, escalation pattern |
-
-### 3.2 Files to Modify
-
-| File | Change | Scope |
-|------|--------|-------|
-| `src/schemas/task.ts` | Add `dagState?: DAGState` to TaskFrontmatter | Small |
-| `src/schemas/project.ts` | Add `workflows?: Record<string, WorkflowDAG>` to ProjectManifest | Small |
-| `src/dispatch/scheduler.ts` | Add DAG hop dispatch step to poll cycle | Medium |
-| `src/protocol/router.ts` | Branch `handleCompletionReport` for DAG tasks | Medium |
-| `src/dispatch/escalation.ts` | Extend timeout checking for hops | Small |
-| `src/dispatch/assign-executor.ts` | Inject hopContext (alongside existing gateContext) | Small |
-| `src/protocol/completion-utils.ts` | Add DAG-aware completion transitions | Small |
-
-### 3.3 Files NOT Modified (Preserved)
-
-| File | Reason |
-|------|--------|
-| `src/dispatch/gate-evaluator.ts` | Preserved for backward compat with linear gate tasks |
-| `src/dispatch/gate-context-builder.ts` | Preserved for backward compat |
-| `src/dispatch/gate-conditional.ts` | Reused by DAG evaluator (shared `when` logic) |
-| `src/dispatch/action-executor.ts` | Action types unchanged, just more assign actions |
-| `src/dispatch/task-dispatcher.ts` | Handles non-DAG ready tasks (unchanged) |
-| `src/store/task-store.ts` | Task store is schema-agnostic (just serializes frontmatter) |
-| `src/store/interfaces.ts` | ITaskStore contract unchanged |
-| `src/dispatch/dep-cascader.ts` | Inter-task dependencies unchanged (DAG is intra-task) |
-
----
-
-## 4. Data Flow
-
-### 4.1 DAG Task Lifecycle
-
-```
-1. TASK CREATION
-   Agent or human creates task with workflow reference:
-   routing: { workflow: "standard-sdlc" }
-
-   Task store (or CLI) loads workflow template, initializes dagState:
-   dagState: {
-     workflow: "standard-sdlc",
-     hops: {
-       implement: { id: "implement", status: "ready" },
-       test:      { id: "test",      status: "pending" },
-       review:    { id: "review",    status: "pending" },
-       security:  { id: "security",  status: "pending" },
-       deploy:    { id: "deploy",    status: "pending" },
-     },
-     startedAt: "2026-03-02T10:00:00Z"
-   }
-   Task status: ready
-
-2. FIRST HOP DISPATCH
-   Scheduler poll sees task in "ready" with dagState:
-   - Transitions task to "in-progress"
-   - Finds root hop(s) in "ready" status: ["implement"]
-   - Dispatches "implement" hop
-   dagState.hops.implement.status = "dispatched"
-   dagState.activeHop = "implement"
-
-3. HOP COMPLETION
-   Agent sends completion.report
-   ProtocolRouter detects dagState, calls evaluateDAG:
-   - Marks "implement" as "complete"
-   - Evaluates conditionals (security: when expression)
-   - Propagates readiness: test, review become "ready"
-     (security becomes "ready" or "skipped" based on condition)
-   - Clears activeHop
-
-   dagState.hops:
-     implement: { status: "complete", completedAt: "..." }
-     test:      { status: "ready", readyAt: "..." }
-     review:    { status: "ready", readyAt: "..." }
-     security:  { status: "skipped" | "ready" }
-     deploy:    { status: "pending" }
-
-4. PARALLEL HOP DISPATCH
-   Next scheduler poll sees ready hops: [test, review, (security)]
-
-   CRITICAL CONSTRAINT: OpenClaw cannot run nested sessions.
-   Only ONE hop can be dispatched at a time per task.
-
-   Scheduler picks highest-priority ready hop (or earliest readyAt):
-   - Dispatches "test" first
-   - test completes, then dispatches "review"
-   - review completes, then dispatches "security" (if not skipped)
-
-   Note: "parallel" in the DAG means no ordering dependency, not
-   simultaneous execution. The scheduler serializes actual dispatch.
-
-5. JOIN CONVERGENCE
-   "deploy" depends on [test, review, security]:
-   - After all three are complete/skipped, deploy becomes "ready"
-   - Scheduler dispatches "deploy"
-
-6. DAG COMPLETION
-   All terminal hops complete:
-   - evaluateDAG returns taskStatus: "review"
-   - Task transitions in-progress -> review -> done
-
-7. REJECTION LOOP
-   If "review" hop rejects (outcome: "needs_review"):
-   - evaluateDAG determines rejection target: "implement" (origin strategy)
-   - Resets "implement" to "ready"
-   - Resets all downstream hops (test, review, security, deploy) to "pending"
-   - rejectionCount incremented
-   - Scheduler dispatches "implement" again on next poll
-```
-
-### 4.2 Parallel Execution Model
-
-OpenClaw's no-nested-sessions constraint means "parallel" DAG branches execute sequentially. The DAG captures logical parallelism (no ordering dependency), but the scheduler serializes physical execution.
-
-**Dispatch priority for ready hops (within one task):**
-1. Hops with earlier `readyAt` timestamp (FIFO)
-2. Hops with canReject=true (reviews before implementation, to fail fast)
-3. Hops with timeout (time-sensitive work first)
-
-**Multiple tasks with ready hops**: The existing concurrency system handles this. Each hop dispatch is one `assign` action competing for the global concurrency pool. DAG tasks get no special priority over non-DAG tasks.
-
-### 4.3 Event Flow
-
-```
-Protocol Messages:
-
-completion.report (agent -> router)
-  |
-  +-- Router detects dagState
-  |
-  +-- Calls dag-completion-handler:
-  |     - evaluateDAG(task, workflow, event)
-  |     - Apply hop state updates
-  |     - Write task with updated dagState
-  |
-  +-- Logs: dag.hop.completed, dag.hop.ready, dag.completed
-  |
-  +-- Next scheduler poll picks up ready hops
-
-Events emitted:
-  dag.started       - Task enters DAG execution
-  dag.hop.ready     - Hop becomes eligible for dispatch
-  dag.hop.dispatched - Hop dispatched to agent
-  dag.hop.completed  - Hop completed successfully
-  dag.hop.rejected   - Hop rejected work
-  dag.hop.blocked    - Hop hit blocker
-  dag.hop.skipped    - Conditional hop skipped
-  dag.hop.timeout    - Hop exceeded timeout
-  dag.completed      - All terminal hops done
-  dag.rejection_loop - Rejection cycle detected
+    // Assert default template added
+    const yaml = await readFile(join(tempDir, "project.yaml"), "utf-8");
+    const manifest = parse(yaml);
+    expect(manifest.workflowTemplates?.default).toBeDefined();
+  });
+});
 ```
 
 ---
 
-## 5. Critical Design Decisions
+## 6. Anti-Patterns to Avoid
 
-### D1: DAG State on Task Frontmatter (Not Separate File)
+### Anti-Pattern 1: Hardcoding Default Workflow in Code
 
-**Decision**: Store `dagState` in the task's YAML frontmatter.
+**What:** Defining the default workflow shape inside `store.create()` or `task-store.ts`.
 
-**Rationale**:
-- Atomic consistency: task status and DAG state update together
-- Human-readable: `cat task.md` tells the full story
-- Existing pattern: `gate`/`gateHistory` already live in frontmatter
-- No new file management: ITaskStore unchanged
-- Crash recovery: state survives restarts (persisted on every write)
+**Why bad:** Different projects need different defaults. Hardcoded workflows cannot be customized without code changes. Violates the project.yaml-as-config principle.
 
-**Trade-off**: Frontmatter grows larger. A 10-hop workflow adds ~3KB. Acceptable for filesystem store. If this becomes a problem at scale, consider moving `hopHistory` (the equivalent of `gateHistory`) to a separate `outputs/dag-history.json` file.
+**Instead:** Default workflow lives in `project.yaml` under `workflowTemplates.default`. Code reads it at task creation time.
 
-### D2: One Active Hop Per Task (Serial Dispatch)
+### Anti-Pattern 2: Removing Lazy Migration Before Registry Migration Exists
 
-**Decision**: Only one hop executes at a time per task, even when multiple hops are ready.
+**What:** Deleting the lazy gate-to-DAG code in task-store.ts before formal migrations handle all conversion cases.
 
-**Rationale**:
-- OpenClaw constraint: no nested sessions
-- Lease model: one lease per task, one agent per lease
-- Simplicity: no coordination between concurrent hops on same task
-- Correctness: no race conditions on dagState updates
+**Why bad:** Some tasks may never have been loaded since v1.2. Without the lazy migration, they would fail schema validation (gate + workflow mutual exclusivity check).
 
-**Trade-off**: Logical parallelism is not physical parallelism. A DAG with `test` and `review` running in parallel will actually run them sequentially. This is acceptable because:
-- Each hop is a separate agent session (seconds to minutes, not hours)
-- The scheduler dispatches the next hop within one poll cycle (~30s)
-- True parallelism would require splitting into separate tasks (out of scope per PROJECT.md)
+**Instead:** Keep both. The registry migration handles project config; the lazy migration handles individual tasks. Remove the lazy migration in v1.4 after one full release cycle with registry migrations.
 
-### D3: Workflow Templates in Project Config + Ad-Hoc on Task
+### Anti-Pattern 3: Running Smoke Tests Against Live Install
 
-**Decision**: Support both pre-defined templates (project.yaml `workflows:`) and ad-hoc agent-composed DAGs (dagState on task at creation time).
+**What:** Smoke tests that modify `~/.aof` or any real installation directory.
 
-**Template path**: Task has `routing.workflow: "standard-sdlc"` -> scheduler loads template from `project.yaml`, initializes `dagState`.
+**Why bad:** Destructive, non-reproducible, CI will not have an existing install.
 
-**Ad-hoc path**: Agent creates task with inline `dagState` already populated (the DAG is embedded in the task). No template reference needed.
+**Instead:** All smoke tests operate in temporary directories with copied fixtures. Never touch real install paths.
 
-**Rationale**: Templates handle the 80% case (recurring workflows). Ad-hoc handles dynamic pipelines where agents compose workflows based on task requirements.
+### Anti-Pattern 4: Breaking Taskless Task Creation
 
-### D4: Rejection Resets Downstream Hops
+**What:** Making workflow a required field or failing if no default template exists.
 
-**Decision**: When a hop rejects, reset the rejection target and ALL downstream hops to pending.
+**Why bad:** Breaks backward compatibility. Some users may not want workflows. Some tests create simple tasks.
 
-**Rationale**: If `review` rejects to `implement`, then `test` (which depends on `implement`) must re-run too -- the implementation changed. Keeping downstream hops as "complete" with stale results is incorrect.
-
-**Circuit breaker**: `dagState.rejectionCount` tracks rejection cycles. After N rejections (configurable, default 3), the task transitions to `blocked` with a circuit breaker alert. Prevents infinite rejection loops.
-
-### D5: Skipped Hops Propagate as "Complete" for Dependency Resolution
-
-**Decision**: When a conditional hop evaluates to "skipped", downstream hops treat it as satisfied (equivalent to "complete" for dependency checking).
-
-**Rationale**: If `security` hop is skipped because the task has no security tags, `deploy` (which depends on `[test, review, security]`) should not be blocked waiting for a hop that will never run.
-
-### D6: Hop History Replaces Gate History
-
-**Decision**: `dagState.hops` serves as both current state AND history. Each hop's `HopState` records timestamps and outcomes. A separate `hopHistory` array is NOT needed initially.
-
-**Rationale**: Unlike linear gates where the same gate can be visited multiple times (rejection loops), a DAG hop is visited once per cycle. On rejection, the hop state is reset. The event log captures the full history (each `dag.hop.*` event is logged to JSONL). If audit trail on the task file is needed later, add `hopHistory` array (append-only, like `gateHistory`).
-
-**Revisit if**: Auditors need full hop traversal history on the task file itself (not just in event logs).
+**Instead:** Default workflow is a convenience, not a requirement. `store.create()` without workflow and with `skipDefaultWorkflow: true` must always work. Missing default template falls back to taskless.
 
 ---
 
-## 6. Build Order
+## 7. Scalability and Edge Cases
 
-The build order respects dependency chains and ensures each phase is independently testable.
+### Edge Cases in Upgrade Path
 
-### Phase 1: Schema Foundation
-```
-Create:
-  src/schemas/workflow-dag.ts     - Hop + WorkflowDAG schemas
-  src/schemas/dag-state.ts        - HopState + DAGState schemas
+| Scenario | Current Behavior | v1.3 Behavior |
+|----------|------------------|---------------|
+| Pre-v1.2 install with gate tasks | Tasks converted lazily on load | Migrations transform project.yaml; lazy migration still converts individual tasks |
+| v1.2 install with DAG tasks | No migration needed | Migration 001 adds default template if missing; existing templates preserved |
+| Install with no project.yaml | Wizard creates minimal scaffold | Migration skips (no file to transform); default template added only if project.yaml exists |
+| Install with custom workflowTemplates | Templates preserved | Migration 001 skips if "default" already exists; 002 only transforms workflow.gates |
+| Interrupted migration | Partial state | Pre-migration snapshot restores clean state |
+| Multiple upgrades (v1.1 -> v1.2 -> v1.3) | Never tested | Migration registry handles: already-applied migrations skipped |
+| Migration from legacy (~/.openclaw/aof) | migrateLegacyData copies files | Legacy flow runs first, then migrations; migration history starts fresh |
 
-Modify:
-  src/schemas/task.ts             - Add dagState?: DAGState field
-  src/schemas/project.ts          - Add workflows?: Record<string, WorkflowDAG>
+### Task Store Compatibility Matrix
 
-Test:
-  Schema validation, serialization round-trip, backward compat with existing tasks
-```
-
-**Why first**: Everything else depends on the data shapes. Schema changes are low-risk (additive, optional fields).
-
-### Phase 2: DAG Evaluator (Pure Logic)
-```
-Create:
-  src/dispatch/dag-evaluator.ts   - Core evaluation algorithm
-  src/dispatch/dag-validator.ts   - DAG validation (cycles, missing refs)
-
-Test:
-  Extensive unit tests with fixture DAGs:
-  - Linear DAG (equivalent to gate sequence)
-  - Diamond DAG (fan-out + fan-in)
-  - Conditional hops (skip, evaluate)
-  - Rejection loops (origin, predecessor)
-  - Circuit breaker (max rejections)
-  - Edge cases (single hop, all skipped, empty DAG)
-```
-
-**Why second**: Pure function, no I/O, no integration points. Can be tested in isolation. This is the algorithmic core.
-
-### Phase 3: Hop Context & Dispatch Integration
-```
-Create:
-  src/dispatch/hop-context-builder.ts  - Build HopContext for agents
-  src/dispatch/dag-dispatcher.ts       - Scheduler integration for DAG hop dispatch
-
-Modify:
-  src/dispatch/scheduler.ts            - Add DAG hop evaluation step
-  src/dispatch/assign-executor.ts      - Inject hopContext alongside gateContext
-
-Test:
-  Integration tests: scheduler poll with DAG tasks, hop dispatch flow
-```
-
-**Why third**: Depends on schemas (Phase 1) and evaluator (Phase 2). This connects the DAG to the scheduler.
-
-### Phase 4: Completion Handling & Protocol Integration
-```
-Create:
-  src/dispatch/dag-completion-handler.ts - DAG-aware completion processing
-
-Modify:
-  src/protocol/router.ts                - Branch for DAG task completions
-  src/protocol/completion-utils.ts       - DAG-aware transition mapping
-
-Test:
-  Integration tests: completion report -> DAG advancement -> ready hops
-  End-to-end: task creation -> dispatch -> complete -> next hop -> DAG done
-```
-
-**Why fourth**: Depends on all previous phases. This closes the loop: dispatch -> complete -> advance -> dispatch.
-
-### Phase 5: Timeout, Escalation & Rejection
-```
-Create:
-  src/dispatch/dag-timeout-checker.ts   - Hop timeout detection
-
-Modify:
-  src/dispatch/escalation.ts            - Extend for hop timeouts
-
-Test:
-  Timeout detection, escalation flow, rejection with downstream reset
-```
-
-**Why fifth**: Edge cases built on the working happy path from phases 1-4.
-
-### Phase 6: Workflow Templates & Ad-Hoc Composition
-```
-Modify:
-  CLI commands for workflow management
-  Task creation to accept inline DAG definitions
-  Template loading and validation
-
-Test:
-  Template resolution, ad-hoc DAG creation, validation errors
-```
-
-**Why last**: User-facing features built on the complete internal machinery.
+| Task Type | workflow field | gate field | Behavior |
+|-----------|---------------|------------|----------|
+| Taskless (pre-v1.2, no gates) | absent | absent | Works as-is, no workflow dispatch |
+| Gate task (pre-v1.2) | absent | present | Lazy migration converts to DAG on load |
+| DAG task (v1.2+) | present | absent | Works as-is |
+| New task (v1.3, default) | present (from template) | absent | Default workflow from project.yaml |
+| New task (v1.3, explicit) | present (from opts) | absent | Explicit workflow, same as v1.2 |
+| New task (v1.3, --no-workflow) | absent | absent | Taskless, same as pre-v1.2 |
 
 ---
 
-## 7. Anti-Patterns to Avoid
+## 8. Recommended Build Order
 
-### Anti-Pattern 1: Storing DAG Definition on Every Task
-**What**: Copying the full `WorkflowDAG` definition into each task's frontmatter.
-**Why bad**: Duplication, inconsistency when template changes, bloated frontmatter.
-**Instead**: Store `dagState.workflow` as a reference name. Load the definition from `project.yaml` when needed. The `dagState.hops` only stores runtime state, not the definition.
+### Phase 1: Foundation (No Dependencies)
 
-### Anti-Pattern 2: Using Task Status for Hop Lifecycle
-**What**: Transitioning the task through ready -> in-progress -> review for each hop.
-**Why bad**: Task status represents the TASK lifecycle, not the HOP lifecycle. Moving task to "review" after each hop breaks the scheduler's assumptions.
-**Instead**: Task stays in-progress during all hops. Hop state lives in `dagState.hops[hopId].status`.
+**1A. Migration implementations**
+- Write `001-default-workflow-template.ts`
+- Write `002-deprecate-gate-config.ts`
+- Write `003-version-metadata.ts`
+- Unit test each migration in isolation with temp dirs
 
-### Anti-Pattern 3: Dispatching Multiple Hops Simultaneously
-**What**: Spawning multiple agent sessions for parallel hops on the same task.
-**Why bad**: OpenClaw has no nested sessions. Multiple sessions would conflict on the same task file. Lease model is one-agent-per-task.
-**Instead**: Serial dispatch of one hop at a time. The DAG captures logical parallelism; the scheduler serializes physical execution.
+**1B. Pre-migration snapshot**
+- Write `snapshot.ts` with `createPreMigrationSnapshot()` and `restoreFromSnapshot()`
+- Unit test snapshot/restore round-trip
 
-### Anti-Pattern 4: Modifying Gate Evaluator for DAG Support
-**What**: Making `gate-evaluator.ts` handle both linear gates and DAGs.
-**Why bad**: Different evaluation algorithms. Linear gate evaluation is sequential; DAG evaluation is graph-based. Mixing them creates complexity and fragility.
-**Instead**: Separate `dag-evaluator.ts`. Detection happens at the router/scheduler level (check for `dagState` vs `gate`).
+**1C. Upgrade test fixtures**
+- Create `tests/fixtures/upgrade/pre-v1.2/` with sample project.yaml (has workflow.gates), sample gate tasks
+- Create `tests/fixtures/upgrade/v1.2-clean/` with sample project.yaml (has workflowTemplates), sample DAG tasks
 
-### Anti-Pattern 5: Tight Coupling Between Evaluator and Store
-**What**: Having the DAG evaluator directly read/write the task store.
-**Why bad**: Breaks testability. The evaluator should be a pure function.
-**Instead**: Evaluator takes task + workflow + event, returns state updates. Caller applies updates to the store. Same pattern as existing `evaluateGateTransition()`.
+### Phase 2: Migration Wiring (Depends on Phase 1)
 
----
+**2A. Wire migrations into setup.ts**
+- Populate `getAllMigrations()` with the three migrations
+- Add pre-migration snapshot before `runMigrations()`
+- Add snapshot restore in catch block
+- Test: full upgrade flow with fixtures
 
-## 8. Migration and Compatibility
+**2B. store.create() default workflow**
+- Add `loadDefaultWorkflowTemplate()` method to `FilesystemTaskStore`
+- Modify `create()` to load default template when no workflow provided
+- Add `skipDefaultWorkflow` option
+- Test: create with default, create with explicit, create with skip
 
-### 8.1 Existing Task Compatibility
+### Phase 3: CLI + Smoke Tests (Depends on Phase 2)
 
-All existing fields remain optional:
-- Tasks with `gate` field: use linear gate evaluator (unchanged)
-- Tasks with `dagState` field: use DAG evaluator (new)
-- Tasks with neither: no workflow (unchanged)
+**3A. CLI changes**
+- Add `--no-workflow` flag to task create command
+- Default: resolve default template; with flag: skip
 
-A task MUST NOT have both `gate` and `dagState`. Schema validation enforces mutual exclusivity.
+**3B. Smoke tests**
+- Fresh install smoke test
+- Upgrade smoke test (pre-v1.2 -> v1.3)
+- DAG default smoke test
+- Rollback smoke test
 
-### 8.2 Project Configuration Migration
+### Phase 4: Release Pipeline (Depends on Phase 3)
 
-```yaml
-# v1.1 (current):
-workflow:
-  name: standard
-  gates:
-    - id: implement
-      role: backend
-    - id: review
-      role: architect
-      canReject: true
+**4A. Release workflow update**
+- Add smoke test steps to `release.yml` after tarball build
+- Build tarball must include migration files
 
-# v1.2 (new, backward compatible):
-workflow:                          # Still supported for legacy tasks
-  name: standard
-  gates: [...]
+**4B. Documentation**
+- Upgrade guide (what users need to know)
+- Migration reference (what each migration does)
 
-workflows:                         # New: named DAG workflows
-  standard-v2:
-    name: standard-v2
-    version: 2
-    hops:
-      - id: implement
-        role: backend
-      - id: review
-        role: architect
-        dependsOn: [implement]
-        canReject: true
+### Phase 5: Cut Release (Depends on Phase 4)
+
+**5A. Version bump + tag**
+- Update package.json version to 1.3.0
+- Git tag v1.3.0
+- Release pipeline runs, smoke tests pass, tarball published
+
+### Phase Dependency Summary
+
+```
+Phase 1A ----+
+Phase 1B ----+--> Phase 2A --> Phase 3A --> Phase 4A --> Phase 5
+Phase 1C ----+                 Phase 3B --> Phase 4B
+                  Phase 2B --> Phase 3A
+                               Phase 3B
 ```
 
-Both `workflow` (singular, linear) and `workflows` (plural, DAG map) coexist in `project.yaml`.
-
-### 8.3 Gate-to-DAG Conversion Utility
-
-A CLI command (`aof workflow convert`) converts linear gate workflows to equivalent DAGs:
-- Each gate becomes a hop
-- Each hop (except the first) gets `dependsOn: [previousHop]`
-- `canReject`, `when`, `timeout`, `escalateTo` carry over directly
-- `rejectionStrategy: "origin"` maps to `rejectTo` on the first hop
+Phases 1A, 1B, and 1C are independent and can run in parallel. Phase 2A requires all of Phase 1. Phase 2B requires Phase 1A (needs the migrations for project.yaml transform to know what default template looks like). Phases 3A and 3B can partially overlap. Phase 4 requires Phase 3. Phase 5 requires Phase 4.
 
 ---
 
-## 9. Scalability Considerations
+## 9. Integration Points Summary
 
-| Concern | At 10 tasks | At 100 tasks | At 1000 tasks |
-|---------|------------|-------------|---------------|
-| DAG evaluation per poll | ~1ms | ~10ms | ~100ms (pure function, fast) |
-| Frontmatter size | Negligible | Negligible | ~3KB per task (10-hop DAGs) |
-| Ready hop scanning | Trivial | Linear scan of dagState | Consider index if needed |
-| Event log volume | +5 events/task | +50 events | +500 events (rotation handles this) |
+| Integration Point | Source File | Change Type | Complexity |
+|-------------------|-------------|-------------|------------|
+| `getAllMigrations()` | `src/cli/commands/setup.ts` | Populate with 3 migrations | Medium |
+| Pre-migration snapshot | `src/cli/commands/setup.ts` | Add snapshot/restore around runMigrations | Low |
+| Default workflow loading | `src/store/task-store.ts` | Add `loadDefaultWorkflowTemplate()`, modify `create()` | Medium |
+| `--no-workflow` flag | `src/cli/commands/task.ts` | Add flag, pass to store.create | Low |
+| Smoke test step | `.github/workflows/release.yml` | New steps after tarball build | Low |
+| Tarball contents | `scripts/build-tarball.mjs` | Ensure migration files included (already in dist/) | None (verify) |
+| Migration 001 | `src/packaging/migrations/001-*.ts` (new) | Transform project.yaml | Medium |
+| Migration 002 | `src/packaging/migrations/002-*.ts` (new) | Transform project.yaml gates | Medium |
+| Migration 003 | `src/packaging/migrations/003-*.ts` (new) | Write version metadata | Low |
+| Test fixtures | `tests/fixtures/upgrade/*` (new) | Static files, no logic | Low |
+| Smoke tests | `tests/smoke/*.test.ts` (new) | End-to-end validation | Medium |
 
-The filesystem store caps at ~1000 active tasks before directory scanning becomes a concern. DAG evaluation adds negligible overhead compared to the existing poll cycle (which already reads all task files).
+---
+
+## 10. Risk Assessment
+
+| Risk | Severity | Mitigation |
+|------|----------|------------|
+| Migration corrupts project.yaml | HIGH | Pre-migration snapshot + restore on failure; idempotent migrations |
+| Default workflow breaks existing projects without org chart roles | MEDIUM | Graceful degradation (taskless if template fails); migration only adds template, doesn't force use |
+| Smoke tests flaky in CI | LOW | Use deterministic fixtures, no network deps, temp dirs with cleanup |
+| install.sh backup doesn't cover project.yaml | MEDIUM | install.sh backs up data dirs but NOT project.yaml; add to backup list |
+| Lazy migration and registry migration interact badly | LOW | They are complementary: registry handles config, lazy handles tasks; both are idempotent |
+| Version tracking inconsistency (.version vs channel.json vs package.json) | MEDIUM | Migration 003 synchronizes; document the canonical source (package.json) |
 
 ---
 
 ## Sources
 
-- **Direct source code analysis**: All files listed in Section 1.4 (PRIMARY source, HIGH confidence)
-- **Existing design doc**: `/Users/xavier/Projects/aof/docs/dev/workflow-gates-design.md` (HIGH confidence)
-- **PROJECT.md**: `/Users/xavier/Projects/aof/.planning/PROJECT.md` (HIGH confidence, project constraints)
-- **Existing DAG test**: `/Users/xavier/Projects/aof/src/dispatch/__tests__/dag-gating.test.ts` (inter-task dependency tests, not intra-task DAG)
+- Direct source code analysis of `/Users/xavier/Projects/aof/src/`
+- `src/cli/commands/setup.ts` -- setup orchestrator
+- `src/packaging/migrations.ts` -- migration framework
+- `src/store/task-store.ts` -- task store with lazy migration
+- `src/migration/gate-to-dag.ts` -- gate-to-DAG conversion
+- `src/dispatch/scheduler.ts` -- scheduler poll cycle
+- `src/schemas/project.ts` -- project manifest schema
+- `src/schemas/workflow-dag.ts` -- DAG workflow schema
+- `src/schemas/workflow.ts` -- deprecated gate workflow schema
+- `src/packaging/updater.ts` -- self-update engine
+- `src/packaging/channels.ts` -- channel management
+- `scripts/install.sh` -- shell installer
+- `scripts/build-tarball.mjs` -- tarball builder
+- `.github/workflows/release.yml` -- release pipeline
+- `.github/workflows/ci.yml` -- CI pipeline
+- Confidence: HIGH -- all findings based on direct code inspection, no external sources needed

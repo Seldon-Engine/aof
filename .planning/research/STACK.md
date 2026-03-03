@@ -1,404 +1,318 @@
 # Technology Stack
 
-**Project:** AOF v1.2 Per-Task Workflow DAG Execution
-**Researched:** 2026-03-02
-**Scope:** Stack additions/changes for DAG execution engine, conditional branching, parallel hop dispatch, workflow composition API, hop lifecycle state machine
-**Confidence:** HIGH (zero new runtime dependencies; all capabilities buildable with existing Zod + TypeScript)
+**Project:** AOF v1.3 Seamless Upgrade
+**Researched:** 2026-03-03
+**Scope:** Stack additions/changes for config migration, DAG-as-default, smoke tests, rollback safety, and release validation
 
----
+## Executive Assessment
 
-## Executive Decision: Build In-House, No New Dependencies
+**No new dependencies required.** The existing stack already contains every library needed. The v1.3 milestone is an integration and hardening milestone, not a greenfield feature build. The work is writing new migration code, new test suites, and new release hooks -- all using tools already in the project.
 
-The per-task workflow DAG engine requires **zero new npm dependencies**. The existing stack (Zod schemas, TypeScript, filesystem task store, deterministic scheduler) provides everything needed. This is not a "DAG library" problem -- it is a schema evolution and scheduler integration problem.
+## Existing Stack (Confirmed Current)
 
-**Why not use an external DAG library:**
+| Technology | Installed | Purpose | Status for v1.3 |
+|------------|-----------|---------|------------------|
+| yaml | 2.8.2 | YAML parse/stringify for project.yaml migration | Sufficient |
+| zod | 3.25.76 | Schema validation for migrated config | Sufficient |
+| vitest | 3.2.4 | Smoke and integration test runner | Sufficient |
+| release-it | 19.2.4 | Release pipeline with hook lifecycle | Sufficient |
+| @release-it/conventional-changelog | (installed) | Changelog generation from conventional commits | Sufficient |
+| write-file-atomic | 7.x | Atomic file writes for rollback-safe operations | Sufficient |
+| gray-matter | 4.0.3 | YAML frontmatter parsing for task migration | Sufficient |
+| TypeScript | 5.7.x | Type safety across migration code | Sufficient |
+| Node.js | 22 (pinned) | Runtime | Sufficient |
 
-| Rejected Library | Why Not |
-|------------------|---------|
-| `graphlib` / `dagre` | Unmaintained (last release 2021). AOF's DAG is simple (tens of nodes, not thousands). Topological sort is ~30 lines of TypeScript. Adding a dependency for this is over-engineering. |
-| `xstate` v5 | State machines for hop lifecycle are tempting, but xstate brings 40KB+ of runtime, actor model complexity, and a learning curve. AOF's hop states are a simple enum with 5-6 transitions -- a switch statement or lookup table suffices. The existing gate evaluator is already a pure-function state machine without xstate. |
-| `bull` / `bullmq` | Job queue libraries assume Redis. AOF is filesystem-based with no external databases. Fundamentally incompatible constraint. |
-| `temporal` / `inngest` | Workflow-as-code platforms with server dependencies. AOF is a single-machine plugin. Massive over-engineering. |
-| `p-limit` / `p-queue` | For parallel hop dispatch limiting. AOF already has throttle.ts with concurrency tracking. Adding another concurrency library creates dual control planes. |
+**Confidence:** HIGH -- versions verified from installed `node_modules`.
 
-**What we build instead:**
+## What Each v1.3 Feature Needs
 
-1. **DAG data structure** -- adjacency list as a plain `Record<string, string[]>` (hop ID to successor hop IDs), validated by Zod. Topological sort is a simple DFS (~30 lines).
-2. **Hop lifecycle** -- enum-based state transitions validated by a lookup table (same pattern as `VALID_TRANSITIONS` in `task.ts`).
-3. **Condition evaluator** -- extend the existing `evaluateGateCondition()` from `gate-conditional.ts`. Already has sandboxed JS eval with timeout protection.
-4. **Parallel dispatch tracking** -- extend the existing `pendingDispatches` counter in `task-dispatcher.ts` to track multiple hops per task.
-5. **Workflow schema** -- Zod discriminated unions and `.superRefine()` for DAG validation (cycle detection, reachability).
+### 1. Config Migration (project.yaml gets workflowTemplates)
 
-```bash
-# Nothing new to install.
-npm ci   # verify clean state
-```
+**Existing infrastructure:** The migration framework at `src/packaging/migrations.ts` already provides:
+- `Migration` interface with `up(ctx)` / `down(ctx)` lifecycle
+- `runMigrations()` with version comparison, history tracking, and ordered execution
+- Migration history persisted to `.aof/migrations.json`
+- Forward and reverse migration support
 
----
+**Existing YAML tooling:** The `yaml` library (v2.8.2) is already used throughout the codebase for:
+- `src/projects/migration.ts` -- YAML frontmatter parse/stringify for task migration
+- `src/projects/manifest.ts` -- project.yaml write via `stringifyYaml`
+- `src/cli/commands/task-create-workflow.ts` -- project.yaml read via `parseYaml`
 
-## Core Stack Components for DAG Execution
+**What to build (no new deps):**
+- A new `Migration` entry (e.g., `003-add-workflow-templates`) that:
+  1. Reads each project's `project.yaml`
+  2. Parses with `yaml` library
+  3. Adds empty `workflowTemplates: {}` section if absent
+  4. Writes back with `stringifyYaml` preserving formatting (yaml@2 handles this natively)
+  5. `down()` removes the `workflowTemplates` key
+- The `WorkflowConfig` to `WorkflowDefinition` conversion already exists in `gate-to-dag.ts` -- reuse for converting legacy `workflow.gates` into a default template entry
 
-### 1. DAG Schema (Zod Extension)
+**Stack decision:** Use `yaml` library's `parseDocument()` API (not `parse()`) for the config migration because `parseDocument()` preserves comments and formatting, which matters when editing user config files. This is available in yaml@2 already installed.
 
-**Existing:** `WorkflowConfig` in `src/schemas/workflow.ts` defines linear gate sequences.
+**Why not add a dedicated config migration library (like `kyrage` or custom)?** The existing `Migration` framework is purpose-built and lightweight. Adding another migration framework creates two systems to maintain. The existing framework handles versioning, history, up/down, and ordering -- everything needed.
 
-**New:** `WorkflowDAG` schema that replaces linear gates with a hop graph.
+### 2. DAG Workflows as Default for New Tasks
 
-| Component | Technology | Purpose | Why This Approach |
-|-----------|-----------|---------|-------------------|
-| `HopSchema` | Zod `z.object()` | Individual hop definition (agent, role, conditions) | Extends existing `Gate` schema pattern. Agents already understand gates. |
-| `WorkflowDAG` | Zod `z.object()` with `.superRefine()` | DAG structure with edges, validation | `.superRefine()` allows custom validation (cycle detection, reachability) at parse time. No separate validation step needed. |
-| `WorkflowTemplate` | Zod `z.object()` | Pre-defined workflow in `project.yaml` | Extends existing `WorkflowConfig` location in `ProjectManifest` |
-| `TaskWorkflow` | Zod `z.object()` | Per-task workflow instance with runtime state | New field on `TaskFrontmatter`, parallel to existing `gate` field |
+**Existing infrastructure:**
+- `src/store/task-store.ts` create() already accepts `workflow?: { definition, templateName }`
+- `src/cli/commands/task-create-workflow.ts` resolves templates from `project.yaml`
+- `src/schemas/project.ts` already defines `workflowTemplates: z.record(TemplateNameKey, WorkflowDefinition).optional()`
+- `src/schemas/workflow.ts` is already marked `@deprecated` with "Will be removed in v1.3"
 
-**Schema design decision -- adjacency list, not edge list:**
+**What to build (no new deps):**
+- Add a `defaultWorkflow` field to the ProjectManifest schema (string key referencing a workflowTemplates entry)
+- Modify task create path to auto-attach the default workflow when no explicit workflow is specified
+- The config migration (above) seeds a sensible default template
+
+**Stack decision:** This is a schema addition to the existing Zod schema in `src/schemas/project.ts`, plus a lookup in the task creation path. Zero new dependencies.
+
+### 3. Smoke/Integration Tests for the Upgrade Path
+
+**Existing infrastructure:**
+- vitest 3.2.4 with two configs: root `vitest.config.ts` (unit) and `tests/vitest.e2e.config.ts` (e2e)
+- E2E tests use tmpdir-based fixtures with `beforeEach`/`afterEach` cleanup (see `src/projects/__tests__/migration.test.ts`)
+- The packaging migration tests (`src/packaging/__tests__/migrations.test.ts`) demonstrate the pattern: create temp dir, run migrations, assert state
+- The project migration tests (`src/projects/__tests__/migration.test.ts`) demonstrate full upgrade flow: create legacy layout, migrate, verify, rollback, verify
+
+**What to build (no new deps):**
+
+A dedicated vitest config for upgrade smoke tests:
 
 ```typescript
-// CHOSEN: Adjacency list (hop defines its own successors)
-// Why: Each hop is self-contained. No separate edges array to keep in sync.
-// Easy to validate: every successor reference must point to a valid hop ID.
-const HopSchema = z.object({
-  id: z.string().min(1),
-  role: z.string().min(1),
-  next: z.array(z.string()).default([]),       // successor hop IDs
-  when: z.string().optional(),                  // condition for THIS hop's activation
-  joinType: z.enum(["any", "all"]).default("all"), // parallel join strategy
-  // ... other fields from Gate (timeout, escalateTo, description, etc.)
+// tests/vitest.upgrade.config.ts
+import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  test: {
+    include: ["tests/upgrade/**/*.test.ts"],
+    testTimeout: 30_000,
+    pool: "forks",
+    poolOptions: { forks: { singleFork: true } },
+    bail: 1,
+  },
 });
-
-// REJECTED: Edge list (separate edges array)
-// Why not: Requires cross-referencing two arrays. Easy to have orphaned edges.
-// More complex validation. No benefit for graphs under 50 nodes.
 ```
 
-**Integration point:** The `ProjectManifest` schema in `src/schemas/project.ts` already has `workflow: WorkflowConfig.optional()`. This evolves to support both legacy `WorkflowConfig` (linear gates) and new `WorkflowDAG` (DAG hops) via a discriminated union or version field.
+**Test strategy using existing patterns:**
 
-**Backward compatibility strategy:** Keep `WorkflowConfig` as-is. Add `workflowDAG` as a new optional field. If both are present, `workflowDAG` takes precedence. The gate evaluator continues to work for legacy tasks. Migration path: existing gate sequences map trivially to DAGs (linear chain of hops).
+| Test Category | Pattern | Example |
+|--------------|---------|---------|
+| Config migration roundtrip | tmpdir + writeFile + runMigrations + readFile + assert | Pre-v1.2 project.yaml -> v1.3 with workflowTemplates |
+| Gate-to-DAG preservation | tmpdir + create legacy task + load via TaskStore + assert workflow field | Task with gate fields migrates to DAG on read |
+| DAG default attachment | tmpdir + create task without workflow + assert default workflow attached | New task gets project's defaultWorkflow |
+| Rollback safety | tmpdir + migrate + rollback + assert original state | Config, tasks, state all restored |
+| Tarball integrity | build tarball + extract to tmpdir + assert required files + npm ci + health check | All production files present, dependencies install |
+| Fresh install path | tmpdir + run installer setup logic + assert _inbox created + project.yaml valid | Clean install produces valid state |
+| Upgrade from v1.2 | tmpdir + create v1.2 state + run migrations + assert v1.3 state | v1.2 data preserved, new fields added |
 
-### 2. Hop Lifecycle State Machine
+**Why not add a separate test framework?** vitest already handles everything. The existing e2e test patterns (tmpdir fixtures, sequential execution via forks, bail-on-failure) are exactly what upgrade smoke tests need. Adding a separate framework (like shellspec or bats for shell testing) would add complexity without benefit since the critical upgrade logic runs in Node.js, not in the shell installer.
 
-**Existing pattern:** `VALID_TRANSITIONS` in `src/schemas/task.ts` -- a lookup table `Record<TaskStatus, readonly TaskStatus[]>`. Pure data, no library.
+**npm test script addition:**
 
-**New:** `HOP_VALID_TRANSITIONS` -- same pattern for hop states.
-
-| Hop State | Description | Valid Next States |
-|-----------|-------------|-------------------|
-| `pending` | Not yet eligible (predecessors incomplete) | `ready` |
-| `ready` | All predecessors complete, eligible for dispatch | `dispatched`, `skipped` |
-| `dispatched` | Agent session spawned | `complete`, `failed`, `blocked` |
-| `complete` | Hop finished successfully | (terminal) |
-| `failed` | Hop failed (will retry or deadletter) | `ready`, `deadletter` |
-| `blocked` | Hop blocked on external dependency | `ready`, `deadletter` |
-| `skipped` | Hop skipped due to condition evaluation | (terminal) |
-| `deadletter` | Hop permanently failed | (terminal) |
-
-```typescript
-// Same pattern as existing VALID_TRANSITIONS -- no xstate needed
-const HOP_VALID_TRANSITIONS: Record<HopStatus, readonly HopStatus[]> = {
-  pending:     ["ready"],
-  ready:       ["dispatched", "skipped"],
-  dispatched:  ["complete", "failed", "blocked"],
-  complete:    [],
-  failed:      ["ready", "deadletter"],
-  blocked:     ["ready", "deadletter"],
-  skipped:     [],
-  deadletter:  [],
-} as const;
+```json
+"test:upgrade": "./scripts/test-lock.sh run --config tests/vitest.upgrade.config.ts"
 ```
 
-**Why not xstate:** The hop lifecycle has 8 states and ~12 transitions. xstate's value is in complex statecharts with nested/parallel states, guards, actions, and delayed transitions. AOF's hop states are flat with no nesting. The existing pure-function gate evaluator pattern (`evaluateGateTransition()` in `gate-evaluator.ts`) proves this works without a state machine library. The same approach scales to hop lifecycle.
+### 4. Rollback Safety Mechanisms
 
-### 3. DAG Execution Engine (Topological Sort + Frontier Tracking)
+**Existing infrastructure:**
+- `src/projects/migration.ts` -- full rollback with `rollbackMigration()`: finds backup, restores dirs, handles timestamps
+- `src/packaging/installer.ts` -- `update()` with automatic backup/restore on failure
+- `scripts/install.sh` -- shell-level backup of data dirs before tarball extraction, restore on failure
+- `write-file-atomic` -- atomic file writes (write to temp, rename over original)
+- `src/packaging/migrations.ts` -- migration `down()` for reversible migrations
 
-**Existing:** The scheduler's `poll()` function in `scheduler.ts` already:
-- Scans all tasks
-- Checks dependencies (`dependsOn` with DFS cycle detection)
-- Dispatches eligible tasks
-- Tracks concurrency limits
+**What to build (no new deps):**
 
-**New:** A `DAGAdvancer` module that evaluates a single task's workflow DAG on each poll cycle.
+The rollback safety for v1.3 is a combination of:
 
-| Function | Purpose | Integration Point |
-|----------|---------|-------------------|
-| `evaluateDAGFrontier(task, workflow)` | Find hops that are ready to dispatch (all predecessors complete) | Called from `poll()` for each task with an active DAG workflow |
-| `advanceHop(task, hopId, outcome)` | Process hop completion, update state, find next hops | Replaces `evaluateGateTransition()` for DAG tasks |
-| `validateDAG(workflow)` | Cycle detection, reachability check, orphan detection | Called at schema parse time via Zod `.superRefine()` |
-| `topologicalSort(hops)` | Kahn's algorithm for execution order | Used by `evaluateDAGFrontier()` |
+1. **Config backup before migration:** Copy `project.yaml` to `project.yaml.pre-v1.3` before modifying
+2. **Reversible migration with `down()`:** The config migration must implement `down()` to strip `workflowTemplates` and `defaultWorkflow`
+3. **Atomic config writes:** Use `write-file-atomic` (already a dependency) instead of raw `writeFile` for project.yaml updates
+4. **Version gating:** Record the migration in `.aof/migrations.json` so it never re-runs
 
-**Topological sort implementation (Kahn's algorithm):**
+**Why not add a transactional filesystem library (like `fs-jetpack` or `graceful-fs`)?** The existing `write-file-atomic` handles the critical path (atomic rename on POSIX). The backup-then-migrate-then-verify pattern in `projects/migration.ts` is battle-tested within this codebase. A transactional layer adds abstraction without improving safety beyond what atomic rename provides on a single-machine deployment.
+
+**Rollback command pattern:**
 
 ```typescript
-// ~30 lines, no library needed
-function topologicalSort(hops: Hop[]): string[] {
-  const inDegree = new Map<string, number>();
-  const adj = new Map<string, string[]>();
-  for (const hop of hops) {
-    inDegree.set(hop.id, 0);
-    adj.set(hop.id, hop.next);
-  }
-  for (const hop of hops) {
-    for (const next of hop.next) {
-      inDegree.set(next, (inDegree.get(next) ?? 0) + 1);
-    }
-  }
-  const queue = [...inDegree.entries()].filter(([, d]) => d === 0).map(([id]) => id);
-  const order: string[] = [];
-  while (queue.length > 0) {
-    const id = queue.shift()!;
-    order.push(id);
-    for (const next of adj.get(id) ?? []) {
-      const newDeg = (inDegree.get(next) ?? 1) - 1;
-      inDegree.set(next, newDeg);
-      if (newDeg === 0) queue.push(next);
-    }
-  }
-  if (order.length !== hops.length) throw new Error("Cycle detected in workflow DAG");
-  return order;
+// In migration down():
+async down(ctx: MigrationContext) {
+  // For each project's project.yaml:
+  // 1. Load document with yaml.parseDocument() (preserves comments)
+  // 2. Delete 'workflowTemplates' and 'defaultWorkflow' keys
+  // 3. Write back atomically
 }
 ```
 
-**Integration with scheduler:** The scheduler's `poll()` function calls `buildDispatchActions()` for ready tasks. For DAG-enabled tasks, dispatch decisions are per-hop, not per-task. The task stays `in-progress` while hops execute. Each poll cycle re-evaluates the DAG frontier.
+### 5. Release Validation Before Publishing
 
-### 4. Condition Evaluation (Extend Existing)
+**Existing infrastructure:**
+- `.release-it.json` already has `before:init` hooks: `["npm run typecheck", "npm test"]`
+- `scripts/build-tarball.mjs` validates required files exist before packaging
+- `.github/workflows/release.yml` runs typecheck, build, test before creating tarball
+- `.github/workflows/ci.yml` runs on PRs with Node 22 and 23
 
-**Existing:** `evaluateGateCondition()` in `src/dispatch/gate-conditional.ts` provides:
-- Sandboxed JavaScript expression evaluation via `Function` constructor
-- Access to `tags`, `metadata`, `gateHistory` context variables
-- 100ms timeout protection
-- Syntax validation
+**What to build (no new deps):**
 
-**Extension for DAG hops:**
+Extend the existing release-it hooks and CI workflow:
 
-| New Context Variable | Type | Purpose |
-|---------------------|------|---------|
-| `hopResults` | `Record<string, HopResult>` | Results from completed predecessor hops |
-| `artifacts` | `Record<string, string[]>` | File lists from predecessor hop output directories |
-| `workflow` | `{ currentPhase: string }` | Workflow-level metadata |
-
-```typescript
-// Extended context for DAG condition evaluation
-interface DAGEvaluationContext extends GateEvaluationContext {
-  hopResults: Record<string, { status: HopStatus; summary?: string }>;
-  artifacts: Record<string, string[]>;
+```jsonc
+// .release-it.json additions
+{
+  "hooks": {
+    "before:init": [
+      "npm run typecheck",
+      "npm test",
+      "npm run test:upgrade"  // NEW: run upgrade smoke tests
+    ],
+    "after:bump": [
+      "npm run build",
+      "node scripts/build-tarball.mjs v${version}",
+      "node scripts/verify-tarball.mjs v${version}"  // NEW: verify tarball contents
+    ]
+  }
 }
 ```
 
-**Existing `buildGateContext()` extends naturally.** The function already builds context from task frontmatter. Adding `hopResults` from the task's workflow state is straightforward.
+**New tarball verification script** (`scripts/verify-tarball.mjs`):
 
-**Condition examples for branching:**
+```javascript
+// Extracts tarball to tmpdir, verifies:
+// 1. All required files present (dist/, package.json, etc.)
+// 2. npm ci --production succeeds
+// 3. dist/cli/index.js is executable
+// 4. Version in package.json matches tag
+// 5. No dev-only files leaked (tsconfig, vitest.config, etc.)
+// 6. Tarball size within expected range (catches accidental bloat)
+```
+
+**CI workflow enhancement** (`.github/workflows/release.yml`):
 
 ```yaml
-# Only run security review if task has security tag
-when: "tags.includes('security')"
+# Add between "Test" and "Build release tarball":
+- name: Run upgrade smoke tests
+  run: npm run test:upgrade
 
-# Only run hotfix deploy if previous hop flagged urgency
-when: "hopResults.triage?.summary?.includes('hotfix')"
-
-# Skip manual QA if automated tests passed
-when: "hopResults.autoTest?.status !== 'complete'"
+# Add after "Build release tarball":
+- name: Verify tarball
+  run: node scripts/verify-tarball.mjs ${{ steps.version.outputs.version }}
 ```
 
-### 5. Parallel Hop Dispatch and Join Semantics
+**Why not add a separate release validation tool (like semantic-release)?** release-it is already wired in, has the hook lifecycle needed, and the team is familiar with it. semantic-release has a different philosophy (fully automated releases from commit messages) that conflicts with the explicit `release:minor` / `release:patch` commands already in package.json. Switching would be a lateral move with churn and no benefit.
 
-**Existing:** The scheduler tracks `currentInProgress` globally and `inProgressByTeam` per team. The `maxConcurrentDispatches` config limits parallel work.
+## Stack: What NOT to Add
 
-**New concern:** A single task can have multiple hops executing in parallel. The scheduler must:
-1. Dispatch all eligible hops in the frontier (not just one per task)
-2. Track which hops are dispatched (per-task hop state, not just task-level lease)
-3. Join parallel branches (wait for all/any predecessors before advancing)
+| Considered | Why Not |
+|-----------|---------|
+| `semver` npm package | The existing `compareVersions()` in `src/packaging/migrations.ts` handles the simple cases needed (X.Y.Z comparison). Semver's prerelease/range features aren't needed for migration version gating. |
+| `fs-jetpack` / `fs-extra` | `write-file-atomic` + Node's built-in `fs/promises` cover all needs. The codebase is already consistent with these. |
+| `shellspec` / `bats` (shell test frameworks) | The installer's shell portion is thin (download + extract + hand off to Node.js). Testing the Node.js setup logic with vitest is more valuable and already working. |
+| `kyrage` / `umzug` (migration frameworks) | The existing `Migration` framework in `src/packaging/migrations.ts` is purpose-built and lightweight. Adding another creates two migration systems. |
+| `semantic-release` | Already using release-it with conventional-changelog plugin. Switching is churn. |
+| `ajv` (JSON Schema validator) | Zod is the validation layer. Adding JSON Schema validation creates a parallel system. |
+| `deep-diff` / `diff` | Config migration doesn't need diffing -- it's additive (add workflowTemplates key). |
+| `inquirer` (additional prompts) | Already have `@inquirer/prompts`. The upgrade path should be non-interactive (`--auto` flag). |
 
-**Implementation approach -- hop-level leases:**
+## Integration Points
 
-Each hop dispatch creates a correlation ID (existing pattern from `dispatch/executor.ts`). The hop state in the task frontmatter tracks:
+### Migration Registration
 
-```typescript
-const HopState = z.object({
-  hopId: z.string(),
-  status: HopStatus,
-  correlationId: z.string().uuid().optional(),  // links to gateway session
-  agent: z.string().optional(),
-  dispatchedAt: z.string().datetime().optional(),
-  completedAt: z.string().datetime().optional(),
-  summary: z.string().optional(),
-  retryCount: z.number().int().nonnegative().default(0),
-});
-```
-
-**Join semantics (`joinType` on each hop):**
-
-| Join Type | Behavior | When to Use |
-|-----------|----------|-------------|
-| `all` (default) | Wait for ALL predecessors to complete | Standard sequential dependency |
-| `any` | Advance when ANY predecessor completes | Race conditions, first-available patterns |
-
-**Scheduler integration:** The `buildDispatchActions()` function in `task-dispatcher.ts` currently iterates ready tasks. For DAG tasks, it additionally iterates the hop frontier of each in-progress task with an active DAG. This is an additive change, not a rewrite.
-
-### 6. Workflow Composition API (Agent-Facing)
-
-**Existing:** Tasks are created via `ITaskStore.create()` and the `aof_create_task` MCP tool. The `routing.workflow` field references a workflow name from `project.yaml`.
-
-**New:** Two composition modes:
-
-| Mode | When | Schema Location |
-|------|------|----------------|
-| **Template reference** | Task references a pre-defined workflow template | `routing.workflow: "standard-sdlc"` (existing pattern, now resolves to DAG) |
-| **Ad-hoc composition** | Agent defines workflow inline at task creation | New `workflow` field on task frontmatter containing the DAG definition |
-
-**Agent API extension (MCP tools):**
-
-| Tool | Change | Purpose |
-|------|--------|---------|
-| `aof_create_task` | Add optional `workflow` parameter accepting DAG definition | Agents compose workflows at task creation |
-| `aof_advance_hop` | New tool | Agent reports hop completion (replaces `aof_gate_transition` for DAG tasks) |
-| `aof_get_workflow_status` | New tool | Agent queries current DAG state (which hops complete, which pending) |
-
-**Template resolution:** When `routing.workflow` names a template and the task also has an inline `workflow`, the inline definition wins (override semantics, same as CSS specificity).
-
----
-
-## Stack Component Summary
-
-### Runtime Dependencies: No Changes
+New v1.3 migrations should be registered in a central registry file and imported by the installer setup:
 
 ```
-Current package.json is correct as-is for all v1.2 DAG work.
-No npm install/add/remove needed.
+src/packaging/migrations/
+  index.ts           -- exports all migrations in order
+  001-init-schema.ts -- (existing, if any)
+  002-project-layout.ts -- (existing, from v1.1)
+  003-workflow-templates.ts -- NEW: adds workflowTemplates to project.yaml
+  004-default-workflow.ts -- NEW: sets defaultWorkflow on projects that had workflow.gates
 ```
 
-### Existing Libraries Used (No Version Changes)
+### Schema Changes
 
-| Library | Current Version | Role in v1.2 |
-|---------|----------------|--------------|
-| `zod` | ^3.24.0 | DAG schema definition, validation with `.superRefine()`, discriminated unions |
-| `yaml` | ^2.7.0 | Parse workflow templates from `project.yaml` |
-| `write-file-atomic` | ^7.0.0 | Atomic hop state updates (same pattern as gate transitions) |
-| `vitest` | ^3.0.0 (dev) | Unit tests for DAG engine, integration tests for scheduler |
+```
+src/schemas/project.ts:
+  + defaultWorkflow: z.string().optional()  // references key in workflowTemplates
 
-### New Modules to Create
+src/schemas/workflow.ts:
+  - Remove @deprecated tag, replace with full removal
+  - Move any remaining gate types to migration-only code
+```
 
-| Module | Path | Purpose |
-|--------|------|---------|
-| `WorkflowDAG` schema | `src/schemas/workflow-dag.ts` | Zod schema for DAG-based workflows (hops, edges, conditions, join types) |
-| `HopStatus` types | `src/schemas/hop.ts` | Hop lifecycle types and valid transitions |
-| DAG validator | `src/dispatch/dag-validator.ts` | Cycle detection, reachability, orphan detection (pure functions) |
-| DAG advancer | `src/dispatch/dag-advancer.ts` | Evaluate frontier, advance hops, join semantics (pure functions) |
-| Hop dispatch | `src/dispatch/hop-dispatcher.ts` | Per-hop dispatch (extends task-dispatcher pattern) |
-| Workflow resolver | `src/dispatch/workflow-resolver.ts` | Resolve template name to DAG definition |
+### Test Suite Organization
 
-### Existing Modules to Extend
+```
+tests/
+  upgrade/
+    config-migration.test.ts    -- project.yaml migration roundtrips
+    gate-to-dag-upgrade.test.ts -- legacy task workflows convert correctly
+    dag-default.test.ts         -- new tasks get default workflow
+    rollback.test.ts            -- migration reversal works
+    tarball-integrity.test.ts   -- built tarball contains required files
+    fresh-install.test.ts       -- clean install from scratch
+```
 
-| Module | Path | Change |
-|--------|------|--------|
-| Task schema | `src/schemas/task.ts` | Add `workflow` and `hopStates` fields to `TaskFrontmatter` |
-| Project schema | `src/schemas/project.ts` | Add `workflowTemplates` (map of named DAG workflows) alongside existing `workflow` |
-| Scheduler | `src/dispatch/scheduler.ts` | Call DAG advancer for tasks with active DAG workflows |
-| Task dispatcher | `src/dispatch/task-dispatcher.ts` | Handle hop-level dispatch for DAG tasks |
-| Gate conditional | `src/dispatch/gate-conditional.ts` | Extend context with `hopResults` for DAG condition evaluation |
-| Gate transition handler | `src/dispatch/gate-transition-handler.ts` | Add DAG-aware path alongside existing gate path |
-| MCP tools | `src/mcp/tools.ts` | Add `aof_advance_hop` and `aof_get_workflow_status` tools |
-| Action executor | `src/dispatch/action-executor.ts` | Handle new `advance_hop` action type |
-| Event schema | `src/schemas/event.ts` | Add `hop_dispatched`, `hop_completed`, `hop_failed` event types |
+### Release Pipeline Order
 
----
-
-## Key Design Decisions
-
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| No external DAG library | Build ~100 lines of topological sort + frontier eval | AOF DAGs are small (5-20 hops). Graph libraries add dependency weight for trivial operations. The existing codebase already has O(n+e) DFS cycle detection in `scheduler.ts`. |
-| No state machine library | Lookup table pattern (matches existing `VALID_TRANSITIONS`) | Hop lifecycle is flat (8 states, 12 transitions). xstate's value is in complex nested statecharts, not simple FSMs. |
-| Zod `.superRefine()` for DAG validation | Parse-time validation, not runtime | Catches invalid DAGs (cycles, unreachable hops) when config is loaded, not when task is executing. Fail fast. |
-| Hop-level state in task frontmatter | `hopStates: HopState[]` on task | Filesystem-based persistence. Each hop state persists via atomic write. Crash recovery reads hop states on restart. |
-| Extend gate-conditional, don't replace | Add `hopResults` to evaluation context | Conditional branching reuses the same sandboxed eval engine. One security model, one test suite. |
-| Adjacency list in hop definition | `next: string[]` on each hop | Self-contained hops. No separate edge array to drift out of sync. |
-| Join semantics per-hop, not per-edge | `joinType` on destination hop | Simpler mental model: "this hop waits for all/any predecessors." Avoids per-edge join complexity. |
-| Backward compatibility via dual schema | `workflow` (legacy gates) + `workflowDAG` (new) | Existing tasks with linear gate workflows continue working. No migration required for v1.2 launch. |
-
----
-
-## What NOT to Add
-
-| Technology | Why Not |
-|------------|---------|
-| `graphlib` / `dagre` | Unmaintained. AOF's graphs are tiny. Topological sort is trivial to implement. |
-| `xstate` v5 | Overkill for flat state machines. Would add ~40KB runtime + learning curve for 12 transitions. |
-| `bull` / `bullmq` | Requires Redis. Violates filesystem-only constraint. |
-| `p-limit` | AOF already has throttle.ts. Dual concurrency control is a bug factory. |
-| `temporal` / `inngest` / `trigger.dev` | Server-based workflow platforms. AOF is a single-machine plugin. |
-| Separate SQLite table for hop state | Hop state belongs in the task file (filesystem task store constraint). Adding a side-channel database violates the single-source-of-truth principle. |
-| React Flow / vis.js | DAG visualization is deferred to v2. CLI-only for v1.2. |
-| `json-logic-js` | Condition evaluation. The existing `Function` constructor approach in `gate-conditional.ts` is more powerful and already proven. json-logic adds a learning curve with no benefit. |
-
----
+```
+1. npm run typecheck           (existing, before:init)
+2. npm test                    (existing, before:init)
+3. npm run test:upgrade        (NEW, before:init)
+4. npm run build               (NEW location, after:bump)
+5. build-tarball.mjs           (NEW location, after:bump)
+6. verify-tarball.mjs          (NEW, after:bump)
+7. git tag + push              (release-it automatic)
+8. GitHub Release + upload     (release-it/GitHub Actions)
+```
 
 ## Alternatives Considered
 
 | Category | Recommended | Alternative | Why Not |
 |----------|-------------|-------------|---------|
-| DAG representation | Adjacency list in hop definitions | Edge list (separate `edges` array) | Two arrays to keep in sync. Orphan edges possible. More complex validation. |
-| State machine | Lookup table (`Record<HopStatus, HopStatus[]>`) | xstate v5 | 8 states, 12 transitions. Lookup table is simpler, zero-dep, matches existing patterns. |
-| Condition engine | Extend existing `gate-conditional.ts` | `json-logic-js` or `expr-eval` | Existing engine is proven, sandboxed, tested. Swapping adds risk for no gain. |
-| Parallel tracking | Hop-level state in task frontmatter | Separate tracking file per task | Violates single-file-per-task pattern. Complicates atomic writes. |
-| Join semantics | Per-hop `joinType: "all" | "any"` | Per-edge join annotations | Per-hop is simpler mental model. Per-edge creates combinatorial complexity for N predecessors. |
-| Workflow storage | Template in `project.yaml`, instance in task frontmatter | Separate workflow files | Adds file management complexity. Task frontmatter is the natural home for per-task state. |
-
----
-
-## Version Compatibility (v1.2 relevant)
-
-| Component | Version | Notes |
-|-----------|---------|-------|
-| Node.js | >=22.0.0 (pinned) | No change from v1.1. Node 24/25 still have better-sqlite3 issues. |
-| Zod | ^3.24.0 | `.superRefine()` available since Zod 3.x. `.discriminatedUnion()` available since Zod 3.0. No upgrade needed. |
-| TypeScript | ^5.7.0 | Satisfies constraint types and template literal types used in schema definitions. |
-| vitest | ^3.0.0 | No change. Test patterns remain the same. |
-| write-file-atomic | ^7.0.0 | No change. Atomic writes for hop state updates. |
-
----
+| Config migration | Existing Migration framework + yaml parseDocument | New YAML-specific migration tool | Already have a working migration framework; adding another is duplication |
+| Test runner | vitest (existing) | Jest, bats, shellspec | vitest is already configured, familiar, and handles the tmpdir fixture pattern well |
+| Release pipeline | release-it hooks (existing) | GitHub Actions-only validation | release-it hooks run locally too (via `npm run release:dry`), providing faster feedback |
+| Atomic writes | write-file-atomic (existing) | fs-extra, custom rename wrapper | Already a dependency, already used in task-store.ts |
+| YAML handling | yaml@2 parseDocument (existing) | js-yaml, custom parser | yaml@2 already installed, parseDocument preserves comments |
 
 ## Installation
 
-```bash
-# No new packages needed for v1.2
-npm ci
+No new packages to install. Run existing:
 
-# Verify build works
-npm run typecheck
-npm test
+```bash
+npm ci
 ```
 
----
+## Version Verification Commands
+
+```bash
+# Verify all required tools are at expected versions
+node -e "console.log('yaml:', require('./node_modules/yaml/package.json').version)"
+# Expected: 2.8.x
+
+node -e "console.log('vitest:', require('./node_modules/vitest/package.json').version)"
+# Expected: 3.2.x
+
+node -e "console.log('release-it:', require('./node_modules/release-it/package.json').version)"
+# Expected: 19.2.x
+
+node -e "console.log('zod:', require('./node_modules/zod/package.json').version)"
+# Expected: 3.25.x
+```
 
 ## Sources
 
-### Codebase (PRIMARY - HIGH confidence)
-
-All technology decisions are grounded in direct reading of the existing codebase:
-
-- `src/schemas/workflow.ts` -- Existing `WorkflowConfig` with linear gate sequences. Extension point for DAG schema.
-- `src/schemas/gate.ts` -- Gate/hop type definitions. `GateOutcome`, `GateHistoryEntry`, `GateTransition` patterns to replicate for hops.
-- `src/schemas/task.ts` -- `TaskFrontmatter` with `gate`, `gateHistory`, `reviewContext` fields. Pattern for adding `hopStates`.
-- `src/schemas/project.ts` -- `ProjectManifest` with `workflow: WorkflowConfig.optional()`. Extension point for DAG templates.
-- `src/dispatch/scheduler.ts` -- Poll loop with dependency checking, concurrency tracking. Integration point for DAG advancement.
-- `src/dispatch/gate-evaluator.ts` -- Pure-function state machine pattern. Replicate for hop advancement.
-- `src/dispatch/gate-conditional.ts` -- Sandboxed condition evaluator with `Function` constructor. Extend for DAG conditions.
-- `src/dispatch/gate-transition-handler.ts` -- Orchestrator glue between pure logic and filesystem. Pattern for hop transition handler.
-- `src/dispatch/task-dispatcher.ts` -- Dispatch action builder. Extension point for per-hop dispatch.
-- `src/store/interfaces.ts` -- `ITaskStore` interface. May need `writeHopState()` convenience method.
-- `package.json` -- Current dependency tree confirms all needed libraries are present.
-
-### Algorithm Knowledge (MEDIUM confidence -- training data, not verified against current docs)
-
-- **Kahn's algorithm** for topological sort -- well-established, O(V+E), standard for DAG processing. Used in build systems (Make, Gradle), CI pipelines, and data pipelines universally.
-- **Frontier evaluation** -- standard pattern in DAG task schedulers. At each tick, find nodes with all predecessors complete. Apache Airflow, Prefect, and Dagster all use this approach.
-- **Join semantics (all/any)** -- standard pattern from BPMN (Business Process Model and Notation) parallel gateways. "all" = AND-join, "any" = OR-join.
-
-### Design Pattern Sources (MEDIUM confidence -- training data)
-
-- **Adjacency list representation** -- standard graph representation. Preferred for sparse graphs (which workflow DAGs always are).
-- **State machine as lookup table** -- used in game engines, protocol implementations, and workflow engines where state count is small and transitions are data-driven rather than behavior-driven.
-
----
-*Stack research for: AOF v1.2 Per-Task Workflow DAG Execution*
-*Researched: 2026-03-02*
-*Previous research (v1.1): 2026-02-26 -- retained items not repeated here*
+- yaml@2 parseDocument API: verified via installed node_modules (v2.8.2)
+- Existing migration framework: `src/packaging/migrations.ts` (read from codebase)
+- Existing project migration: `src/projects/migration.ts` (read from codebase)
+- Existing gate-to-DAG: `src/migration/gate-to-dag.ts` (read from codebase)
+- release-it hooks: [release-it GitHub](https://github.com/release-it/release-it)
+- release-it hook lifecycle: [release-it docs](https://github.com/release-it/release-it/blob/main/docs/configuration.md)
+- vitest config: [vitest.dev](https://vitest.dev/guide/cli)
+- Existing installer: `scripts/install.sh` (read from codebase)
+- Existing release workflow: `.github/workflows/release.yml` (read from codebase)
+- Existing tarball builder: `scripts/build-tarball.mjs` (read from codebase)
+- write-file-atomic: already in package.json dependencies
+- Existing test patterns: `src/packaging/__tests__/migrations.test.ts`, `src/projects/__tests__/migration.test.ts`
