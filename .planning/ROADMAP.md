@@ -135,7 +135,7 @@ Plans:
   3. Developer docs cover DAG schema reference, evaluator internals, and extension points for contributors
   4. AOF companion skill teaches agents how to compose workflow DAGs with parameters, best practices, and examples
   5. Outdated gate references are removed from companion skill and documentation, and CLI reference reflects any new workflow commands
-**Plans:** 3 plans
+**Plans:** 1/3 plans executed
 
 Plans:
 - [ ] 15-01-PLAN.md -- Gate-to-DAG lazy migration with TDD (migrateGateToDAG, task-store hook, position mapping, condition conversion)
@@ -162,4 +162,4 @@ Plans:
 | 12. Scheduler Integration | 2/2 | Complete    | 2026-03-03 | - |
 | 13. Timeout, Rejection, and Safety | 3/3 | Complete   | 2026-03-03 | - |
 | 14. Templates, Ad-Hoc API, and Artifacts | 3/3 | Complete    | 2026-03-03 | - |
-| 15. Migration and Documentation | v1.2 | 0/3 | Planning | - |
+| 15. Migration and Documentation | 1/3 | In Progress|  | - |

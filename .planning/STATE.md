@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Task Workflows
-status: completed
-stopped_at: Phase 15 context gathered
-last_updated: "2026-03-03T18:58:31.166Z"
-last_activity: 2026-03-03 -- Completed plan 14-03 (CLI Workflow Flag and Store Ad-hoc API)
+status: executing
+stopped_at: Completed 15-01-PLAN.md
+last_updated: "2026-03-03T19:44:50.898Z"
+last_activity: 2026-03-03 -- Completed plan 15-01 (Gate-to-DAG lazy migration)
 progress:
   total_phases: 6
   completed_phases: 5
-  total_plans: 12
-  completed_plans: 12
+  total_plans: 15
+  completed_plans: 13
   percent: 100
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-02)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** v1.2 Task Workflows -- Phase 14 complete (Templates, Ad-hoc API & Artifacts). All 3 plans delivered.
+**Current focus:** v1.2 Task Workflows -- Phase 15 in progress (Migration and Documentation). Plan 01 delivered.
 
 ## Current Position
 
-Phase: 14 of 15 (Templates, Ad-hoc API & Artifacts)
-Plan: 3 of 3 (14-03 complete -- Phase 14 done)
-Status: Phase Complete
-Last activity: 2026-03-03 -- Completed plan 14-03 (CLI Workflow Flag and Store Ad-hoc API)
+Phase: 15 of 15 (Migration and Documentation)
+Plan: 1 of 3 (15-01 complete)
+Status: In Progress
+Last activity: 2026-03-03 -- Completed plan 15-01 (Gate-to-DAG lazy migration)
 
 Progress: [████████████████████] 100%
 
@@ -56,6 +56,7 @@ Progress: [████████████████████] 100%
 
 **Prior milestones:** v1.0 (7 plans), v1.1 (16 plans) -- 23 plans total across 9 phases
 | Phase 14 P02 | 3min | 2 tasks | 4 files |
+| Phase 15 P01 | 4min | 1 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -112,6 +113,7 @@ v1.2 research decisions:
 - [Phase 14]: artifactPaths maps only completed predecessor hop IDs (not all predecessors)
 - [Phase 14]: mkdir called before buildHopContext and spawnSession for fail-fast directory creation
 - [Phase 14]: task.path guard throws early rather than producing invalid paths
+- [Phase 15]: migrateGateToDAG mutates task in-place; gate canReject maps to rejectionStrategy=origin; unparseable when expressions skip condition with warning
 
 ### Roadmap Evolution
 
@@ -129,6 +131,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-03T18:58:31.163Z
-Stopped at: Phase 15 context gathered
-Resume file: .planning/phases/15-migration-and-documentation/15-CONTEXT.md
+Last session: 2026-03-03T19:44:49.992Z
+Stopped at: Completed 15-01-PLAN.md
+Resume file: None

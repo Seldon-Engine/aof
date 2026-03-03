@@ -42,7 +42,7 @@ Requirements for per-task workflow DAG execution. Each maps to roadmap phases.
 - [x] **SAFE-02**: Existing gate-based tasks coexist with DAG tasks via dual-mode evaluator
 - [x] **SAFE-03**: Each hop supports timeout with escalation to a specified role
 - [x] **SAFE-04**: Hop rejection resets downstream hops and re-dispatches (configurable rejection strategy)
-- [ ] **SAFE-05**: Existing linear gate workflows can be lazily migrated to equivalent DAG format
+- [x] **SAFE-05**: Existing linear gate workflows can be lazily migrated to equivalent DAG format
 
 ### Documentation & Companion Skill
 
@@ -108,7 +108,7 @@ Deferred to later milestones. Tracked but not in current roadmap.
 | SAFE-02 | Phase 12 | Complete |
 | SAFE-03 | Phase 13 | Complete |
 | SAFE-04 | Phase 13 | Complete |
-| SAFE-05 | Phase 15 | Pending |
+| SAFE-05 | Phase 15 | Complete |
 | DOCS-01 | Phase 15 | Pending |
 | DOCS-02 | Phase 15 | Pending |
 | DOCS-03 | Phase 15 | Pending |
