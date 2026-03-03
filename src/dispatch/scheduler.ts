@@ -28,7 +28,7 @@ import { evaluateMurmurTriggers } from "./murmur-integration.js";
 import { loadOrgChart } from "../org/loader.js";
 import { checkThrottle, updateThrottleState, resetThrottleState as resetThrottleStateInternal } from "./throttle.js";
 import { isLeaseActive, startLeaseRenewal, stopLeaseRenewal, cleanupLeaseRenewals } from "./lease-manager.js";
-import { escalateGateTimeout, checkGateTimeouts } from "./escalation.js";
+import { escalateGateTimeout, checkGateTimeouts, checkHopTimeouts } from "./escalation.js";
 import { buildDispatchActions } from "./task-dispatcher.js";
 import { checkPromotionEligibility } from "./promotion.js";
 import { executeActions } from "./action-executor.js";
@@ -244,6 +244,10 @@ export async function poll(
   // 3.9. Check for gate timeouts (AOF-69l: gate timeout detection)
   const timeoutActions = await checkGateTimeouts(store, logger, config, metrics);
   actions.push(...timeoutActions);
+
+  // 3.10. Check for DAG hop timeouts (Phase 13: hop timeout + escalation)
+  const hopTimeoutActions = await checkHopTimeouts(store, logger, config, metrics);
+  actions.push(...hopTimeoutActions);
 
   // 3.1. Check for backlog tasks that can be promoted
   const promotionActions = checkBacklogPromotion(allTasks, childrenByParent, checkPromotionEligibility);
