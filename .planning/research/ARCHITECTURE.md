@@ -1,601 +1,987 @@
-# Architecture Patterns: v1.1 Integration
+# Architecture Patterns: Per-Task Workflow DAGs
 
-**Domain:** Agentic orchestration layer (AOF) -- v1.1 feature integration
-**Researched:** 2026-02-26
-**Confidence:** HIGH (direct source code analysis, all claims verified against codebase)
+**Domain:** DAG-based workflow execution for multi-agent orchestration (AOF v1.2)
+**Researched:** 2026-03-02
+**Confidence:** HIGH (direct source code analysis of all integration points)
 
-## Existing Architecture Summary
+## Executive Summary
 
-AOF is a TypeScript plugin for the OpenClaw gateway. The architecture is:
+AOF currently has a linear gate-based workflow system: tasks progress through an ordered sequence of gates defined in `project.yaml`, with the gate evaluator advancing tasks on completion. The v1.2 milestone replaces this with per-task workflow DAGs -- directed acyclic graphs where hops (the DAG equivalent of gates) can branch, run in parallel, and converge. The critical architectural constraint is that OpenClaw has no nested agent sessions: each hop must be an independent spawn, with the scheduler advancing the DAG between hops.
 
-```
-OpenClaw Gateway
-  |-- plugin.ts (entry point, registers AOF + memory modules)
-       |-- openclaw/adapter.ts (registerAofPlugin: tools, services, event hooks, HTTP routes)
-       |-- memory/index.ts (registerMemoryModule: HNSW, sqlite, embeddings, tools, sync service)
-       |-- service/aof-service.ts (AOFService: scheduler, multi-project, protocol router)
-       |-- dispatch/ (scheduler, task-dispatcher, lease-manager, executor)
-       |-- store/ (FilesystemTaskStore: ~/.openclaw/aof/)
-       |-- projects/ (registry, resolver, manifest, create, migrate)
-       |-- packaging/ (installer, updater, channels, wizard, openclaw-cli)
-       |-- mcp/ (MCP server with tools, resources, subscriptions)
-```
-
-**Key runtime paths:**
-- Source: `~/Projects/AOF/src/`
-- Build: `~/Projects/AOF/dist/`
-- Runtime data: `~/.openclaw/aof/` (events/, tasks/, state/, memory/)
-- Memory DB: `~/.openclaw/aof/memory.db` + `memory-hnsw.dat`
-- Vault/Projects: `<vaultRoot>/Projects/<projectId>/project.yaml`
-
-**Build chain:** `tsc` -> `dist/` (ESM, ES2024, NodeNext). The `build` script also runs `scripts/copy-extension-entry.js`. Exports: `.` (index) and `./plugin` (plugin entry).
+This document maps every integration point, defines the new components needed, specifies how DAG state persists on tasks, and provides a build order that respects dependency chains and maintains backward compatibility.
 
 ---
 
-## Feature 1: Memory Fix (HNSW Capacity + Search)
+## 1. Current Architecture (What Exists)
 
-### Problem Analysis
-
-The HNSW index in `src/memory/store/hnsw-index.ts` has an `ensureCapacity()` method that doubles capacity when `count >= max`. However, the bug manifests in two scenarios:
-
-1. **Load path capacity mismatch:** When `readIndexSync` loads a persisted index, the loaded index's `maxElements` is set to whatever it was when saved. If the index was saved at full capacity (e.g., 10,000/10,000), the `ensureCapacity()` check in the next `add()` call will fire. But the `load()` method at lines 87-89 of `hnsw-index.ts` creates a new `HierarchicalNSW`, calls `readIndexSync`, and replaces `this.index` -- it never checks or adjusts capacity headroom after load. If the loaded index is exactly at capacity and `resizeIndex` behaves differently on a freshly-loaded index vs a live one, inserts crash.
-
-2. **Rebuild path regression:** `rebuild()` at lines 98-105 sets capacity to `Math.max(chunks.length, INITIAL_CAPACITY)`. If there are exactly 10,000 chunks, capacity = 10,000, and the index is immediately full. The very next insert triggers `ensureCapacity` -> `resizeIndex(20,000)`, which may work but is wasteful. If chunks.length > INITIAL_CAPACITY and equals the capacity exactly, the rebuild creates a fully-packed index.
-
-3. **Search returning empty:** When `getCurrentCount()` reports 0 on a loaded index (possible if load failed silently and fell through to a `rebuildHnswFromDb` that also returned 0 rows), `search()` returns `[]` at line 67. The current error handling in `memory/index.ts:90-95` catches load errors silently.
-
-### Where HNSW is Initialized
+### 1.1 Component Map
 
 ```
-src/memory/index.ts:registerMemoryModule()
-  line 88: const hnsw = new HnswIndex(dimensions)  // creates with INITIAL_CAPACITY=10,000
-  line 89-98: if hnswPath exists, try load(); on catch, rebuildHnswFromDb()
-  line 97: else rebuildHnswFromDb()
-  line 100: const vectorStore = new VectorStore(db, hnsw)
+Scheduler Poll Cycle (src/dispatch/scheduler.ts)
+  |
+  +-- store.list() --> all tasks
+  |
+  +-- checkExpiredLeases()
+  +-- checkStaleHeartbeats()
+  +-- checkGateTimeouts() ---- loads project manifest, finds gate timeout violations
+  +-- checkBacklogPromotion()
+  |
+  +-- buildDispatchActions() -- for ready tasks:
+  |     +-- dependency gating (dependsOn check)
+  |     +-- resource serialization
+  |     +-- throttle checks
+  |     +-- builds "assign" actions
+  |
+  +-- checkBlockedTaskRecovery()
+  |
+  +-- executeActions() ------- for each action:
+        +-- "assign" --> executeAssignAction():
+        |     +-- acquireLease()
+        |     +-- build TaskContext (with gateContext if workflow task)
+        |     +-- executor.spawnSession()
+        |     +-- startLeaseRenewal()
+        |
+        +-- "expire_lease" --> transition back to ready/blocked
+        +-- "stale_heartbeat" --> readRunResult, apply transitions
+        +-- "promote" --> backlog -> ready
+        +-- other action types...
 ```
 
-The `HnswIndex` constructor at `src/memory/store/hnsw-index.ts:27-29` calls `createIndex(INITIAL_CAPACITY)` where `INITIAL_CAPACITY = 10_000` and `GROWTH_FACTOR = 2`.
+### 1.2 Workflow Flow (Current Linear Gates)
 
-### Integration Points (MODIFY existing files)
+```
+Task Created (routing.workflow: "standard-sdlc")
+  |
+  v
+Task enters first gate: gate: { current: "implement", entered: "..." }
+  |
+  v
+Scheduler dispatches to role specified by gate
+  |
+  v
+Agent completes --> completion.report via ProtocolRouter
+  |
+  v
+ProtocolRouter.handleCompletionReport():
+  applyCompletionOutcome() --> resolveCompletionTransitions()
+    --> transitions to "review" (or "done" if no review)
+  |
+  v
+[Note: Gate advancement currently happens via the gate evaluator,
+ invoked when an agent completes with a gate outcome]
+```
 
-| File | Change | Risk |
-|------|--------|------|
-| `src/memory/store/hnsw-index.ts` | Fix `load()` to call `ensureCapacity()` after load, guaranteeing headroom | LOW -- isolated class, existing tests cover load path |
-| `src/memory/store/hnsw-index.ts` | Fix `rebuild()` to add headroom: `Math.ceil(chunks.length * 1.5)` minimum | LOW |
-| `src/memory/store/hnsw-index.ts` | Add `get capacity(): number` getter exposing `getMaxElements()` for diagnostics | LOW |
-| `src/memory/index.ts` | Add error logging in `rebuildHnswFromDb()` for empty result case; add logging on silent catch | LOW |
-| `src/memory/__tests__/hnsw-index.test.ts` | Add capacity-at-limit tests (load at capacity, insert after load, rebuild at exact count) | LOW |
+### 1.3 Key Existing Data Structures
 
-### Recommended Fix Pattern
+**Task frontmatter (relevant fields):**
+```typescript
+{
+  routing: {
+    role?: string;          // Current gate's role
+    workflow?: string;      // Workflow name from project.yaml
+    agent?: string;
+  };
+  gate: {                   // Current gate state
+    current: string;        // Gate ID
+    entered: string;        // ISO timestamp
+  };
+  gateHistory: GateHistoryEntry[];  // Audit trail
+  reviewContext?: ReviewContext;      // Rejection feedback
+  metadata: Record<string, unknown>; // Extensible
+}
+```
+
+**WorkflowConfig (project.yaml):**
+```typescript
+{
+  name: string;
+  rejectionStrategy: "origin";
+  gates: Gate[];           // Ordered sequence
+  outcomes?: Record<string, string>;
+}
+```
+
+**Gate:**
+```typescript
+{
+  id: string;
+  role: string;
+  canReject: boolean;
+  when?: string;           // Conditional expression
+  timeout?: string;
+  escalateTo?: string;
+}
+```
+
+### 1.4 Integration Points to Modify
+
+| Component | File | Current Role | DAG Impact |
+|-----------|------|-------------|------------|
+| WorkflowConfig schema | `schemas/workflow.ts` | Linear gate sequence | Add DAG definition schema |
+| Task schema | `schemas/task.ts` | `gate`, `gateHistory` fields | Add `dag`, `dagState`, `hopHistory` fields |
+| ProjectManifest | `schemas/project.ts` | `workflow: WorkflowConfig` | Add `workflows: Record<string, WorkflowConfig>` (named templates) |
+| Gate evaluator | `dispatch/gate-evaluator.ts` | Linear next-gate logic | Replace with DAG evaluator |
+| Gate context builder | `dispatch/gate-context-builder.ts` | Builds context for current gate | Adapt for hop context |
+| Gate conditional | `dispatch/gate-conditional.ts` | `when` expression evaluation | Reuse for hop conditions |
+| Assign executor | `dispatch/assign-executor.ts` | Injects gateContext on dispatch | Inject hopContext instead |
+| Escalation | `dispatch/escalation.ts` | Gate timeout checks | Adapt for hop timeouts |
+| Completion utils | `protocol/completion-utils.ts` | Status transition mapping | Add DAG-aware transitions |
+| Protocol router | `protocol/router.ts` | `handleCompletionReport()` | Add DAG advancement on completion |
+| Scheduler | `dispatch/scheduler.ts` | Gate timeout checking | Add DAG hop dispatch evaluation |
+| Action executor | `dispatch/action-executor.ts` | Executes assign actions | No change needed (action types unchanged) |
+
+---
+
+## 2. Recommended Architecture
+
+### 2.1 DAG Schema Design
+
+The DAG is defined as a set of hops with explicit dependency edges. This replaces the implicit ordering of the linear gate array.
 
 ```typescript
-// In hnsw-index.ts load():
-load(filePath: string): void {
-  const loaded = new HierarchicalNSW(DEFAULT_SPACE, this.dimensions);
-  loaded.readIndexSync(filePath, true /* allowReplaceDeleted */);
-  this.index = loaded;
-  // Guarantee headroom for future inserts after loading a potentially full index
-  this.ensureCapacity();
-}
+// NEW: src/schemas/workflow-dag.ts
 
-// In hnsw-index.ts rebuild():
-rebuild(chunks: ReadonlyArray<{ id: number; embedding: number[] }>): void {
-  // Add 50% headroom so first post-rebuild insert does not trigger immediate resize
-  const capacity = Math.max(
-    Math.ceil(chunks.length * 1.5),
-    INITIAL_CAPACITY,
-  );
-  const fresh = this.createIndex(capacity);
-  for (const { id, embedding } of chunks) {
-    fresh.addPoint(embedding, id);
+/** A hop is the DAG equivalent of a gate -- one unit of work at one stage. */
+const Hop = z.object({
+  /** Unique hop ID within the workflow (e.g., "implement", "review", "test"). */
+  id: z.string().min(1),
+  /** Role responsible for this hop (from org chart). */
+  role: z.string().min(1),
+  /** Hop IDs that must complete before this hop can start. Empty = root hop. */
+  dependsOn: z.array(z.string()).default([]),
+  /** Conditional activation expression (same as gate.when). */
+  when: z.string().optional(),
+  /** Human-readable description. */
+  description: z.string().optional(),
+  /** Whether this hop can reject (send back to predecessors). */
+  canReject: z.boolean().default(false),
+  /** Rejection target: "origin" (first hop) or specific hop ID. */
+  rejectTo: z.string().optional(),
+  /** Maximum time before escalation. */
+  timeout: z.string().optional(),
+  /** Escalation target role. */
+  escalateTo: z.string().optional(),
+  /** Whether this hop requires human approval. */
+  requireHuman: z.boolean().optional(),
+  /**
+   * Hop behavior on completion of predecessor:
+   * - "auto": Scheduler dispatches automatically (default)
+   * - "pause": Task pauses in ready, awaiting manual trigger
+   */
+  trigger: z.enum(["auto", "pause"]).default("auto"),
+});
+type Hop = z.infer<typeof Hop>;
+
+/** DAG workflow definition. */
+const WorkflowDAG = z.object({
+  /** Workflow name (unique within project). */
+  name: z.string().min(1),
+  /** Schema version for migration. */
+  version: z.literal(2).default(2),
+  /** Hop definitions (the nodes of the DAG). */
+  hops: z.array(Hop).min(1),
+  /** Default rejection strategy for hops without explicit rejectTo. */
+  rejectionStrategy: z.enum(["origin", "predecessors"]).default("origin"),
+  /** Optional outcome descriptions. */
+  outcomes: z.record(z.string(), z.string()).optional(),
+});
+type WorkflowDAG = z.infer<typeof WorkflowDAG>;
+```
+
+**Why this shape:**
+- `dependsOn` on each hop makes the DAG explicit and self-documenting in YAML
+- Root hops (no `dependsOn`) are entry points -- the scheduler knows where to start
+- Fan-out: multiple hops can depend on the same predecessor
+- Fan-in: a hop with multiple `dependsOn` waits for all to complete (join)
+- Conditional hops (`when`) are evaluated at dispatch time -- if skipped, downstream hops treat them as complete
+
+**Example YAML:**
+```yaml
+workflows:
+  standard-sdlc:
+    name: standard-sdlc
+    version: 2
+    hops:
+      - id: implement
+        role: swe-backend
+        description: "Initial implementation"
+      - id: test
+        role: swe-qa
+        dependsOn: [implement]
+        canReject: true
+      - id: review
+        role: swe-architect
+        dependsOn: [implement]
+        canReject: true
+      - id: security
+        role: security
+        dependsOn: [implement]
+        when: "tags.includes('security')"
+      - id: deploy
+        role: swe-ops
+        dependsOn: [test, review, security]
+        description: "Deploy to staging"
+```
+
+### 2.2 DAG State on Task (Persisted in Frontmatter)
+
+The DAG execution state lives on the task frontmatter. This is the single source of truth for where the task is in its workflow.
+
+```typescript
+// NEW: Added to TaskFrontmatter schema
+
+/** State of a single hop in the DAG execution. */
+const HopState = z.object({
+  /** Hop ID. */
+  id: z.string(),
+  /** Hop execution status. */
+  status: z.enum([
+    "pending",       // Not yet eligible (predecessors incomplete)
+    "ready",         // All predecessors complete, eligible for dispatch
+    "dispatched",    // Scheduler has dispatched this hop
+    "complete",      // Hop completed successfully
+    "rejected",      // Hop rejected work back to predecessors
+    "blocked",       // Hop hit external blocker
+    "skipped",       // Conditional evaluated to false
+  ]),
+  /** Agent assigned to this hop (set on dispatch). */
+  agent: z.string().optional(),
+  /** ISO timestamp when hop became ready. */
+  readyAt: z.string().datetime().optional(),
+  /** ISO timestamp when hop was dispatched. */
+  dispatchedAt: z.string().datetime().optional(),
+  /** ISO timestamp when hop completed/blocked/rejected. */
+  completedAt: z.string().datetime().optional(),
+  /** Completion outcome (if completed). */
+  outcome: z.enum(["complete", "needs_review", "blocked"]).optional(),
+  /** Summary from the completing agent. */
+  summary: z.string().optional(),
+  /** Blockers if rejected or blocked. */
+  blockers: z.array(z.string()).default([]),
+  /** Rejection notes. */
+  rejectionNotes: z.string().optional(),
+});
+type HopState = z.infer<typeof HopState>;
+
+/** DAG execution state -- the full runtime state of a workflow on a task. */
+const DAGState = z.object({
+  /** Workflow name (references workflow template). */
+  workflow: z.string(),
+  /** Current hops state map (hop ID -> HopState). */
+  hops: z.record(z.string(), HopState),
+  /** The hop currently being dispatched/executed (for routing). */
+  activeHop: z.string().optional(),
+  /** ISO timestamp when DAG execution started. */
+  startedAt: z.string().datetime(),
+  /** ISO timestamp when DAG completed (all terminal hops done). */
+  completedAt: z.string().datetime().optional(),
+  /** Number of rejection cycles (for circuit breaker). */
+  rejectionCount: z.number().int().nonnegative().default(0),
+});
+type DAGState = z.infer<typeof DAGState>;
+```
+
+**Why on the task (not in a separate file):**
+1. **Atomic transitions**: Task file rename (status directory change) and DAG state update happen in one write -- no cross-file consistency issues
+2. **Human-readable**: `cat task.md` shows the complete picture including DAG progress
+3. **Existing pattern**: Gate state already lives in frontmatter (`gate`, `gateHistory`)
+4. **Store interface unchanged**: No new file types to manage
+5. **Crash recovery**: DAG state survives gateway restarts because it is on the task file
+
+**Frontmatter size concern**: A workflow with 10 hops adds approximately 2-4KB to frontmatter. This is acceptable for the filesystem store. The existing `gateHistory` array can grow much larger (one entry per gate traversal including rejection loops).
+
+### 2.3 DAG Evaluator (New Component)
+
+```
+NEW: src/dispatch/dag-evaluator.ts
+
+Purpose: Pure function that evaluates DAG state and returns next actions.
+No I/O, deterministic, easy to test.
+
+Input:
+  - task: Task (with dagState)
+  - workflow: WorkflowDAG definition
+  - event: { type: "hop_completed" | "hop_rejected" | "hop_blocked" | "init", hopId: string, ... }
+
+Output:
+  - hopUpdates: Record<string, Partial<HopState>>  // State changes to apply
+  - readyHops: string[]                              // Hops newly eligible for dispatch
+  - taskStatus?: TaskStatus                          // If DAG complete: "review"/"done"
+  - rejectionTargets?: string[]                      // Hops to reset on rejection
+```
+
+**Evaluation algorithm:**
+
+```
+function evaluateDAG(task, workflow, event):
+
+  1. Apply event to current hop state:
+     - "hop_completed": mark hop as complete, record outcome
+     - "hop_rejected": mark hop as rejected, increment rejectionCount
+     - "hop_blocked": mark hop as blocked
+     - "init": initialize all hops to "pending"
+
+  2. Evaluate conditional hops:
+     For each hop with `when` expression and status "pending":
+       If all predecessors are complete/skipped AND condition evaluates false:
+         Mark hop as "skipped"
+
+  3. Propagate readiness:
+     For each hop with status "pending":
+       If ALL predecessors are in {complete, skipped}:
+         Mark hop as "ready"
+
+  4. Handle rejection:
+     If event is "hop_rejected":
+       Determine rejection targets (based on rejectTo or rejectionStrategy)
+       Reset target hops to "pending" (or "ready" if they have no pending predecessors)
+       Reset all hops downstream of targets to "pending"
+
+  5. Check DAG completion:
+     If ALL terminal hops (no dependents) are in {complete, skipped}:
+       DAG is complete -> return taskStatus: "review" (or "done" if no review needed)
+
+  6. Return:
+     - Updated hop states
+     - List of newly "ready" hops (for scheduler to dispatch)
+     - Optional task status change
+```
+
+**Key properties:**
+- **Pure function**: No I/O, no side effects -- takes state and event, returns new state
+- **Idempotent**: Same input always produces same output
+- **Deterministic**: No LLM calls (maintains control plane guarantee)
+- **Testable**: Easy to unit test with fixture DAGs
+
+### 2.4 Scheduler Integration
+
+The scheduler poll cycle gains a new step: evaluating DAG hops for dispatch.
+
+```
+Modified Scheduler Poll Cycle:
+
+  1. List all tasks
+  2. [existing] Check expired leases, stale heartbeats, SLA violations
+  3. [existing] Check gate timeouts --> EXTEND to check hop timeouts
+  4. [NEW] Evaluate DAG tasks:
+     For each task with dagState where activeHop is NOT dispatched:
+       Scan dagState.hops for hops in "ready" status
+       For each ready hop:
+         If hop.trigger === "auto":
+           Build assign action with routing from hop definition
+         Else (pause):
+           Skip (manual trigger required)
+  5. [existing] Build dispatch actions for non-DAG ready tasks
+  6. [existing] Execute actions (assign, expire_lease, etc.)
+```
+
+**Critical insight**: DAG tasks do NOT use the regular `ready` task status for hop dispatch. A DAG task stays in `in-progress` status throughout its DAG execution. Individual hops go through ready -> dispatched -> complete within the task's `dagState`. The scheduler dispatches hops by reading `dagState.hops`, not by looking at task status.
+
+**Task status lifecycle for DAG tasks:**
+```
+backlog -> ready -> in-progress (DAG starts, stays here during all hops)
+                      |
+                      +-- hop1: ready -> dispatched -> complete
+                      +-- hop2: ready -> dispatched -> complete
+                      +-- hop3: ready -> dispatched -> complete
+                      |
+                   -> review (all terminal hops complete)
+                   -> done
+```
+
+**Why keep the task in-progress during DAG execution:**
+- The task is actively being worked on (by multiple agents across hops)
+- Lease management applies to the currently active hop, not the task overall
+- SLA tracking starts at task `in-progress` and includes total DAG execution time
+- The task only leaves `in-progress` when the entire DAG completes
+
+### 2.5 Hop Dispatch Flow
+
+When the scheduler identifies a ready hop:
+
+```
+1. Scheduler finds task with dagState.hops["test"].status === "ready"
+
+2. Scheduler builds assign action:
+   {
+     type: "assign",
+     taskId: task.id,
+     agent: resolve(hop.role),  // From org chart
+     reason: "DAG hop 'test' ready for dispatch",
+   }
+
+3. executeAssignAction():
+   a. Update dagState.hops["test"].status = "dispatched"
+   b. Update dagState.hops["test"].dispatchedAt = now
+   c. Update dagState.activeHop = "test"
+   d. Update task.routing.role = hop.role
+   e. Build TaskContext with hopContext (replaces gateContext)
+   f. acquireLease() for this hop
+   g. executor.spawnSession(context)
+
+4. Agent works, sends completion.report
+
+5. ProtocolRouter.handleCompletionReport():
+   a. Detect task has dagState (new check)
+   b. Map completion outcome to hop outcome
+   c. Call evaluateDAG(task, workflow, { type: "hop_completed", hopId: activeHop })
+   d. Apply returned hop state updates
+   e. If readyHops returned: update dagState, clear activeHop, release lease
+   f. If taskStatus returned: transition task to review/done
+   g. If no ready hops and DAG not complete: clear activeHop, wait for next poll
+```
+
+### 2.6 Completion Report Handling (Modified)
+
+The `handleCompletionReport` in `ProtocolRouter` needs the most significant change:
+
+```typescript
+// In protocol/router.ts handleCompletionReport():
+
+// After existing authorization and run result handling:
+
+if (task.frontmatter.dagState) {
+  // DAG task: advance the DAG instead of linear gate progression
+  const workflow = await loadWorkflowDAG(store, task);
+  const activeHop = task.frontmatter.dagState.activeHop;
+
+  if (!activeHop) {
+    // Error: completion report with no active hop
+    return;
   }
-  this.index = fresh;
-}
 
-// New diagnostic getter:
-get capacity(): number {
-  return this.index.getMaxElements();
+  const hopOutcome = mapCompletionToHopOutcome(envelope.payload.outcome);
+  const result = evaluateDAG(task, workflow, {
+    type: hopOutcome === "complete" ? "hop_completed"
+        : hopOutcome === "needs_review" ? "hop_rejected"
+        : "hop_blocked",
+    hopId: activeHop,
+    summary: envelope.payload.notes,
+    blockers: envelope.payload.blockers,
+  });
+
+  // Apply hop state updates
+  applyDAGUpdates(task, result);
+
+  // Release lease for completed hop
+  task.frontmatter.lease = undefined;
+  task.frontmatter.dagState.activeHop = undefined;
+
+  // If DAG complete, transition task
+  if (result.taskStatus) {
+    await store.transition(task.frontmatter.id, result.taskStatus, {
+      reason: "dag_complete",
+    });
+  }
+
+  // Ready hops will be picked up by next scheduler poll
+  await store.save(task);
+}
+else if (task.frontmatter.gate) {
+  // Legacy linear gate task: existing behavior
+  // ... existing gate evaluation code ...
+}
+else {
+  // Non-workflow task: existing behavior
+  await applyCompletionOutcome(task, ...);
 }
 ```
 
-No new files. No new dependencies. Pure bug fix in existing class.
+### 2.7 Backward Compatibility Strategy
+
+**Coexistence period**: v1.2 supports BOTH linear gate tasks and DAG tasks simultaneously.
+
+| Aspect | Linear Gate Tasks | DAG Tasks |
+|--------|------------------|-----------|
+| Schema | `gate` + `gateHistory` fields | `dagState` field |
+| Workflow source | `project.yaml` `workflow:` (single) | `project.yaml` `workflows:` (named map) |
+| Dispatch routing | `routing.workflow` + `gate.current` | `dagState.activeHop` + hop definition |
+| Evaluator | `gate-evaluator.ts` | `dag-evaluator.ts` |
+| Timeout checking | `escalation.ts` (gate timeouts) | Extended to check hop timeouts |
+| Completion handling | `applyCompletionOutcome()` | `evaluateDAG()` + `applyDAGUpdates()` |
+
+**Detection**: The presence of `dagState` on a task frontmatter indicates it is a DAG task. The absence means it uses the legacy gate system (or no workflow at all).
+
+**Migration path**: Existing linear workflows can be automatically converted to DAGs:
+```yaml
+# Linear gates:                    # Equivalent DAG:
+workflow:                          workflows:
+  name: standard                     standard:
+  gates:                               name: standard
+    - id: implement                    version: 2
+      role: backend                    hops:
+    - id: review                         - id: implement
+      role: architect                      role: backend
+      canReject: true                    - id: review
+                                           role: architect
+                                           dependsOn: [implement]
+                                           canReject: true
+```
+
+Each gate becomes a hop that `dependsOn` the previous gate. The ordering is preserved.
+
+### 2.8 Artifact Handoff Between Hops
+
+Hops share artifacts via the task's work directory (already exists: `tasks/<status>/<taskId>/outputs/`).
+
+```
+tasks/in-progress/TASK-2026-03-02-001/
+  TASK-2026-03-02-001.md          # Task file with DAG state
+  outputs/
+    implement/                     # Hop-scoped artifact directory
+      summary.md
+      code-changes.patch
+    test/
+      test-results.json
+    review/
+      review-notes.md
+```
+
+**Convention**: Each hop writes to `outputs/<hopId>/`. The hop context injected at dispatch time tells the agent where to find predecessor outputs:
+
+```typescript
+interface HopContext {
+  hop: string;                    // Current hop ID
+  role: string;                   // Expected role
+  expectations: string[];         // What to do
+  outcomes: Record<string, string>; // What outcomes mean
+  predecessorOutputs: string[];   // Paths to predecessor hop outputs
+  tips?: string[];
+}
+```
+
+The `ITaskStore.writeTaskOutput` method already supports writing to `outputs/`. A minor extension scopes it to `outputs/<hopId>/`.
 
 ---
 
-## Feature 2: Installer / Updater
+## 3. New Components
 
-### What Exists
+### 3.1 Files to Create
 
-The `src/packaging/` module already has substantial infrastructure:
+| File | Purpose | Complexity | Dependencies |
+|------|---------|-----------|--------------|
+| `src/schemas/workflow-dag.ts` | `Hop`, `WorkflowDAG` Zod schemas | Low | `zod` only |
+| `src/schemas/dag-state.ts` | `HopState`, `DAGState` Zod schemas | Low | `zod` only |
+| `src/dispatch/dag-evaluator.ts` | Pure DAG evaluation function | Medium | Schemas only |
+| `src/dispatch/dag-validator.ts` | DAG validation (cycles, missing refs) | Low | Schemas only |
+| `src/dispatch/hop-context-builder.ts` | Build agent context for hops | Low | Schemas, gate-conditional.ts |
+| `src/dispatch/dag-dispatcher.ts` | Scheduler integration for DAG dispatch | Medium | dag-evaluator, store, executor |
+| `src/dispatch/dag-completion-handler.ts` | Handle completion reports for DAG tasks | Medium | dag-evaluator, store, protocol |
+| `src/dispatch/dag-timeout-checker.ts` | Hop timeout detection and escalation | Low | dag-state, escalation pattern |
 
-| File | Purpose | Status |
-|------|---------|--------|
-| `installer.ts` | npm ci/install wrapper with backup/rollback | Exists -- wraps npm commands, not curl-pipe-sh |
-| `updater.ts` | Self-update engine (download, extract, swap, rollback) | Exists -- `extractTarball()` is a placeholder (line 338-345) |
-| `channels.ts` | Release channels (stable/beta/canary), version manifests via GitHub API | Exists -- fully functional |
-| `wizard.ts` | Installation wizard (directory scaffold, org chart generation) | Exists -- creates dirs + org chart |
-| `openclaw-cli.ts` | OpenClaw config access wrapper (safe config via `openclaw config` CLI) | Exists -- register plugin, manage memory slot |
-| `ejector.ts` | Uninstall logic | Exists |
-| `integration.ts` | OpenClaw integration (deploy plugin, verify) | Exists |
-| `migrations.ts` | Data format migrations | Exists |
+### 3.2 Files to Modify
 
-### What Gets Installed Where
+| File | Change | Scope |
+|------|--------|-------|
+| `src/schemas/task.ts` | Add `dagState?: DAGState` to TaskFrontmatter | Small |
+| `src/schemas/project.ts` | Add `workflows?: Record<string, WorkflowDAG>` to ProjectManifest | Small |
+| `src/dispatch/scheduler.ts` | Add DAG hop dispatch step to poll cycle | Medium |
+| `src/protocol/router.ts` | Branch `handleCompletionReport` for DAG tasks | Medium |
+| `src/dispatch/escalation.ts` | Extend timeout checking for hops | Small |
+| `src/dispatch/assign-executor.ts` | Inject hopContext (alongside existing gateContext) | Small |
+| `src/protocol/completion-utils.ts` | Add DAG-aware completion transitions | Small |
 
-The installer handles two distinct layouts:
+### 3.3 Files NOT Modified (Preserved)
 
-**Plugin installation (into OpenClaw workspace):**
-```
-~/.openclaw/workspace/package/node_modules/aof/
-  dist/           (transpiled JS + declarations)
-  prompts/        (agent prompt templates)
-  skills/         (agent skill definitions)
-  package.json    (version, deps, bin entries)
-  openclaw.plugin.json
-```
-
-**Runtime data directory (owned by AOF):**
-```
-~/.openclaw/aof/
-  events/         (JSONL event logs, daily rotation)
-  tasks/          (task files by status: backlog/, ready/, in-progress/, ...)
-  state/          (run artifacts, heartbeats)
-  memory/         (memory tier files)
-  memory.db       (SQLite: chunks, vec_chunks, fts_chunks)
-  memory-hnsw.dat (HNSW binary index)
-  .aof/channel.json (version, channel, update policy)
-```
-
-**CLI binaries (package.json bin entries):**
-```
-dist/cli/index.js   -> bin: "aof"
-dist/daemon/index.js -> bin: "aof-daemon"
-```
-
-**Configuration registration (in OpenClaw config):**
-```
-~/.openclaw/openclaw.json:
-  plugins.entries.aof = { enabled: true }
-  plugins.allow = [..., "aof"]
-  plugins.slots.memory = "aof"
-  plugins.entries.aof.config.modules.memory.enabled = true
-```
-
-### Detecting Existing Installs
-
-`openclaw-cli.ts` already provides all necessary detection functions:
-
-| Function | What It Checks |
-|----------|---------------|
-| `detectOpenClaw(homeDir)` | `~/.openclaw/openclaw.json` exists, `openclaw --version` works |
-| `isAofPluginRegistered()` | `plugins.entries.aof` exists in openclaw.json |
-| `isAofInAllowList()` | `plugins.allow` array contains `"aof"` |
-| `isAofMemoryEnabled()` | `plugins.entries.aof.config.modules.memory.enabled === true` |
-| `isAofMemorySlot()` | `plugins.slots.memory === "aof"` |
-| `detectMemoryPlugin()` | Finds current memory slot holder and competing plugins |
-
-Version tracking lives in `~/.openclaw/aof/.aof/channel.json` (managed by `channels.ts`).
-
-### What Needs Building
-
-| File | Type | Purpose |
-|------|------|---------|
-| `scripts/install.sh` | NEW | curl-pipe-sh entry point: detect OS/arch, Node >= 22, download release tarball, extract, run `node dist/cli/index.js install` |
-| `src/cli/commands/install.ts` | NEW or MODIFY | CLI command wiring wizard + openclaw-cli registration + integration verify |
-| `src/cli/commands/update.ts` | NEW or MODIFY | CLI command wiring channels check + updater swap |
-| `src/packaging/updater.ts` | MODIFY | Implement real `extractTarball()` at line 338-345 (currently placeholder) |
-
-### Installer Flow
-
-```
-1. Shell script (install.sh):
-   - Check: node >= 22, npm, git
-   - Check: ~/.openclaw exists (OpenClaw installed)
-   - Determine: OS (darwin/linux), arch (arm64/x64)
-   - Download: release tarball from GitHub releases (via channels.ts URL pattern)
-   - Extract: to ~/.openclaw/workspace/package/node_modules/aof/
-   - Run: node dist/cli/index.js install
-
-2. aof install command (TypeScript):
-   - detectOpenClaw() -> fail if not found
-   - isAofPluginRegistered() -> if yes, offer upgrade
-   - wizard.runWizard() -> scaffold runtime dirs if clean install
-   - registerAofPlugin() + addAofToAllowList()
-   - configureAofAsMemoryPlugin()
-   - npm install in workspace (for native deps: better-sqlite3, hnswlib-node)
-   - Health check: require plugin, verify tools register
-
-3. aof update command:
-   - checkForUpdates(aofRoot) -> compare channel.json version vs latest
-   - selfUpdate() -> download, extract, swap, rollback on failure
-   - Verify: health check after swap
-```
-
-### Three Install Cases
-
-| Case | Detection | Action |
-|------|-----------|--------|
-| Clean install | No `~/.openclaw/aof/`, no plugin entry | Full wizard + register + scaffold |
-| Upgrade | Existing `~/.openclaw/aof/` + plugin registered, older version | Backup -> swap dist/ -> preserve data dirs -> verify |
-| Reinstall/repair | Same version or broken state | Re-register plugin, re-scaffold missing dirs, skip data migration |
+| File | Reason |
+|------|--------|
+| `src/dispatch/gate-evaluator.ts` | Preserved for backward compat with linear gate tasks |
+| `src/dispatch/gate-context-builder.ts` | Preserved for backward compat |
+| `src/dispatch/gate-conditional.ts` | Reused by DAG evaluator (shared `when` logic) |
+| `src/dispatch/action-executor.ts` | Action types unchanged, just more assign actions |
+| `src/dispatch/task-dispatcher.ts` | Handles non-DAG ready tasks (unchanged) |
+| `src/store/task-store.ts` | Task store is schema-agnostic (just serializes frontmatter) |
+| `src/store/interfaces.ts` | ITaskStore contract unchanged |
+| `src/dispatch/dep-cascader.ts` | Inter-task dependencies unchanged (DAG is intra-task) |
 
 ---
 
-## Feature 3: CI Pipeline
+## 4. Data Flow
 
-### What Exists
+### 4.1 DAG Task Lifecycle
 
-| Artifact | Location | Status |
-|----------|----------|--------|
-| Unit test workflow | `.github/workflows/e2e-tests.yml` | Disabled (workflow_dispatch only) |
-| Docs deployment | `.github/workflows/docs.yml` | Active -- deploys Astro website to GitHub Pages |
-| Test config | `vitest.config.ts` | Active -- includes `src/**/__tests__/**` and `tests/**` |
-| E2E test config | `tests/vitest.e2e.config.ts` | Exists -- separate config for e2e |
-| Release config | `.release-it.json` | Active -- conventional changelog, GitHub releases, npm publish disabled |
-| Test lock | `scripts/test-lock.sh` | Active -- prevents parallel test runs |
-| Commit lint | `commitlint` + `simple-git-hooks` | Active -- conventional commits enforced on commit-msg |
-| TypeScript config | `tsconfig.json` | Active -- strict, ES2024, NodeNext, `tsc --noEmit` for typecheck |
+```
+1. TASK CREATION
+   Agent or human creates task with workflow reference:
+   routing: { workflow: "standard-sdlc" }
 
-### Build Pipeline: tsc (not tsdown)
+   Task store (or CLI) loads workflow template, initializes dagState:
+   dagState: {
+     workflow: "standard-sdlc",
+     hops: {
+       implement: { id: "implement", status: "ready" },
+       test:      { id: "test",      status: "pending" },
+       review:    { id: "review",    status: "pending" },
+       security:  { id: "security",  status: "pending" },
+       deploy:    { id: "deploy",    status: "pending" },
+     },
+     startedAt: "2026-03-02T10:00:00Z"
+   }
+   Task status: ready
 
-Despite the project description mentioning tsdown, **the actual build uses `tsc` directly**. The `package.json` build script is:
-```json
-"build": "tsc && node scripts/copy-extension-entry.js"
+2. FIRST HOP DISPATCH
+   Scheduler poll sees task in "ready" with dagState:
+   - Transitions task to "in-progress"
+   - Finds root hop(s) in "ready" status: ["implement"]
+   - Dispatches "implement" hop
+   dagState.hops.implement.status = "dispatched"
+   dagState.activeHop = "implement"
+
+3. HOP COMPLETION
+   Agent sends completion.report
+   ProtocolRouter detects dagState, calls evaluateDAG:
+   - Marks "implement" as "complete"
+   - Evaluates conditionals (security: when expression)
+   - Propagates readiness: test, review become "ready"
+     (security becomes "ready" or "skipped" based on condition)
+   - Clears activeHop
+
+   dagState.hops:
+     implement: { status: "complete", completedAt: "..." }
+     test:      { status: "ready", readyAt: "..." }
+     review:    { status: "ready", readyAt: "..." }
+     security:  { status: "skipped" | "ready" }
+     deploy:    { status: "pending" }
+
+4. PARALLEL HOP DISPATCH
+   Next scheduler poll sees ready hops: [test, review, (security)]
+
+   CRITICAL CONSTRAINT: OpenClaw cannot run nested sessions.
+   Only ONE hop can be dispatched at a time per task.
+
+   Scheduler picks highest-priority ready hop (or earliest readyAt):
+   - Dispatches "test" first
+   - test completes, then dispatches "review"
+   - review completes, then dispatches "security" (if not skipped)
+
+   Note: "parallel" in the DAG means no ordering dependency, not
+   simultaneous execution. The scheduler serializes actual dispatch.
+
+5. JOIN CONVERGENCE
+   "deploy" depends on [test, review, security]:
+   - After all three are complete/skipped, deploy becomes "ready"
+   - Scheduler dispatches "deploy"
+
+6. DAG COMPLETION
+   All terminal hops complete:
+   - evaluateDAG returns taskStatus: "review"
+   - Task transitions in-progress -> review -> done
+
+7. REJECTION LOOP
+   If "review" hop rejects (outcome: "needs_review"):
+   - evaluateDAG determines rejection target: "implement" (origin strategy)
+   - Resets "implement" to "ready"
+   - Resets all downstream hops (test, review, security, deploy) to "pending"
+   - rejectionCount incremented
+   - Scheduler dispatches "implement" again on next poll
 ```
 
-There is no tsdown config anywhere in the repo. The tsconfig targets ES2024/NodeNext and outputs to `dist/` with declarations + source maps. This is correct for a plugin that runs in the gateway's Node process -- no bundling needed.
+### 4.2 Parallel Execution Model
 
-### What Needs Building
+OpenClaw's no-nested-sessions constraint means "parallel" DAG branches execute sequentially. The DAG captures logical parallelism (no ordering dependency), but the scheduler serializes physical execution.
 
-| File | Type | Purpose |
-|------|------|---------|
-| `.github/workflows/ci.yml` | NEW | Main CI: lint + typecheck + test + build on push/PR to main |
-| `.github/workflows/release.yml` | NEW | Release: build + test + create tarball artifact on tag push |
+**Dispatch priority for ready hops (within one task):**
+1. Hops with earlier `readyAt` timestamp (FIFO)
+2. Hops with canReject=true (reviews before implementation, to fail fast)
+3. Hops with timeout (time-sensitive work first)
 
-### CI Workflow Design
+**Multiple tasks with ready hops**: The existing concurrency system handles this. Each hop dispatch is one `assign` action competing for the global concurrency pool. DAG tasks get no special priority over non-DAG tasks.
+
+### 4.3 Event Flow
+
+```
+Protocol Messages:
+
+completion.report (agent -> router)
+  |
+  +-- Router detects dagState
+  |
+  +-- Calls dag-completion-handler:
+  |     - evaluateDAG(task, workflow, event)
+  |     - Apply hop state updates
+  |     - Write task with updated dagState
+  |
+  +-- Logs: dag.hop.completed, dag.hop.ready, dag.completed
+  |
+  +-- Next scheduler poll picks up ready hops
+
+Events emitted:
+  dag.started       - Task enters DAG execution
+  dag.hop.ready     - Hop becomes eligible for dispatch
+  dag.hop.dispatched - Hop dispatched to agent
+  dag.hop.completed  - Hop completed successfully
+  dag.hop.rejected   - Hop rejected work
+  dag.hop.blocked    - Hop hit blocker
+  dag.hop.skipped    - Conditional hop skipped
+  dag.hop.timeout    - Hop exceeded timeout
+  dag.completed      - All terminal hops done
+  dag.rejection_loop - Rejection cycle detected
+```
+
+---
+
+## 5. Critical Design Decisions
+
+### D1: DAG State on Task Frontmatter (Not Separate File)
+
+**Decision**: Store `dagState` in the task's YAML frontmatter.
+
+**Rationale**:
+- Atomic consistency: task status and DAG state update together
+- Human-readable: `cat task.md` tells the full story
+- Existing pattern: `gate`/`gateHistory` already live in frontmatter
+- No new file management: ITaskStore unchanged
+- Crash recovery: state survives restarts (persisted on every write)
+
+**Trade-off**: Frontmatter grows larger. A 10-hop workflow adds ~3KB. Acceptable for filesystem store. If this becomes a problem at scale, consider moving `hopHistory` (the equivalent of `gateHistory`) to a separate `outputs/dag-history.json` file.
+
+### D2: One Active Hop Per Task (Serial Dispatch)
+
+**Decision**: Only one hop executes at a time per task, even when multiple hops are ready.
+
+**Rationale**:
+- OpenClaw constraint: no nested sessions
+- Lease model: one lease per task, one agent per lease
+- Simplicity: no coordination between concurrent hops on same task
+- Correctness: no race conditions on dagState updates
+
+**Trade-off**: Logical parallelism is not physical parallelism. A DAG with `test` and `review` running in parallel will actually run them sequentially. This is acceptable because:
+- Each hop is a separate agent session (seconds to minutes, not hours)
+- The scheduler dispatches the next hop within one poll cycle (~30s)
+- True parallelism would require splitting into separate tasks (out of scope per PROJECT.md)
+
+### D3: Workflow Templates in Project Config + Ad-Hoc on Task
+
+**Decision**: Support both pre-defined templates (project.yaml `workflows:`) and ad-hoc agent-composed DAGs (dagState on task at creation time).
+
+**Template path**: Task has `routing.workflow: "standard-sdlc"` -> scheduler loads template from `project.yaml`, initializes `dagState`.
+
+**Ad-hoc path**: Agent creates task with inline `dagState` already populated (the DAG is embedded in the task). No template reference needed.
+
+**Rationale**: Templates handle the 80% case (recurring workflows). Ad-hoc handles dynamic pipelines where agents compose workflows based on task requirements.
+
+### D4: Rejection Resets Downstream Hops
+
+**Decision**: When a hop rejects, reset the rejection target and ALL downstream hops to pending.
+
+**Rationale**: If `review` rejects to `implement`, then `test` (which depends on `implement`) must re-run too -- the implementation changed. Keeping downstream hops as "complete" with stale results is incorrect.
+
+**Circuit breaker**: `dagState.rejectionCount` tracks rejection cycles. After N rejections (configurable, default 3), the task transitions to `blocked` with a circuit breaker alert. Prevents infinite rejection loops.
+
+### D5: Skipped Hops Propagate as "Complete" for Dependency Resolution
+
+**Decision**: When a conditional hop evaluates to "skipped", downstream hops treat it as satisfied (equivalent to "complete" for dependency checking).
+
+**Rationale**: If `security` hop is skipped because the task has no security tags, `deploy` (which depends on `[test, review, security]`) should not be blocked waiting for a hop that will never run.
+
+### D6: Hop History Replaces Gate History
+
+**Decision**: `dagState.hops` serves as both current state AND history. Each hop's `HopState` records timestamps and outcomes. A separate `hopHistory` array is NOT needed initially.
+
+**Rationale**: Unlike linear gates where the same gate can be visited multiple times (rejection loops), a DAG hop is visited once per cycle. On rejection, the hop state is reset. The event log captures the full history (each `dag.hop.*` event is logged to JSONL). If audit trail on the task file is needed later, add `hopHistory` array (append-only, like `gateHistory`).
+
+**Revisit if**: Auditors need full hop traversal history on the task file itself (not just in event logs).
+
+---
+
+## 6. Build Order
+
+The build order respects dependency chains and ensures each phase is independently testable.
+
+### Phase 1: Schema Foundation
+```
+Create:
+  src/schemas/workflow-dag.ts     - Hop + WorkflowDAG schemas
+  src/schemas/dag-state.ts        - HopState + DAGState schemas
+
+Modify:
+  src/schemas/task.ts             - Add dagState?: DAGState field
+  src/schemas/project.ts          - Add workflows?: Record<string, WorkflowDAG>
+
+Test:
+  Schema validation, serialization round-trip, backward compat with existing tasks
+```
+
+**Why first**: Everything else depends on the data shapes. Schema changes are low-risk (additive, optional fields).
+
+### Phase 2: DAG Evaluator (Pure Logic)
+```
+Create:
+  src/dispatch/dag-evaluator.ts   - Core evaluation algorithm
+  src/dispatch/dag-validator.ts   - DAG validation (cycles, missing refs)
+
+Test:
+  Extensive unit tests with fixture DAGs:
+  - Linear DAG (equivalent to gate sequence)
+  - Diamond DAG (fan-out + fan-in)
+  - Conditional hops (skip, evaluate)
+  - Rejection loops (origin, predecessor)
+  - Circuit breaker (max rejections)
+  - Edge cases (single hop, all skipped, empty DAG)
+```
+
+**Why second**: Pure function, no I/O, no integration points. Can be tested in isolation. This is the algorithmic core.
+
+### Phase 3: Hop Context & Dispatch Integration
+```
+Create:
+  src/dispatch/hop-context-builder.ts  - Build HopContext for agents
+  src/dispatch/dag-dispatcher.ts       - Scheduler integration for DAG hop dispatch
+
+Modify:
+  src/dispatch/scheduler.ts            - Add DAG hop evaluation step
+  src/dispatch/assign-executor.ts      - Inject hopContext alongside gateContext
+
+Test:
+  Integration tests: scheduler poll with DAG tasks, hop dispatch flow
+```
+
+**Why third**: Depends on schemas (Phase 1) and evaluator (Phase 2). This connects the DAG to the scheduler.
+
+### Phase 4: Completion Handling & Protocol Integration
+```
+Create:
+  src/dispatch/dag-completion-handler.ts - DAG-aware completion processing
+
+Modify:
+  src/protocol/router.ts                - Branch for DAG task completions
+  src/protocol/completion-utils.ts       - DAG-aware transition mapping
+
+Test:
+  Integration tests: completion report -> DAG advancement -> ready hops
+  End-to-end: task creation -> dispatch -> complete -> next hop -> DAG done
+```
+
+**Why fourth**: Depends on all previous phases. This closes the loop: dispatch -> complete -> advance -> dispatch.
+
+### Phase 5: Timeout, Escalation & Rejection
+```
+Create:
+  src/dispatch/dag-timeout-checker.ts   - Hop timeout detection
+
+Modify:
+  src/dispatch/escalation.ts            - Extend for hop timeouts
+
+Test:
+  Timeout detection, escalation flow, rejection with downstream reset
+```
+
+**Why fifth**: Edge cases built on the working happy path from phases 1-4.
+
+### Phase 6: Workflow Templates & Ad-Hoc Composition
+```
+Modify:
+  CLI commands for workflow management
+  Task creation to accept inline DAG definitions
+  Template loading and validation
+
+Test:
+  Template resolution, ad-hoc DAG creation, validation errors
+```
+
+**Why last**: User-facing features built on the complete internal machinery.
+
+---
+
+## 7. Anti-Patterns to Avoid
+
+### Anti-Pattern 1: Storing DAG Definition on Every Task
+**What**: Copying the full `WorkflowDAG` definition into each task's frontmatter.
+**Why bad**: Duplication, inconsistency when template changes, bloated frontmatter.
+**Instead**: Store `dagState.workflow` as a reference name. Load the definition from `project.yaml` when needed. The `dagState.hops` only stores runtime state, not the definition.
+
+### Anti-Pattern 2: Using Task Status for Hop Lifecycle
+**What**: Transitioning the task through ready -> in-progress -> review for each hop.
+**Why bad**: Task status represents the TASK lifecycle, not the HOP lifecycle. Moving task to "review" after each hop breaks the scheduler's assumptions.
+**Instead**: Task stays in-progress during all hops. Hop state lives in `dagState.hops[hopId].status`.
+
+### Anti-Pattern 3: Dispatching Multiple Hops Simultaneously
+**What**: Spawning multiple agent sessions for parallel hops on the same task.
+**Why bad**: OpenClaw has no nested sessions. Multiple sessions would conflict on the same task file. Lease model is one-agent-per-task.
+**Instead**: Serial dispatch of one hop at a time. The DAG captures logical parallelism; the scheduler serializes physical execution.
+
+### Anti-Pattern 4: Modifying Gate Evaluator for DAG Support
+**What**: Making `gate-evaluator.ts` handle both linear gates and DAGs.
+**Why bad**: Different evaluation algorithms. Linear gate evaluation is sequential; DAG evaluation is graph-based. Mixing them creates complexity and fragility.
+**Instead**: Separate `dag-evaluator.ts`. Detection happens at the router/scheduler level (check for `dagState` vs `gate`).
+
+### Anti-Pattern 5: Tight Coupling Between Evaluator and Store
+**What**: Having the DAG evaluator directly read/write the task store.
+**Why bad**: Breaks testability. The evaluator should be a pure function.
+**Instead**: Evaluator takes task + workflow + event, returns state updates. Caller applies updates to the store. Same pattern as existing `evaluateGateTransition()`.
+
+---
+
+## 8. Migration and Compatibility
+
+### 8.1 Existing Task Compatibility
+
+All existing fields remain optional:
+- Tasks with `gate` field: use linear gate evaluator (unchanged)
+- Tasks with `dagState` field: use DAG evaluator (new)
+- Tasks with neither: no workflow (unchanged)
+
+A task MUST NOT have both `gate` and `dagState`. Schema validation enforces mutual exclusivity.
+
+### 8.2 Project Configuration Migration
 
 ```yaml
-# .github/workflows/ci.yml
-name: CI
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+# v1.1 (current):
+workflow:
+  name: standard
+  gates:
+    - id: implement
+      role: backend
+    - id: review
+      role: architect
+      canReject: true
 
-jobs:
-  typecheck:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
-      - run: npm ci
-      - run: npm run typecheck  # tsc --noEmit
+# v1.2 (new, backward compatible):
+workflow:                          # Still supported for legacy tasks
+  name: standard
+  gates: [...]
 
-  test:
-    runs-on: ubuntu-latest
-    needs: typecheck
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
-      - run: npm ci
-      - run: npm run build
-      - run: npm test  # vitest run (via test-lock.sh)
-
-  build:
-    runs-on: ubuntu-latest
-    needs: [typecheck, test]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
-      - run: npm ci
-      - run: npm run build
-      - uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: dist/
+workflows:                         # New: named DAG workflows
+  standard-v2:
+    name: standard-v2
+    version: 2
+    hops:
+      - id: implement
+        role: backend
+      - id: review
+        role: architect
+        dependsOn: [implement]
+        canReject: true
 ```
 
-### Release Workflow Design
+Both `workflow` (singular, linear) and `workflows` (plural, DAG map) coexist in `project.yaml`.
 
-```yaml
-# .github/workflows/release.yml
-name: Release
-on:
-  push:
-    tags: ['v*']
+### 8.3 Gate-to-DAG Conversion Utility
 
-jobs:
-  release:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
-      - run: npm ci
-      - run: npm run build
-      - run: npm test
-      - name: Create tarball
-        run: |
-          tar czf aof-${GITHUB_REF_NAME}.tar.gz \
-            dist/ prompts/ skills/ openclaw.plugin.json package.json README.md
-      - name: Upload to Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: aof-*.tar.gz
-```
-
-Note: `release-it` already creates the GitHub release and tag via `npm run release`. The workflow adds the tarball artifact to that release. The `.release-it.json` hooks run `npm run typecheck` and `npm test` in `before:init`, so the release script already validates before tagging.
-
-### Integration Points
-
-| File | Change Type | What |
-|------|-------------|------|
-| `.github/workflows/ci.yml` | NEW | Main CI workflow |
-| `.github/workflows/release.yml` | NEW | Release artifact creation |
-| `.github/workflows/e2e-tests.yml` | MODIFY | Consider enabling on PR (with mock gateway) or keeping as workflow_dispatch |
-| `package.json` | VERIFY | Ensure `build`, `test`, `typecheck` scripts work in CI (no interactive prompts, no local deps) |
-
-### Pre-existing Test Failures
-
-The project reports 99.5% pass rate on 2400+ tests (~12 failing). The CI must either:
-1. **Fix the ~12 failures** before enabling CI (preferred -- clean green baseline)
-2. **Mark known failures** with `.skip` + tracking issue references
-3. CI should not allow NEW failures. Use vitest's `--bail` or failure threshold to catch regressions.
+A CLI command (`aof workflow convert`) converts linear gate workflows to equivalent DAGs:
+- Each gate becomes a hop
+- Each hop (except the first) gets `dependsOn: [previousHop]`
+- `canReject`, `when`, `timeout`, `escalateTo` carry over directly
+- `rejectionStrategy: "origin"` maps to `rejectTo` on the first hop
 
 ---
 
-## Feature 4: Projects Verification
+## 9. Scalability Considerations
 
-### What Exists
+| Concern | At 10 tasks | At 100 tasks | At 1000 tasks |
+|---------|------------|-------------|---------------|
+| DAG evaluation per poll | ~1ms | ~10ms | ~100ms (pure function, fast) |
+| Frontmatter size | Negligible | Negligible | ~3KB per task (10-hop DAGs) |
+| Ready hop scanning | Trivial | Linear scan of dagState | Consider index if needed |
+| Event log volume | +5 events/task | +50 events | +500 events (rotation handles this) |
 
-The projects subsystem is already fully built:
-
-| Component | File | Purpose |
-|-----------|------|---------|
-| Schema | `src/schemas/project.ts` | `ProjectManifest` Zod schema: id, title, status, type, owner, routing, memory, sla, workflow |
-| Registry | `src/projects/registry.ts` | `discoverProjects()` -- scans `<vaultRoot>/Projects/*/project.yaml`, builds hierarchy |
-| Resolver | `src/projects/resolver.ts` | `resolveProject(id, vaultRoot)` -- maps project ID to `{ projectId, projectRoot, vaultRoot }` |
-| Create | `src/projects/create.ts` | `createProject(id, opts)` -- validate ID, scaffold dirs, write manifest |
-| Bootstrap | `src/projects/bootstrap.ts` | `bootstrapProject(root)` -- create tasks/, artifacts/, state/, views/, cold/ |
-| Manifest | `src/projects/manifest.ts` | `buildProjectManifest(id, opts)` + `writeProjectManifest(root, manifest)` |
-| Migration | `src/projects/migration.ts` | `migrateToProjects()` + `rollbackMigration()` -- legacy to project layout |
-| Lint | `src/projects/lint.ts` | Validate project manifests against schema + custom rules |
-
-### Where Multi-Project Routing is Implemented
-
-**AOFService** (`src/service/aof-service.ts`):
-```typescript
-// Line 22: vaultRoot in config enables multi-project mode
-vaultRoot?: string;
-
-// Lines 72-73: Per-project task stores maintained in memory
-private projectStores: Map<string, ITaskStore> = new Map();
-private projects: ProjectRecord[] = [];
-
-// Lines 104-106: Project store resolver wired into ProtocolRouter
-const projectStoreResolver = this.vaultRoot
-  ? (projectId: string) => this.projectStores.get(projectId)
-  : undefined;
-
-// Lines 131-136: Project initialization on service start
-if (this.vaultRoot) {
-  await this.initializeProjects();  // discovers projects, creates per-project stores
-} else {
-  await this.store.init();  // single-store mode
-}
-```
-
-**TaskContext** (`src/dispatch/executor.ts`) already carries project context:
-```typescript
-projectId?: string;     // Project ID from manifest
-projectRoot?: string;   // Absolute path to project root
-taskRelpath?: string;   // Task path relative to project root
-```
-
-### What Tools Need Exposure
-
-**Currently registered tools** (in `src/openclaw/adapter.ts`):
-- `aof_dispatch` -- NO projectId parameter
-- `aof_task_update`, `aof_status_report`, `aof_task_complete`, `aof_task_edit`, `aof_task_cancel`
-- `aof_task_dep_add`, `aof_task_dep_remove`, `aof_task_block`, `aof_task_unblock`
-
-**Currently registered MCP tools** (in `src/mcp/tools.ts`):
-- `aof_dispatch`, `aof_task_update`, `aof_task_complete`, `aof_status_report`, `aof_board`
-
-**Missing: project-scoped tools. Agents need:**
-
-| Tool | Purpose | Where to Add |
-|------|---------|-------------|
-| `aof_project_list` | List discovered projects with status/type | `openclaw/adapter.ts` + `mcp/tools.ts` |
-| `aof_project_info` | Get project manifest, task counts, memory config | `openclaw/adapter.ts` + `mcp/tools.ts` |
-| `aof_project_create` | Create new project (validate, scaffold, manifest) | `openclaw/adapter.ts` + `mcp/tools.ts` |
-| `projectId` param on `aof_dispatch` | Route task to project-specific store | MODIFY both tool registrations |
-| `projectId` param on `aof_status_report` | Filter status report to project scope | MODIFY both tool registrations |
-
-### Data Flow for Multi-Project Dispatch
-
-```
-Agent calls aof_dispatch(title, brief, projectId="my-project")
-  |
-  v
-openclaw/adapter.ts: resolve project store from AOFService.projectStores
-  |
-  v
-store.create() writes task to project-specific task directory
-  (<vaultRoot>/Projects/my-project/Tasks/Backlog/AOF-xxx.md)
-  |
-  v
-scheduler poll picks up task from project store (initializeProjects iterates all stores)
-  |
-  v
-task-dispatcher builds TaskContext with { projectId, projectRoot, taskRelpath }
-  |
-  v
-executor.spawnSession(context) passes project context to spawned agent
-  |
-  v
-spawned agent sees projectRoot in its working context, works in project scope
-```
-
-### Critical Verification Points
-
-1. **Does `initializeProjects()` create per-project `FilesystemTaskStore` instances?** Need to read the method body (in the portion of aof-service.ts beyond what was loaded). Each store must point to `<vaultRoot>/Projects/<id>/Tasks/`.
-
-2. **Does the scheduler poll ALL project stores?** The `triggerPoll` must iterate `projectStores.values()` and poll each.
-
-3. **Does `aof_dispatch` accept `projectId`?** Currently NO -- the tool parameter list in `openclaw/adapter.ts` lines 156-198 has no `projectId` field. This must be added.
-
-4. **Does the MCP dispatch accept `projectId`?** Currently NO -- `src/mcp/tools.ts` `dispatchInputSchema` has no `projectId` field.
-
-### Integration Points
-
-| File | Change Type | What |
-|------|-------------|------|
-| `src/openclaw/adapter.ts` | MODIFY | Add `projectId` param to `aof_dispatch`; register `aof_project_list`, `aof_project_info`, `aof_project_create` tools |
-| `src/mcp/tools.ts` | MODIFY | Add `projectId` to dispatch input schema; add project tools to MCP server |
-| `src/service/aof-service.ts` | VERIFY | Confirm `initializeProjects()` creates per-project stores correctly |
-| `src/dispatch/task-dispatcher.ts` | VERIFY | Confirm `projectId`/`projectRoot` flow from store through to executor context |
-| tests | NEW | E2E: create project -> dispatch task with projectId -> verify task lands in project dir -> verify scheduler picks it up |
-
----
-
-## Component Boundaries (Updated for v1.1)
-
-| Component | Responsibility | v1.1 Changes |
-|-----------|---------------|--------------|
-| `memory/store/hnsw-index.ts` | HNSW wrapper (insert, search, persist, rebuild) | **FIX:** capacity after load/rebuild |
-| `memory/store/vector-store.ts` | SQLite + HNSW dual storage for embeddings | None |
-| `memory/index.ts` | Memory module registration and wiring | **MINOR:** better error logging in rebuildHnswFromDb |
-| `packaging/installer.ts` | npm install wrapper | Possibly expand for tarball install |
-| `packaging/updater.ts` | Self-update download/swap/rollback | **FIX:** implement extractTarball |
-| `packaging/wizard.ts` | Installation scaffold (dirs + org chart) | None |
-| `packaging/openclaw-cli.ts` | Safe OpenClaw config access | None |
-| `packaging/channels.ts` | Release channel + version manifest | None (already functional) |
-| `service/aof-service.ts` | Scheduler + multi-project routing | **VERIFY:** initializeProjects works e2e |
-| `projects/registry.ts` | Project discovery from vaultRoot | **VERIFY:** end-to-end flow |
-| `projects/create.ts` | Project creation + scaffold | **VERIFY:** e2e with dispatch |
-| `dispatch/executor.ts` | GatewayAdapter interface + TaskContext | None (interface stable, projectId fields exist) |
-| `openclaw/adapter.ts` | Plugin tool registration | **ADD:** project tools, projectId param |
-| `mcp/tools.ts` | MCP tool registration | **ADD:** project tools, projectId param |
-| `.github/workflows/` | CI/CD | **NEW:** ci.yml, release.yml |
-| `scripts/install.sh` | curl-pipe-sh installer | **NEW** |
-
----
-
-## Patterns to Follow
-
-### Pattern 1: Zod Schema First
-**What:** All data structures defined as Zod schemas, TypeScript types derived with `z.infer`.
-**When:** Any new tool parameters (project tools, projectId additions).
-**Example:** `src/schemas/project.ts` -- `ProjectManifest = z.object({...}); type ProjectManifest = z.infer<typeof ProjectManifest>`
-
-### Pattern 2: Plugin API Tool Registration
-**What:** Tools registered via `api.registerTool()` with JSON Schema parameters object.
-**When:** Adding project list/info/create tools to the OpenClaw plugin surface.
-**Example:** Follow `src/openclaw/adapter.ts` lines 156-198 pattern exactly -- JSON Schema `properties`, `required`, `execute` callback returning `wrapResult()`.
-
-### Pattern 3: MCP Tool Registration (Zod Schemas)
-**What:** MCP tools use Zod schemas for input/output validation via `server.registerTool()`.
-**When:** Adding project tools to MCP surface.
-**Example:** Follow `src/mcp/tools.ts` pattern -- `z.object` for input, handler returns `{ content: [{ type: "text", text: JSON.stringify(...) }] }`.
-
-### Pattern 4: Service Registration for Lifecycle
-**What:** Long-running services registered via `api.registerService({ id, start, stop })`.
-**When:** Already used by scheduler and memory sync. No new services needed for v1.1.
-
-### Pattern 5: Filesystem Atomic Operations
-**What:** State transitions use `rename()` for atomicity; config writes use `write-file-atomic`.
-**When:** Already enforced in FilesystemTaskStore. Installer should follow same pattern for any file swaps.
-
----
-
-## Anti-Patterns to Avoid
-
-### Anti-Pattern 1: Direct openclaw.json Editing
-**What:** Reading/writing `~/.openclaw/openclaw.json` directly with `fs`.
-**Why bad:** Gateway may be running and watching the file. Race conditions. Validation bypass. The MEMORY.md explicitly warns about config field order sensitivity.
-**Instead:** Use `openclaw-cli.ts` wrapper (`openclawConfigGet`/`openclawConfigSet`) which shells out to `openclaw config` CLI. The CLI handles validation and atomic writes.
-
-### Anti-Pattern 2: Bundling the Plugin
-**What:** Using tsdown/esbuild/rollup to bundle AOF into a single file.
-**Why bad:** Plugin runs in gateway's Node process. Bundling breaks `require` chains for native modules (`better-sqlite3`, `hnswlib-node`), breaks source maps, and makes debugging harder.
-**Instead:** Keep `tsc` transpilation. The build produces ESM with declarations. OpenClaw loads via `node_modules/aof/dist/plugin.js`.
-
-### Anti-Pattern 3: Catching and Swallowing Errors in Memory Init
-**What:** The current pattern in `memory/index.ts:90-95` catches load errors silently and falls through to rebuild. If rebuild also produces zero chunks, the index is empty with no error.
-**Why bad:** User's memory is silently broken. Search returns `[]` and they have no idea.
-**Instead:** Log at ERROR level in the catch. If `rebuildHnswFromDb` produces 0 rows, log a WARNING. Consider a health check flag on the memory service that exposes index count.
-
-### Anti-Pattern 4: Shell Scripts That Assume Interactive
-**What:** Install scripts that use `read`, `select`, or other interactive prompts.
-**Why bad:** `curl | sh` runs non-interactively. Prompts hang or fail.
-**Instead:** Use flags and environment variables for all configuration. Interactive mode only when explicitly invoked (`--interactive`).
-
----
-
-## Recommended Build Order
-
-```
-Phase 1: Memory Fix          (no deps on other features, standalone P0 fix)
-  |-- Fix hnsw-index.ts load() + rebuild() capacity
-  |-- Add capacity diagnostic getter
-  |-- Add error logging in rebuildHnswFromDb
-  |-- Write regression tests for capacity-at-limit scenarios
-  |-- Verify with production memory.db if available
-
-Phase 2: CI Pipeline          (no deps on code changes, enables validation)
-  |-- Create .github/workflows/ci.yml (typecheck + test + build)
-  |-- Fix or skip pre-existing ~12 test failures
-  |-- Create .github/workflows/release.yml (tarball artifact)
-  |-- Verify: push to branch, CI passes green
-
-Phase 3: Projects Verification (benefits from CI for test validation)
-  |-- Verify initializeProjects() in AOFService creates per-project stores
-  |-- Add projectId parameter to aof_dispatch in adapter.ts and mcp/tools.ts
-  |-- Add aof_project_list, aof_project_info, aof_project_create tools
-  |-- Write e2e test: project create -> dispatch -> verify routing
-  |-- Verify scheduler polls all project stores
-
-Phase 4: Installer            (depends on CI for release tarball artifacts)
-  |-- Implement extractTarball() in updater.ts
-  |-- Create scripts/install.sh (curl-pipe-sh entry)
-  |-- Wire install + update CLI commands
-  |-- Test: clean install, upgrade, reinstall on fresh machine
-  |-- Release workflow must produce tarball before installer can download it
-```
-
-**Phase ordering rationale:**
-- **Memory first** because it is the only P0 production breakage; standalone fix with no dependencies.
-- **CI second** because it validates everything downstream; creates the release pipeline that the installer depends on.
-- **Projects third** because it is mostly verification of existing code plus tool parameter additions; CI validates the new tests.
-- **Installer last** because it depends on the CI release workflow to produce tarball artifacts; also benefits from memory fix being shipped (installer installs working memory).
-
----
-
-## Scalability Considerations
-
-| Concern | Current (< 1K chunks) | At 10K chunks | At 100K chunks |
-|---------|----------------------|---------------|----------------|
-| HNSW memory | ~50MB at 768-dim | ~100MB (one resize) | ~600MB (multiple resizes, each doubles) |
-| HNSW search latency | < 1ms | < 10ms (verified by benchmark test) | ~50ms (HNSW is O(log N), tested at 10K with 128-dim) |
-| SQLite vec_chunks | Fine | Fine | May need WAL mode + periodic VACUUM |
-| Multi-project stores | N/A | 5-10 store instances in memory | Store lazy-loading needed (Map grows) |
-| CI build time | ~30s tsc | Same | Same (build is source-only, not data-dependent) |
-| Tarball size | ~2MB (dist/ + prompts/) | Same | Same |
+The filesystem store caps at ~1000 active tasks before directory scanning becomes a concern. DAG evaluation adds negligible overhead compared to the existing poll cycle (which already reads all task files).
 
 ---
 
 ## Sources
 
-- [hnswlib-node GitHub](https://github.com/yoshoku/hnswlib-node) -- HIGH confidence (official repo)
-- [hnswlib-node API: HierarchicalNSW class](https://yoshoku.github.io/hnswlib-node/doc/classes/HierarchicalNSW.html) -- HIGH confidence (official docs, confirms readIndexSync and resizeIndex signatures)
-- [hnswlib dynamic capacity issue #172](https://github.com/nmslib/hnswlib/issues/172) -- MEDIUM confidence (upstream C++ library confirms resizeIndex is the solution)
-- All architecture analysis: direct source code reading of `~/Projects/AOF/src/` -- HIGH confidence
-
----
-*Architecture research for: AOF v1.1 feature integration*
-*Researched: 2026-02-26*
+- **Direct source code analysis**: All files listed in Section 1.4 (PRIMARY source, HIGH confidence)
+- **Existing design doc**: `/Users/xavier/Projects/aof/docs/dev/workflow-gates-design.md` (HIGH confidence)
+- **PROJECT.md**: `/Users/xavier/Projects/aof/.planning/PROJECT.md` (HIGH confidence, project constraints)
+- **Existing DAG test**: `/Users/xavier/Projects/aof/src/dispatch/__tests__/dag-gating.test.ts` (inter-task dependency tests, not intra-task DAG)
