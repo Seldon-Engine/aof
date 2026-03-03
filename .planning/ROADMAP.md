@@ -41,7 +41,7 @@ See: `.planning/milestones/v1.1-ROADMAP.md` for full details
 - [x] **Phase 11: DAG Evaluator** — Pure-function DAG evaluation: readiness propagation, conditional logic, skip cascading, and hop lifecycle (completed 2026-03-03)
 - [x] **Phase 12: Scheduler Integration** — Scheduler dispatches hops as independent sessions, advances DAGs on completion, dual-mode gate/DAG coexistence (completed 2026-03-03)
 - [x] **Phase 13: Timeout, Rejection, and Safety** — Per-hop timeout with escalation, rejection with downstream reset, restricted JSON DSL for agent-authored conditions (completed 2026-03-03)
-- [ ] **Phase 14: Templates, Ad-Hoc API, and Artifacts** — Workflow templates in project config, agent-composed ad-hoc DAGs, hop-scoped artifact directories
+- [x] **Phase 14: Templates, Ad-Hoc API, and Artifacts** — Workflow templates in project config, agent-composed ad-hoc DAGs, hop-scoped artifact directories (completed 2026-03-03)
 - [ ] **Phase 15: Migration and Documentation** — Gate-to-DAG lazy migration, user/developer/skill docs, gate reference cleanup, CLI reference update
 
 ## Phase Details
@@ -118,7 +118,7 @@ Plans:
   2. An agent can compose an ad-hoc workflow DAG inline when creating a task, without requiring a pre-defined template
   3. Both template-referenced and ad-hoc inline workflows resolve to the same runtime WorkflowDAG schema at dispatch time
   4. Each hop writes output to a per-hop subdirectory in the task work directory, and downstream hops can read upstream outputs via documented directory conventions
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans complete
 
 Plans:
 - [ ] 14-01-PLAN.md -- Template schema in ProjectManifest + templateName on TaskWorkflow + lint validation
@@ -155,5 +155,5 @@ Plans:
 | 11. DAG Evaluator | 2/2 | Complete    | 2026-03-03 | - |
 | 12. Scheduler Integration | 2/2 | Complete    | 2026-03-03 | - |
 | 13. Timeout, Rejection, and Safety | 3/3 | Complete   | 2026-03-03 | - |
-| 14. Templates, Ad-Hoc API, and Artifacts | 2/3 | In Progress|  | - |
+| 14. Templates, Ad-Hoc API, and Artifacts | 3/3 | Complete   | 2026-03-03 | - |
 | 15. Migration and Documentation | v1.2 | 0/? | Not started | - |

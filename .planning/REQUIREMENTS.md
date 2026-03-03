@@ -28,7 +28,7 @@ Requirements for per-task workflow DAG execution. Each maps to roadmap phases.
 ### Workflow Authoring
 
 - [x] **TMPL-01**: Workflow templates can be defined in project configuration
-- [ ] **TMPL-02**: Agent can compose an ad-hoc workflow DAG at task creation time
+- [x] **TMPL-02**: Agent can compose an ad-hoc workflow DAG at task creation time
 - [x] **TMPL-03**: Both templates and ad-hoc workflows resolve to the same runtime WorkflowDAG schema
 
 ### Artifact Handoff
@@ -100,7 +100,7 @@ Deferred to later milestones. Tracked but not in current roadmap.
 | EXEC-07 | Phase 11 | Complete |
 | EXEC-08 | Phase 10 | Complete |
 | TMPL-01 | Phase 14 | Complete |
-| TMPL-02 | Phase 14 | Pending |
+| TMPL-02 | Phase 14 | Complete |
 | TMPL-03 | Phase 14 | Complete |
 | ARTF-01 | Phase 14 | Complete |
 | ARTF-02 | Phase 14 | Complete |
