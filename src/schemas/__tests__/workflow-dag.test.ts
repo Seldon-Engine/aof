@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import YAML from "yaml";
 import {
   ConditionExpr,
   Hop,
@@ -11,6 +12,19 @@ import {
   validateDAG,
   initializeWorkflowState,
 } from "../workflow-dag.js";
+import { TaskFrontmatter } from "../task.js";
+import {
+  ConditionExpr as BarrelConditionExpr,
+  Hop as BarrelHop,
+  WorkflowDefinition as BarrelWorkflowDefinition,
+  HopStatus as BarrelHopStatus,
+  HopState as BarrelHopState,
+  WorkflowStatus as BarrelWorkflowStatus,
+  WorkflowState as BarrelWorkflowState,
+  TaskWorkflow as BarrelTaskWorkflow,
+  validateDAG as barrelValidateDAG,
+  initializeWorkflowState as barrelInitializeWorkflowState,
+} from "../index.js";
 
 // ---------------------------------------------------------------------------
 // ConditionExpr
@@ -580,5 +594,221 @@ describe("initializeWorkflowState", () => {
 
     const state = initializeWorkflowState(definition);
     expect(() => WorkflowState.parse(state)).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TaskFrontmatter integration
+// ---------------------------------------------------------------------------
+describe("TaskFrontmatter integration", () => {
+  const baseTask = {
+    schemaVersion: 1,
+    id: "TASK-2026-03-02-001",
+    project: "AOF",
+    title: "DAG integration test task",
+    status: "ready",
+    priority: "normal",
+    createdAt: "2026-03-02T10:00:00Z",
+    updatedAt: "2026-03-02T10:00:00Z",
+    lastTransitionAt: "2026-03-02T10:00:00Z",
+    createdBy: "test-agent",
+  };
+
+  const sampleWorkflow = {
+    definition: {
+      name: "diamond-sdlc",
+      hops: [
+        { id: "implement", role: "swe-backend" },
+        { id: "test", role: "swe-qa", dependsOn: ["implement"] },
+        { id: "review", role: "swe-architect", dependsOn: ["implement"] },
+        { id: "deploy", role: "swe-devops", dependsOn: ["test", "review"] },
+      ],
+    },
+    state: {
+      status: "pending",
+      hops: {
+        implement: { status: "ready" },
+        test: { status: "pending" },
+        review: { status: "pending" },
+        deploy: { status: "pending" },
+      },
+    },
+  };
+
+  it("rejects task with both gate and workflow (mutual exclusivity)", () => {
+    const withBoth = {
+      ...baseTask,
+      gate: { current: "implement", entered: "2026-03-02T10:00:00Z" },
+      workflow: sampleWorkflow,
+    };
+    const result = TaskFrontmatter.safeParse(withBoth);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const messages = result.error.issues.map((i) => i.message).join(" ");
+      expect(messages.toLowerCase()).toContain("mutual");
+    }
+  });
+
+  it("accepts task with gate fields and no workflow (backward compat)", () => {
+    const gateOnly = {
+      ...baseTask,
+      gate: { current: "dev", entered: "2026-03-02T10:00:00Z" },
+      gateHistory: [
+        {
+          gate: "triage",
+          role: "swe-lead",
+          entered: "2026-03-02T09:00:00Z",
+          exited: "2026-03-02T10:00:00Z",
+          outcome: "complete",
+        },
+      ],
+    };
+    const result = TaskFrontmatter.safeParse(gateOnly);
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts task with no gate and no workflow (bare task)", () => {
+    const result = TaskFrontmatter.safeParse(baseTask);
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts task with workflow field and no gate (DAG task)", () => {
+    const dagTask = { ...baseTask, workflow: sampleWorkflow };
+    const result = TaskFrontmatter.safeParse(dagTask);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.workflow?.definition.name).toBe("diamond-sdlc");
+      expect(result.data.workflow?.state.status).toBe("pending");
+      expect(result.data.workflow?.state.hops.implement.status).toBe("ready");
+    }
+  });
+
+  it("round-trips workflow data through YAML without data loss", () => {
+    const dagTask = {
+      ...baseTask,
+      workflow: {
+        definition: {
+          name: "condition-dag",
+          hops: [
+            { id: "implement", role: "swe-backend" },
+            {
+              id: "security-review",
+              role: "swe-security",
+              dependsOn: ["implement"],
+              condition: {
+                op: "and",
+                conditions: [
+                  { op: "has_tag", value: "security-sensitive" },
+                  { op: "hop_status", hop: "implement", status: "complete" },
+                ],
+              },
+            },
+            { id: "deploy", role: "swe-devops", dependsOn: ["implement", "security-review"], joinType: "any" },
+          ],
+        },
+        state: {
+          status: "running",
+          hops: {
+            implement: {
+              status: "complete",
+              startedAt: "2026-03-02T10:00:00Z",
+              completedAt: "2026-03-02T11:00:00Z",
+              agent: "swe-backend-1",
+            },
+            "security-review": { status: "ready" },
+            deploy: { status: "pending" },
+          },
+          startedAt: "2026-03-02T10:00:00Z",
+        },
+      },
+    };
+
+    // Parse to validate
+    const parsed = TaskFrontmatter.parse(dagTask);
+
+    // Serialize to YAML and back
+    const yamlStr = YAML.stringify(parsed, { lineWidth: 120 });
+    const roundTripped = YAML.parse(yamlStr);
+    const reparsed = TaskFrontmatter.parse(roundTripped);
+
+    // Verify DAG structure preserved
+    expect(reparsed.workflow?.definition.name).toBe("condition-dag");
+    expect(reparsed.workflow?.definition.hops).toHaveLength(3);
+    expect(reparsed.workflow?.definition.hops.map((h) => h.id)).toEqual([
+      "implement",
+      "security-review",
+      "deploy",
+    ]);
+
+    // Verify hop statuses preserved
+    expect(reparsed.workflow?.state.status).toBe("running");
+    expect(reparsed.workflow?.state.hops.implement.status).toBe("complete");
+    expect(reparsed.workflow?.state.hops.implement.completedAt).toBe("2026-03-02T11:00:00Z");
+    expect(reparsed.workflow?.state.hops["security-review"].status).toBe("ready");
+    expect(reparsed.workflow?.state.hops.deploy.status).toBe("pending");
+
+    // Verify condition expression preserved
+    const secReview = reparsed.workflow?.definition.hops.find((h) => h.id === "security-review");
+    expect(secReview?.condition).toEqual({
+      op: "and",
+      conditions: [
+        { op: "has_tag", value: "security-sensitive" },
+        { op: "hop_status", hop: "implement", status: "complete" },
+      ],
+    });
+
+    // Verify joinType preserved
+    const deploy = reparsed.workflow?.definition.hops.find((h) => h.id === "deploy");
+    expect(deploy?.joinType).toBe("any");
+
+    // Verify startedAt preserved
+    expect(reparsed.workflow?.state.startedAt).toBe("2026-03-02T10:00:00Z");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Barrel exports
+// ---------------------------------------------------------------------------
+describe("barrel exports", () => {
+  it("exports ConditionExpr from barrel", () => {
+    expect(BarrelConditionExpr).toBeDefined();
+  });
+
+  it("exports Hop from barrel", () => {
+    expect(BarrelHop).toBeDefined();
+  });
+
+  it("exports WorkflowDefinition from barrel", () => {
+    expect(BarrelWorkflowDefinition).toBeDefined();
+  });
+
+  it("exports HopStatus from barrel", () => {
+    expect(BarrelHopStatus).toBeDefined();
+  });
+
+  it("exports HopState from barrel", () => {
+    expect(BarrelHopState).toBeDefined();
+  });
+
+  it("exports WorkflowStatus from barrel", () => {
+    expect(BarrelWorkflowStatus).toBeDefined();
+  });
+
+  it("exports WorkflowState from barrel", () => {
+    expect(BarrelWorkflowState).toBeDefined();
+  });
+
+  it("exports TaskWorkflow from barrel", () => {
+    expect(BarrelTaskWorkflow).toBeDefined();
+  });
+
+  it("exports validateDAG from barrel", () => {
+    expect(barrelValidateDAG).toBeDefined();
+    expect(typeof barrelValidateDAG).toBe("function");
+  });
+
+  it("exports initializeWorkflowState from barrel", () => {
+    expect(barrelInitializeWorkflowState).toBeDefined();
+    expect(typeof barrelInitializeWorkflowState).toBe("function");
   });
 });

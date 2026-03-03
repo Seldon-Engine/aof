@@ -125,7 +125,7 @@ export const TaskFrontmatter = z.preprocess((input) => {
   if (data.gate && data.workflow) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: "Task cannot have both 'gate' (linear workflow) and 'workflow' (DAG workflow) fields. Use one or the other.",
+      message: "Task cannot have both 'gate' (linear workflow) and 'workflow' (DAG workflow) fields. They are mutually exclusive -- use one or the other.",
       path: ["workflow"],
     });
   }
