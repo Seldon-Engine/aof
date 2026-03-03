@@ -127,6 +127,13 @@ export const EventType = z.enum([
   // Scheduler alerts
   "scheduler_alert",
   "scheduler_action_failed",
+
+  // DAG workflow
+  "dag.warning",
+  "dag.hop_completed",
+  "dag.hop_dispatched",
+  "dag.dispatch_error",
+  "dag.dispatch_failed",
 ]);
 export type EventType = z.infer<typeof EventType>;
 
