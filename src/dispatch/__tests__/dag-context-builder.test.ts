@@ -61,6 +61,7 @@ describe("buildHopContext", () => {
     expect(ctx.role).toBe("swe");
     expect(ctx.autoAdvance).toBe(true);
     expect(ctx.upstreamResults).toEqual({});
+    expect(ctx.artifactPaths).toEqual({});
   });
 
   it("populates upstreamResults from completed predecessors", () => {
@@ -242,6 +243,156 @@ describe("buildHopContext", () => {
     // implement is complete but has no result, so it should not appear in upstreamResults
     expect(ctx.upstreamResults).toEqual({});
   });
+
+  // --- artifactPaths tests ---
+
+  it("includes artifactPaths as Record<string, string>", () => {
+    const task = makeTask({
+      definition: {
+        name: "test-workflow",
+        hops: [
+          { id: "implement", role: "swe", dependsOn: [], joinType: "all", autoAdvance: true, canReject: false },
+        ],
+      },
+      state: {
+        status: "running",
+        hops: {
+          implement: { status: "ready" },
+        },
+      },
+    });
+
+    const ctx = buildHopContext(task, "implement");
+    expect(ctx).toHaveProperty("artifactPaths");
+    expect(typeof ctx.artifactPaths).toBe("object");
+  });
+
+  it("returns artifactPaths with entries for completed predecessor hops only", () => {
+    const task = makeTask({
+      definition: {
+        name: "test-workflow",
+        hops: [
+          { id: "implement", role: "swe", dependsOn: [], joinType: "all", autoAdvance: true, canReject: false },
+          { id: "lint", role: "swe", dependsOn: [], joinType: "all", autoAdvance: true, canReject: false },
+          { id: "review", role: "qa", dependsOn: ["implement", "lint"], joinType: "any", autoAdvance: true, canReject: false },
+        ],
+      },
+      state: {
+        status: "running",
+        hops: {
+          implement: {
+            status: "complete",
+            completedAt: "2026-03-03T01:00:00Z",
+            result: { notes: "Done" },
+          },
+          lint: { status: "dispatched" }, // Not complete
+          review: { status: "ready" },
+        },
+      },
+    });
+
+    const ctx = buildHopContext(task, "review");
+
+    // Only "implement" is complete, so only it should appear
+    expect(ctx.artifactPaths).toHaveProperty("implement");
+    expect(ctx.artifactPaths).not.toHaveProperty("lint");
+  });
+
+  it("returns empty artifactPaths when hop has no predecessors", () => {
+    const task = makeTask({
+      definition: {
+        name: "test-workflow",
+        hops: [
+          { id: "implement", role: "swe", dependsOn: [], joinType: "all", autoAdvance: true, canReject: false },
+        ],
+      },
+      state: {
+        status: "running",
+        hops: {
+          implement: { status: "ready" },
+        },
+      },
+    });
+
+    const ctx = buildHopContext(task, "implement");
+    expect(ctx.artifactPaths).toEqual({});
+  });
+
+  it("returns empty artifactPaths for predecessor hops that are not complete (pending, dispatched, skipped, failed)", () => {
+    const task = makeTask({
+      definition: {
+        name: "test-workflow",
+        hops: [
+          { id: "a", role: "swe", dependsOn: [], joinType: "all", autoAdvance: true, canReject: false },
+          { id: "b", role: "swe", dependsOn: [], joinType: "all", autoAdvance: true, canReject: false },
+          { id: "c", role: "swe", dependsOn: [], joinType: "all", autoAdvance: true, canReject: false },
+          { id: "d", role: "swe", dependsOn: [], joinType: "all", autoAdvance: true, canReject: false },
+          { id: "target", role: "qa", dependsOn: ["a", "b", "c", "d"], joinType: "any", autoAdvance: true, canReject: false },
+        ],
+      },
+      state: {
+        status: "running",
+        hops: {
+          a: { status: "pending" },
+          b: { status: "dispatched" },
+          c: { status: "skipped" },
+          d: { status: "failed" },
+          target: { status: "ready" },
+        },
+      },
+    });
+
+    const ctx = buildHopContext(task, "target");
+    expect(ctx.artifactPaths).toEqual({});
+  });
+
+  it("artifact paths follow convention: join(dirname(task.path!), 'work', predId)", () => {
+    const task = makeTask({
+      definition: {
+        name: "test-workflow",
+        hops: [
+          { id: "implement", role: "swe", dependsOn: [], joinType: "all", autoAdvance: true, canReject: false },
+          { id: "review", role: "qa", dependsOn: ["implement"], joinType: "all", autoAdvance: true, canReject: false },
+        ],
+      },
+      state: {
+        status: "running",
+        hops: {
+          implement: {
+            status: "complete",
+            completedAt: "2026-03-03T01:00:00Z",
+            result: { notes: "Done" },
+          },
+          review: { status: "ready" },
+        },
+      },
+    });
+    // task.path is /tmp/test-task.md so dirname is /tmp
+    const ctx = buildHopContext(task, "review");
+    expect(ctx.artifactPaths.implement).toBe("/tmp/work/implement");
+  });
+
+  it("throws if task.path is not set", () => {
+    const task = makeTask({
+      definition: {
+        name: "test-workflow",
+        hops: [
+          { id: "implement", role: "swe", dependsOn: [], joinType: "all", autoAdvance: true, canReject: false },
+        ],
+      },
+      state: {
+        status: "running",
+        hops: {
+          implement: { status: "ready" },
+        },
+      },
+    });
+    task.path = undefined;
+
+    expect(() => buildHopContext(task, "implement")).toThrow(
+      /task\.path required/i,
+    );
+  });
 });
 
 describe("HopContext type", () => {
@@ -250,6 +401,7 @@ describe("HopContext type", () => {
       hopId: "test",
       role: "swe",
       upstreamResults: {},
+      artifactPaths: {},
       autoAdvance: true,
     };
 
@@ -257,6 +409,7 @@ describe("HopContext type", () => {
     expect(ctx.description).toBeUndefined();
     expect(ctx.role).toBe("swe");
     expect(ctx.upstreamResults).toEqual({});
+    expect(ctx.artifactPaths).toEqual({});
     expect(ctx.autoAdvance).toBe(true);
   });
 });
