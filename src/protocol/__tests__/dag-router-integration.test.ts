@@ -224,6 +224,7 @@ function makeRunResult(overrides?: Partial<RunResult>): RunResult {
     tests: { passed: 1, failed: 0, skipped: 0, total: 1 },
     blockers: [],
     notes: "All done",
+    ...overrides,
   } as RunResult;
 }
 
