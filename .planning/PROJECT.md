@@ -48,15 +48,19 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 
 ### Active
 
-- [ ] Per-task workflow DAG schema (templates + ad-hoc agent-composed pipelines)
-- [ ] Hop-based execution model (scheduler dispatches each hop independently)
-- [ ] Scheduler DAG advancement (evaluate graph on completion, dispatch eligible next hops)
-- [ ] Configurable hop behavior (auto-advance vs pause-for-review per hop)
-- [ ] Artifact handoff between hops via task work directory
-- [ ] Conditional branching and parallel execution within workflow DAGs
-- [ ] Pre-defined workflow templates in project config
-- [ ] Agent API for composing ad-hoc workflows at task creation time
-- [ ] Gate system replacement (review gates become review hops)
+(None yet — define with `/gsd:new-milestone`)
+
+### Validated (v1.2)
+
+- ✓ Per-task workflow DAG schema (templates + ad-hoc agent-composed pipelines) — v1.2
+- ✓ Hop-based execution model (scheduler dispatches each hop independently) — v1.2
+- ✓ Scheduler DAG advancement (evaluate graph on completion, dispatch eligible next hops) — v1.2
+- ✓ Configurable hop behavior (auto-advance vs pause-for-review per hop) — v1.2
+- ✓ Artifact handoff between hops via task work directory — v1.2
+- ✓ Conditional branching and parallel execution within workflow DAGs — v1.2
+- ✓ Pre-defined workflow templates in project config — v1.2
+- ✓ Agent API for composing ad-hoc workflows at task creation time — v1.2
+- ✓ Gate system replacement (review gates become review hops) — v1.2
 
 ### Out of Scope
 
@@ -87,7 +91,7 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 - The org chart (`org/org-chart.yaml`) drives all routing, memory, and agent configuration
 - v1.0 shipped: scheduler is restart-safe, daemon runs under OS supervision, gateway dispatch works via GatewayAdapter
 - v1.1 shipped: memory fixed, CI pipeline live, curl|sh installer, multi-project isolation verified, documentation complete with guardrails
-- v1.2 focus: per-task workflow DAGs — tasks carry pipeline definitions (hops), scheduler executes DAG mechanically, replaces linear gate system
+- v1.2 shipped: per-task workflow DAGs — tasks carry pipeline definitions (hops), scheduler executes DAG mechanically, replaces linear gate system. 27 requirements, 10 phases, 23 plans, ~100K LOC
 - OpenClaw constraint: no nested agent sessions — scheduler must advance hops between independent sessions
 - Node 22 pinned as prerequisite (Node 24/25 have better-sqlite3 build failures)
 
@@ -123,4 +127,4 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 | Product messaging: "multi-team agent orchestration platform" | Domain-agnostic positioning, not implementation-centric | ✓ Good |
 
 ---
-*Last updated: 2026-03-02 after v1.2 milestone start*
+*Last updated: 2026-03-03 after v1.2 milestone complete*

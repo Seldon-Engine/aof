@@ -1,5 +1,14 @@
 # Milestones
 
+## v1.2 Task Workflows (Shipped: 2026-03-03)
+
+**Phases completed:** 7 phases, 16 plans, 0 tasks
+
+**Key accomplishments:**
+- (none recorded)
+
+---
+
 ## v1.0 AOF Production Readiness (Shipped: 2026-02-26)
 
 **Phases completed:** 3 phases, 7 plans, 15 commits
