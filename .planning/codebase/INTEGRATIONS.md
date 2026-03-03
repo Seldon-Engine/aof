@@ -100,7 +100,7 @@ Auth profiles configured in `/Users/xavier/.openclaw/openclaw.json`:
 - 1Password Connect API - External credential retrieval
   - Endpoint: Via `OP_CONNECT_HOST` env var
   - Token: `OP_CONNECT_TOKEN`
-  - Vault/Item IDs: `***REMOVED***` / `***REMOVED***`
+  - Vault/Item IDs: `<REDACTED>` (stored in 1Password Connect config)
   - Fallback: Local JSON secrets files in `/Users/xavier/.openclaw/workspace/secrets/`
   - Integration: `proton_imap_ingest.py` retrieves IMAP creds from 1Password Connect
 
@@ -197,7 +197,7 @@ For logging/observability:
 - Port: 18789 (default)
 - Mode: `local` (not exposed to network)
 - Bind: `auto` (auto-detect interface)
-- Auth: Token-based (`***REMOVED***`)
+- Auth: Token-based (stored in `~/.openclaw/openclaw.json` — ROTATE IF EXPOSED)
 - TailScale: `serve` mode enabled (can expose via Tailscale)
 
 **Allowed Tools:**
