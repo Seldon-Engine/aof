@@ -6,9 +6,9 @@ status: executing
 last_updated: "2026-03-02"
 progress:
   total_phases: 6
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State
@@ -22,23 +22,24 @@ See: .planning/PROJECT.md (updated 2026-03-02)
 
 ## Current Position
 
-Phase: 10 of 15 (DAG Schema Foundation)
-Plan: 2 of 2
-Status: Executing
-Last activity: 2026-03-02 -- Completed plan 10-01 (DAG schemas, validateDAG, initializeWorkflowState)
+Phase: 10 of 15 (DAG Schema Foundation) -- COMPLETE
+Plan: 2 of 2 (all plans complete)
+Status: Phase Complete
+Last activity: 2026-03-02 -- Completed plan 10-02 (TaskFrontmatter DAG integration, barrel exports)
 
-Progress: [████░░░░░░░░░░░░] 8%
+Progress: [████████░░░░░░░░] 17%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1 (v1.2)
-- Average duration: 4min
-- Total execution time: 4min
+- Total plans completed: 2 (v1.2)
+- Average duration: 4.5min
+- Total execution time: 9min
 
 | Phase | Plan | Duration | Tasks | Files |
 |-------|------|----------|-------|-------|
 | 10    | 01   | 4min     | 1     | 2     |
+| 10    | 02   | 5min     | 2     | 3     |
 
 **Prior milestones:** v1.0 (7 plans), v1.1 (16 plans) -- 23 plans total across 9 phases
 
@@ -52,6 +53,8 @@ v1.2 execution decisions:
 - Phase 10-01: ConditionExprType uses optional value for eq/neq to match z.unknown() inference
 - Phase 10-01: validateDAG is standalone function (not in Zod superRefine) -- avoids slow parse on task load
 - Phase 10-01: Timeout format regex supports m/h/d (extends existing m/h pattern)
+- Phase 10-02: superRefine on inner z.object() (not z.preprocess()) for correct mutual exclusivity validation
+- Phase 10-02: schemaVersion stays at 1 -- workflow field is additive/optional, no migration needed
 
 v1.2 research decisions:
 - Zero new dependencies -- pure TypeScript/Zod DAG engine
@@ -78,5 +81,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-02
-Stopped at: Completed 10-01-PLAN.md (DAG schemas). Plan 10-02 ready for execution.
+Stopped at: Completed 10-02-PLAN.md (TaskFrontmatter DAG integration). Phase 10 complete. Phase 11 ready.
 Resume file: None
