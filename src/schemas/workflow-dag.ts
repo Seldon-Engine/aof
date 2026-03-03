@@ -246,6 +246,93 @@ export type TaskWorkflow = z.infer<typeof TaskWorkflow>;
 // DAG Validation
 // ---------------------------------------------------------------------------
 
+/** Maximum nesting depth for condition expressions. */
+export const MAX_CONDITION_DEPTH = 5;
+
+/** Maximum total node count for condition expressions. */
+export const MAX_CONDITION_NODES = 50;
+
+/**
+ * Measure the complexity of a condition expression tree.
+ *
+ * Walks the recursive condition tree and returns the maximum nesting depth
+ * (0-based for leaf nodes) and total node count. Used by `validateDAG()`
+ * to enforce safety limits on agent-authored conditions.
+ *
+ * @param expr - Root condition expression to measure
+ * @param depth - Current nesting depth (internal, defaults to 0)
+ * @returns Object with maxDepth and totalNodes
+ */
+export function measureConditionComplexity(
+  expr: ConditionExprType,
+  depth = 0,
+): { maxDepth: number; totalNodes: number } {
+  switch (expr.op) {
+    case "and":
+    case "or": {
+      let maxDepth = depth;
+      let totalNodes = 1; // this node
+      for (const child of expr.conditions) {
+        const result = measureConditionComplexity(child, depth + 1);
+        if (result.maxDepth > maxDepth) maxDepth = result.maxDepth;
+        totalNodes += result.totalNodes;
+      }
+      return { maxDepth, totalNodes };
+    }
+    case "not": {
+      const result = measureConditionComplexity(expr.condition, depth + 1);
+      return { maxDepth: result.maxDepth, totalNodes: 1 + result.totalNodes };
+    }
+    default:
+      // Leaf node (eq, neq, gt, gte, lt, lte, in, has_tag, hop_status, true, false)
+      return { maxDepth: depth, totalNodes: 1 };
+  }
+}
+
+/** Regex to match hop field paths: hops.<hopId>.* */
+const HOPS_FIELD_REGEX = /^hops\.([^.]+)/;
+
+/**
+ * Collect all hop IDs referenced in a condition expression.
+ *
+ * Extracts hop IDs from:
+ * - `hop_status` operator's `hop` field
+ * - Field paths matching `hops.<hopId>...` pattern
+ *
+ * Used by `validateDAG()` to verify all referenced hops exist.
+ *
+ * @param expr - Condition expression to scan
+ * @returns Array of hop IDs referenced (may contain duplicates)
+ */
+export function collectHopReferences(expr: ConditionExprType): string[] {
+  const refs: string[] = [];
+
+  switch (expr.op) {
+    case "hop_status":
+      refs.push(expr.hop);
+      break;
+    case "and":
+    case "or":
+      for (const child of expr.conditions) {
+        refs.push(...collectHopReferences(child));
+      }
+      break;
+    case "not":
+      refs.push(...collectHopReferences(expr.condition));
+      break;
+    default: {
+      // Check for field paths like "hops.X.result.y"
+      if ("field" in expr && typeof expr.field === "string") {
+        const match = expr.field.match(HOPS_FIELD_REGEX);
+        if (match) refs.push(match[1]!);
+      }
+      break;
+    }
+  }
+
+  return refs;
+}
+
 /** Valid timeout format: digits followed by m (minutes), h (hours), or d (days). */
 const TIMEOUT_REGEX = /^\d+[mhd]$/;
 
@@ -378,6 +465,37 @@ export function validateDAG(definition: WorkflowDefinition): string[] {
   for (const hop of definition.hops) {
     if (hop.escalateTo !== undefined && hop.escalateTo.trim().length === 0) {
       errors.push(`Hop "${hop.id}" has empty escalateTo role`);
+    }
+  }
+
+  // --- Validate condition depth/complexity ---
+  for (const hop of definition.hops) {
+    if (hop.condition) {
+      const { maxDepth, totalNodes } = measureConditionComplexity(hop.condition);
+      if (maxDepth > MAX_CONDITION_DEPTH) {
+        errors.push(
+          `Hop "${hop.id}" condition exceeds max nesting depth ${MAX_CONDITION_DEPTH} (found: ${maxDepth})`,
+        );
+      }
+      if (totalNodes > MAX_CONDITION_NODES) {
+        errors.push(
+          `Hop "${hop.id}" condition exceeds max node count ${MAX_CONDITION_NODES} (found: ${totalNodes})`,
+        );
+      }
+    }
+  }
+
+  // --- Validate hop references in conditions ---
+  for (const hop of definition.hops) {
+    if (hop.condition) {
+      const refs = collectHopReferences(hop.condition);
+      for (const ref of refs) {
+        if (!hopIds.has(ref)) {
+          errors.push(
+            `Hop "${hop.id}" condition references non-existent hop "${ref}"`,
+          );
+        }
+      }
     }
   }
 

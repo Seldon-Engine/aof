@@ -569,7 +569,8 @@ describe("measureConditionComplexity", () => {
   });
 
   it("returns correct depth and count for nested and/or", () => {
-    // and(or(leaf, leaf), leaf, leaf) => depth=0 and, depth=1 or, depth=2 leaves under or
+    // and(or(leaf, leaf), leaf, leaf) => 1(and) + 1(or) + 2(or-leaves) + 2(and-leaves) = 6 nodes
+    // maxDepth: and=0, or=1, leaves-under-or=2
     const expr: ConditionExprType = {
       op: "and",
       conditions: [
@@ -586,7 +587,7 @@ describe("measureConditionComplexity", () => {
     };
     const result = measureConditionComplexity(expr);
     expect(result.maxDepth).toBe(2);
-    expect(result.totalNodes).toBe(5);
+    expect(result.totalNodes).toBe(6);
   });
 
   it("returns correct depth for 'not' wrapper", () => {

@@ -27,7 +27,7 @@ describe("Duration Parser", () => {
     expect(parseDuration("")).toBe(null);
     expect(parseDuration("1")).toBe(null);
     expect(parseDuration("1s")).toBe(null);
-    expect(parseDuration("1d")).toBe(null);
+    expect(parseDuration("1d")).toBe(86400000); // "d" now valid (Phase 13)
     expect(parseDuration("abc")).toBe(null);
     expect(parseDuration("1hm")).toBe(null);
     expect(parseDuration("m1")).toBe(null);
