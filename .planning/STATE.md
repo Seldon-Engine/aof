@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Task Workflows
 status: executing
-stopped_at: Completed 14-02-PLAN.md
-last_updated: "2026-03-03T18:39:11.015Z"
-last_activity: 2026-03-03 -- Completed plan 14-02 (Per-Hop Artifact Directories)
+stopped_at: Completed 14-03-PLAN.md
+last_updated: "2026-03-03T18:45:22.000Z"
+last_activity: 2026-03-03 -- Completed plan 14-03 (CLI Workflow Flag and Store Ad-hoc API) -- Phase 14 done
 progress:
   total_phases: 6
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 12
-  completed_plans: 11
-  percent: 94
+  completed_plans: 12
+  percent: 100
 ---
 
 # Project State
@@ -21,23 +21,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-02)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** v1.2 Task Workflows -- Phase 14 in progress (Templates, Ad-hoc API & Artifacts). Plan 02 complete.
+**Current focus:** v1.2 Task Workflows -- Phase 14 complete (Templates, Ad-hoc API & Artifacts). All 3 plans delivered.
 
 ## Current Position
 
 Phase: 14 of 15 (Templates, Ad-hoc API & Artifacts)
-Plan: 2 of 3 (14-02 complete)
-Status: In Progress
-Last activity: 2026-03-03 -- Completed plan 14-02 (Per-Hop Artifact Directories)
+Plan: 3 of 3 (14-03 complete -- Phase 14 done)
+Status: Phase Complete
+Last activity: 2026-03-03 -- Completed plan 14-03 (CLI Workflow Flag and Store Ad-hoc API)
 
-Progress: [█████████████████░] 94%
+Progress: [████████████████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 11 (v1.2)
+- Total plans completed: 12 (v1.2)
 - Average duration: 6min
-- Total execution time: 65min
+- Total execution time: 69min
 
 | Phase | Plan | Duration | Tasks | Files |
 |-------|------|----------|-------|-------|
@@ -52,6 +52,7 @@ Progress: [█████████████████░] 94%
 | 13    | 03   | 10min    | 2     | 5     |
 | 14    | 01   | 3min     | 2     | 6     |
 | 14    | 02   | 3min     | 2     | 4     |
+| 14    | 03   | 4min     | 2     | 6     |
 
 **Prior milestones:** v1.0 (7 plans), v1.1 (16 plans) -- 23 plans total across 9 phases
 | Phase 14 P02 | 3min | 2 tasks | 4 files |
@@ -97,6 +98,9 @@ v1.2 execution decisions:
 - Phase 14-02: artifactPaths maps only completed predecessor hop IDs (not all predecessors)
 - Phase 14-02: mkdir called before buildHopContext and spawnSession for fail-fast directory creation
 - Phase 14-02: task.path guard throws early rather than producing invalid paths
+- Phase 14-03: Template resolution in CLI command handler, not store.create() (keeps store simple)
+- Phase 14-03: resolveWorkflowTemplate as separate testable module (not inline in commander action)
+- Phase 14-03: Belt-and-suspenders validateDAG in both CLI resolution and store.create() (defense-in-depth)
 
 v1.2 research decisions:
 - Zero new dependencies -- pure TypeScript/Zod DAG engine
@@ -125,6 +129,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-03T18:39:02.802Z
-Stopped at: Completed 14-02-PLAN.md
+Last session: 2026-03-03T18:45:22.000Z
+Stopped at: Completed 14-03-PLAN.md -- Phase 14 complete
 Resume file: None
