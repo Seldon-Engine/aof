@@ -2,10 +2,10 @@
 name: aof
 description: >
   Work with AOF (Agentic Ops Fabric) — deterministic multi-agent orchestration with
-  tool-based task management, org-chart governance, workflow gates, and structured
+  tool-based task management, org-chart governance, DAG workflows, and structured
   inter-agent protocols. Use when: creating/managing tasks, coordinating multi-agent
   handoffs, checking system status, or completing assigned work.
-version: 2.0.0
+version: 2.1.0
 requires:
   bins: [node]
 ---
@@ -278,17 +278,104 @@ from your existing OpenClaw config.
 
 ---
 
-## Workflow Gates
+## DAG Workflows
 
-Gates enforce quality checkpoints. Tasks pass through stages sequentially:
+Tasks progress through **hops** in a workflow DAG (directed acyclic graph). Each hop represents a
+workflow step (implement, review, QA, etc.) with conditions and rejection strategies.
 
+### Creating tasks with workflows
+
+Use the `--workflow` flag to apply a named template from `project.yaml`:
+
+```bash
+aof task create "Implement feature X" --workflow standard-review
 ```
-implement → review → qa → approve → done
+
+Templates are defined in `workflowTemplates` in your `project.yaml`.
+
+### Ad-hoc DAG in YAML frontmatter
+
+For one-off workflows, define a `WorkflowDefinition` inline:
+
+```yaml
+workflow:
+  hops:
+    - id: implement
+      executor: swe-backend
+    - id: review
+      executor: swe-architect
+      dependsOn: [implement]
+      canReject: true
+      rejectionStrategy: origin
+    - id: done
+      dependsOn: [review]
 ```
 
-If a reviewer rejects, the task loops back. Agents can't skip gates — the scheduler enforces order.
+### Common patterns
 
-Gates are defined in `project.yaml` and reference roles from the org chart.
+**Linear (implement then review):**
+```yaml
+hops:
+  - id: implement
+    executor: swe-backend
+  - id: review
+    executor: swe-architect
+    dependsOn: [implement]
+```
+
+**Review cycle (with rejection back to origin):**
+```yaml
+hops:
+  - id: implement
+    executor: swe-backend
+  - id: review
+    executor: swe-architect
+    dependsOn: [implement]
+    canReject: true
+    rejectionStrategy: origin   # rejection restarts from implement
+```
+
+**Parallel fan-out with join:**
+```yaml
+hops:
+  - id: implement
+    executor: swe-backend
+  - id: unit-test
+    executor: swe-qa
+    dependsOn: [implement]
+  - id: security-scan
+    executor: swe-security
+    dependsOn: [implement]
+  - id: approve
+    executor: swe-architect
+    dependsOn: [unit-test, security-scan]
+    joinType: all               # waits for all predecessors
+```
+
+### Condition DSL
+
+Hops can have `condition` expressions controlling activation:
+
+```yaml
+condition:
+  op: has_tag
+  value: needs-security-review
+```
+
+Available operators: `has_tag`, `hop_status`, `eq`, `neq` with field paths.
+Combinators: `and`, `or`, `not` for complex logic.
+
+### Pitfalls to avoid
+
+- **Cycles in `dependsOn`**: DAG validation rejects circular references
+- **Missing root hop**: At least one hop must have no `dependsOn`
+- **Condition complexity**: Conditions exceeding depth/node limits are rejected at parse time
+
+### If you encounter gate-format tasks
+
+Legacy tasks may still use the older gate-based workflow format. AOF auto-migrates
+gate tasks to DAG format on load (lazy migration). **Always use DAG format for new
+tasks.** See [Workflow DAGs](docs/guide/workflow-dags.md) for full documentation.
 
 ---
 

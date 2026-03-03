@@ -3,6 +3,11 @@
  *
  * Defines multi-stage workflows with gates, rejection strategies, and validation.
  * See ~/Projects/AOF/docs/design/WORKFLOW-GATES-DESIGN.md for complete spec.
+ *
+ * @deprecated Since v1.2. WorkflowConfig is superseded by WorkflowDefinition.
+ * Kept for backward compatibility during gate-to-DAG migration period.
+ * Will be removed in v1.3.
+ * @see {WorkflowDefinition} from "./workflow-dag.js"
  */
 
 import { z } from "zod";

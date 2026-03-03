@@ -9,6 +9,10 @@
  * This is a pure function with no I/O — takes task, workflow, and outcome,
  * returns GateTransition and task updates. Makes it easy to test and reason about.
  *
+ * @deprecated Since v1.2. Gate evaluator is superseded by DAG evaluator.
+ * Kept for backward compatibility during gate-to-DAG migration period.
+ * Will be removed in v1.3.
+ * @see {evaluateDAG} from "./dag-evaluator.js"
  * @module gate-evaluator
  */
 
