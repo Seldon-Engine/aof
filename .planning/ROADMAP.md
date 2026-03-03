@@ -87,7 +87,7 @@ Plans:
   3. Completion-triggered advancement dispatches the next hop immediately on completion report, with the poll cycle as fallback
   4. Parallel-eligible hops (no mutual dependency) dispatch in sequence without blocking each other, respecting the one-session-at-a-time OpenClaw constraint
   5. Gate-based tasks and DAG-based tasks coexist via a dual-mode evaluator that routes to the correct code path based on task frontmatter
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 
 Plans:
 - [ ] 12-01-PLAN.md -- DAG transition handler + context builder (TDD: handleDAGHopCompletion, dispatchDAGHop, buildHopContext, TaskContext.hopContext)
@@ -143,7 +143,7 @@ Plans:
 | 9. Documentation & Guardrails | v1.1 | 5/5 | Complete | 2026-02-27 |
 | 10. DAG Schema Foundation | 2/2 | Complete    | 2026-03-03 | - |
 | 11. DAG Evaluator | 2/2 | Complete    | 2026-03-03 | - |
-| 12. Scheduler Integration | v1.2 | 0/2 | Not started | - |
+| 12. Scheduler Integration | 1/2 | In Progress|  | - |
 | 13. Timeout, Rejection, and Safety | v1.2 | 0/? | Not started | - |
 | 14. Templates, Ad-Hoc API, and Artifacts | v1.2 | 0/? | Not started | - |
 | 15. Migration and Documentation | v1.2 | 0/? | Not started | - |

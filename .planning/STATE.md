@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Task Workflows
-status: unknown
-last_updated: "2026-03-03T13:02:35.773Z"
+status: in-progress
+last_updated: "2026-03-03T14:13:19.000Z"
 progress:
   total_phases: 5
   completed_phases: 5
-  total_plans: 11
-  completed_plans: 11
+  total_plans: 13
+  completed_plans: 12
 ---
 
 # Project State
@@ -18,23 +18,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-02)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** v1.2 Task Workflows -- Phase 11 complete, Phase 12 next (Scheduler)
+**Current focus:** v1.2 Task Workflows -- Phase 12 in progress (Scheduler Integration)
 
 ## Current Position
 
-Phase: 11 of 15 (DAG Evaluator) -- COMPLETE
-Plan: 2 of 2 (11-02 complete)
-Status: Phase Complete
-Last activity: 2026-03-03 -- Completed plan 11-02 (DAG Evaluator)
+Phase: 12 of 15 (Scheduler Integration)
+Plan: 1 of 2 (12-01 complete)
+Status: In Progress
+Last activity: 2026-03-03 -- Completed plan 12-01 (DAG Transition Handler)
 
-Progress: [████████████░░░░] 40%
+Progress: [█████████████░░░] 46%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 4 (v1.2)
+- Total plans completed: 5 (v1.2)
 - Average duration: 4min
-- Total execution time: 15min
+- Total execution time: 19min
 
 | Phase | Plan | Duration | Tasks | Files |
 |-------|------|----------|-------|-------|
@@ -42,6 +42,7 @@ Progress: [████████████░░░░] 40%
 | 10    | 02   | 5min     | 2     | 3     |
 | 11    | 01   | 3min     | 1     | 2     |
 | 11    | 02   | 3min     | 2     | 3     |
+| 12    | 01   | 4min     | 2     | 6     |
 
 **Prior milestones:** v1.0 (7 plans), v1.1 (16 plans) -- 23 plans total across 9 phases
 
@@ -63,6 +64,10 @@ v1.2 execution decisions:
 - Phase 11-02: structuredClone for immutable state output in evaluateDAG
 - Phase 11-02: Eager condition evaluation in same call enables skip cascading from condition-skipped hops atomically
 - Phase 11-02: AND-join readiness requires at least one complete predecessor (defensive against all-skipped/failed)
+- Phase 12-01: HopContext provides hop-scoped context only -- no full DAG visibility (progressive disclosure)
+- Phase 12-01: Hop status set to dispatched ONLY after spawnSession succeeds (prevents orphan dispatches)
+- Phase 12-01: Run result notes become hop result field for downstream consumption
+- Phase 12-01: Added DAG event types to EventType enum for transition logging
 
 v1.2 research decisions:
 - Zero new dependencies -- pure TypeScript/Zod DAG engine
@@ -89,5 +94,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-03
-Stopped at: Completed 11-02-PLAN.md (DAG Evaluator). Phase 11 complete. Phase 12 ready.
+Stopped at: Completed 12-01-PLAN.md (DAG Transition Handler). Plan 12-02 next (Scheduler Router).
 Resume file: None
