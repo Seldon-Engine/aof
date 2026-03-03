@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Task Workflows
 status: executing
-stopped_at: Completed 15-01-PLAN.md
-last_updated: "2026-03-03T19:44:50.898Z"
+stopped_at: Completed 15-02 (DAG Documentation)
+last_updated: "2026-03-03T19:48:44.093Z"
 last_activity: 2026-03-03 -- Completed plan 15-01 (Gate-to-DAG lazy migration)
 progress:
   total_phases: 6
   completed_phases: 5
   total_plans: 15
-  completed_plans: 13
+  completed_plans: 14
   percent: 100
 ---
 
@@ -57,6 +57,7 @@ Progress: [████████████████████] 100%
 **Prior milestones:** v1.0 (7 plans), v1.1 (16 plans) -- 23 plans total across 9 phases
 | Phase 14 P02 | 3min | 2 tasks | 4 files |
 | Phase 15 P01 | 4min | 1 tasks | 4 files |
+| Phase 15 P02 | 7min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -114,6 +115,7 @@ v1.2 research decisions:
 - [Phase 14]: mkdir called before buildHopContext and spawnSession for fail-fast directory creation
 - [Phase 14]: task.path guard throws early rather than producing invalid paths
 - [Phase 15]: migrateGateToDAG mutates task in-place; gate canReject maps to rejectionStrategy=origin; unparseable when expressions skip condition with warning
+- [Phase 15]: User guide replaces both workflow-gates.md and custom-gates.md in single document
 
 ### Roadmap Evolution
 
@@ -131,6 +133,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-03T19:44:49.992Z
-Stopped at: Completed 15-01-PLAN.md
+Last session: 2026-03-03T19:48:44.090Z
+Stopped at: Completed 15-02 (DAG Documentation)
 Resume file: None
