@@ -48,9 +48,9 @@ Requirements for per-task workflow DAG execution. Each maps to roadmap phases.
 
 - [x] **DOCS-01**: User guide updated with workflow DAG concepts, authoring, and monitoring
 - [x] **DOCS-02**: Developer docs updated with DAG schema reference, evaluator internals, and extension points
-- [ ] **DOCS-03**: AOF companion skill updated to teach agents how to compose workflow DAGs (parameters, best practices, examples)
-- [ ] **DOCS-04**: Outdated gate references removed from companion skill and documentation
-- [ ] **DOCS-05**: Auto-generated CLI reference updated with any new workflow commands
+- [x] **DOCS-03**: AOF companion skill updated to teach agents how to compose workflow DAGs (parameters, best practices, examples)
+- [x] **DOCS-04**: Outdated gate references removed from companion skill and documentation
+- [x] **DOCS-05**: Auto-generated CLI reference updated with any new workflow commands
 
 ## Future Requirements
 
@@ -111,9 +111,9 @@ Deferred to later milestones. Tracked but not in current roadmap.
 | SAFE-05 | Phase 15 | Complete |
 | DOCS-01 | Phase 15 | Complete |
 | DOCS-02 | Phase 15 | Complete |
-| DOCS-03 | Phase 15 | Pending |
-| DOCS-04 | Phase 15 | Pending |
-| DOCS-05 | Phase 15 | Pending |
+| DOCS-03 | Phase 15 | Complete |
+| DOCS-04 | Phase 15 | Complete |
+| DOCS-05 | Phase 15 | Complete |
 
 **Coverage:**
 - v1.2 requirements: 27 total
