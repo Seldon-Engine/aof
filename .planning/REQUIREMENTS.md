@@ -38,7 +38,7 @@ Requirements for per-task workflow DAG execution. Each maps to roadmap phases.
 
 ### Safety & Compatibility
 
-- [ ] **SAFE-01**: Hop conditions use a restricted JSON DSL (no eval/new Function) for agent-composed workflows
+- [x] **SAFE-01**: Hop conditions use a restricted JSON DSL (no eval/new Function) for agent-composed workflows
 - [x] **SAFE-02**: Existing gate-based tasks coexist with DAG tasks via dual-mode evaluator
 - [ ] **SAFE-03**: Each hop supports timeout with escalation to a specified role
 - [ ] **SAFE-04**: Hop rejection resets downstream hops and re-dispatches (configurable rejection strategy)
@@ -104,7 +104,7 @@ Deferred to later milestones. Tracked but not in current roadmap.
 | TMPL-03 | Phase 14 | Pending |
 | ARTF-01 | Phase 14 | Pending |
 | ARTF-02 | Phase 14 | Pending |
-| SAFE-01 | Phase 13 | Pending |
+| SAFE-01 | Phase 13 | Complete |
 | SAFE-02 | Phase 12 | Complete |
 | SAFE-03 | Phase 13 | Pending |
 | SAFE-04 | Phase 13 | Pending |

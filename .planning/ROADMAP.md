@@ -144,6 +144,6 @@ Plans:
 | 10. DAG Schema Foundation | 2/2 | Complete    | 2026-03-03 | - |
 | 11. DAG Evaluator | 2/2 | Complete    | 2026-03-03 | - |
 | 12. Scheduler Integration | 2/2 | Complete    | 2026-03-03 | - |
-| 13. Timeout, Rejection, and Safety | v1.2 | 0/? | Not started | - |
+| 13. Timeout, Rejection, and Safety | 1/3 | In Progress|  | - |
 | 14. Templates, Ad-Hoc API, and Artifacts | v1.2 | 0/? | Not started | - |
 | 15. Migration and Documentation | v1.2 | 0/? | Not started | - |
