@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Task Workflows
-status: unknown
-last_updated: "2026-03-03T16:03:52.594Z"
+status: in_progress
+last_updated: "2026-03-03T18:36:49Z"
 progress:
   total_phases: 7
   completed_phases: 7
   total_plans: 16
-  completed_plans: 16
+  completed_plans: 18
 ---
 
 # Project State
@@ -18,23 +18,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-02)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** v1.2 Task Workflows -- Phase 13 complete (Timeout, Rejection & Safety). Phase 14 next.
+**Current focus:** v1.2 Task Workflows -- Phase 14 in progress (Templates, Ad-hoc API & Artifacts). Plan 02 complete.
 
 ## Current Position
 
-Phase: 13 of 15 (Timeout, Rejection & Safety) -- COMPLETE
-Plan: 3 of 3 (13-03 complete)
-Status: Complete
-Last activity: 2026-03-03 -- Completed plan 13-03 (Rejection Cascade and Circuit Breaker)
+Phase: 14 of 15 (Templates, Ad-hoc API & Artifacts)
+Plan: 2 of 3 (14-02 complete)
+Status: In Progress
+Last activity: 2026-03-03 -- Completed plan 14-02 (Per-Hop Artifact Directories)
 
-Progress: [████████████████] 100%
+Progress: [████████████████░░] 89%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 9 (v1.2)
-- Average duration: 7min
-- Total execution time: 59min
+- Total plans completed: 10 (v1.2)
+- Average duration: 6min
+- Total execution time: 62min
 
 | Phase | Plan | Duration | Tasks | Files |
 |-------|------|----------|-------|-------|
@@ -47,6 +47,7 @@ Progress: [████████████████] 100%
 | 13    | 01   | 7min     | 2     | 8     |
 | 13    | 02   | 6min     | 2     | 3     |
 | 13    | 03   | 10min    | 2     | 5     |
+| 14    | 01   | 3min     | 2     | 6     |
 
 **Prior milestones:** v1.0 (7 plans), v1.1 (16 plans) -- 23 plans total across 9 phases
 
@@ -84,6 +85,10 @@ v1.2 execution decisions:
 - Phase 13-03: Rejection path short-circuits normal evaluateDAG pipeline (steps 2-4 replaced by rejection logic)
 - Phase 13-03: Origin strategy creates minimal HopState (full clear of result/timestamps/agent)
 - Phase 13-03: readyHops after rejection includes root hops already set to ready by reset helpers
+- Phase 14-01: TemplateNameKey uses ^[a-z0-9][a-z0-9-]*$ regex (matches project ID convention without length limit)
+- Phase 14-01: workflowTemplates optional on ProjectManifest (backward compatible, no migration needed)
+- Phase 14-01: templateName on TaskWorkflow is informational-only (full definition is source of truth)
+- Phase 14-01: Lint category 'workflow-templates' for template DAG errors (separate from other categories)
 
 v1.2 research decisions:
 - Zero new dependencies -- pure TypeScript/Zod DAG engine
@@ -110,5 +115,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-03
-Stopped at: Phase 14 context gathered. Ready for planning.
-Resume file: .planning/phases/14-templates-ad-hoc-api-and-artifacts/14-CONTEXT.md
+Stopped at: Completed 14-01-PLAN.md (Workflow Template Schema)
+Resume file: .planning/phases/14-templates-ad-hoc-api-and-artifacts/14-01-SUMMARY.md
