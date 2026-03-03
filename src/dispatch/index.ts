@@ -19,7 +19,7 @@ export type { GateEvaluationInput, GateEvaluationResult } from "./gate-evaluator
 // Note: aofDispatch from aof-dispatch.js is not re-exported to avoid naming conflict with tools/aof-tools.ts
 // Import directly from "./dispatch/aof-dispatch.js" if needed
 export type { AofDispatchOptions, DispatchResult } from "./aof-dispatch.js";
-export { evaluateDAG } from "./dag-evaluator.js";
+export { evaluateDAG, DEFAULT_MAX_REJECTIONS } from "./dag-evaluator.js";
 export type {
   DAGEvaluationInput,
   DAGEvaluationResult,
