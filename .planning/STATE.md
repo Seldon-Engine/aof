@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Task Workflows
-status: ready_to_plan
+status: executing
 last_updated: "2026-03-02"
 progress:
   total_phases: 6
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 2
+  completed_plans: 1
 ---
 
 # Project State
@@ -23,18 +23,22 @@ See: .planning/PROJECT.md (updated 2026-03-02)
 ## Current Position
 
 Phase: 10 of 15 (DAG Schema Foundation)
-Plan: --
-Status: Ready to plan
-Last activity: 2026-03-02 -- Roadmap created for v1.2 milestone (6 phases, 27 requirements mapped)
+Plan: 2 of 2
+Status: Executing
+Last activity: 2026-03-02 -- Completed plan 10-01 (DAG schemas, validateDAG, initializeWorkflowState)
 
-Progress: [░░░░░░░░░░░░░░░░] 0%
+Progress: [████░░░░░░░░░░░░] 8%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 0 (v1.2)
-- Average duration: --
-- Total execution time: --
+- Total plans completed: 1 (v1.2)
+- Average duration: 4min
+- Total execution time: 4min
+
+| Phase | Plan | Duration | Tasks | Files |
+|-------|------|----------|-------|-------|
+| 10    | 01   | 4min     | 1     | 2     |
 
 **Prior milestones:** v1.0 (7 plans), v1.1 (16 plans) -- 23 plans total across 9 phases
 
@@ -43,6 +47,11 @@ Progress: [░░░░░░░░░░░░░░░░] 0%
 ### Decisions
 
 All prior decisions logged in PROJECT.md Key Decisions table.
+
+v1.2 execution decisions:
+- Phase 10-01: ConditionExprType uses optional value for eq/neq to match z.unknown() inference
+- Phase 10-01: validateDAG is standalone function (not in Zod superRefine) -- avoids slow parse on task load
+- Phase 10-01: Timeout format regex supports m/h/d (extends existing m/h pattern)
 
 v1.2 research decisions:
 - Zero new dependencies -- pure TypeScript/Zod DAG engine
@@ -69,5 +78,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-02
-Stopped at: Roadmap created for v1.2 Task Workflows. Ready to plan Phase 10.
+Stopped at: Completed 10-01-PLAN.md (DAG schemas). Plan 10-02 ready for execution.
 Resume file: None

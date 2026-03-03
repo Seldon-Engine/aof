@@ -56,7 +56,7 @@ See: `.planning/milestones/v1.1-ROADMAP.md` for full details
   3. Invalid DAGs (cycles, unreachable hops, missing roles) are rejected at creation time with actionable error messages
   4. DAG execution state (per-hop status following pending/ready/dispatched/complete/failed/skipped lifecycle) persists on task frontmatter via atomic writes
   5. Existing gate-based tasks parse and function without modification (schema is additive, not breaking)
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 
 Plans:
 - [ ] 10-01-PLAN.md -- DAG Zod schemas (Hop, WorkflowDefinition, HopState, WorkflowState) + validateDAG() + initializeWorkflowState() with TDD
@@ -133,7 +133,7 @@ Plans:
 | 7. Projects | v1.1 | 3/3 | Complete | 2026-02-26 |
 | 8. Production Dependency Fix | v1.1 | 1/1 | Complete | 2026-02-26 |
 | 9. Documentation & Guardrails | v1.1 | 5/5 | Complete | 2026-02-27 |
-| 10. DAG Schema Foundation | v1.2 | 0/2 | In progress | - |
+| 10. DAG Schema Foundation | 1/2 | In Progress|  | - |
 | 11. DAG Evaluator | v1.2 | 0/? | Not started | - |
 | 12. Scheduler Integration | v1.2 | 0/? | Not started | - |
 | 13. Timeout, Rejection, and Safety | v1.2 | 0/? | Not started | - |

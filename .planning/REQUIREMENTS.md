@@ -9,10 +9,10 @@ Requirements for per-task workflow DAG execution. Each maps to roadmap phases.
 
 ### DAG Schema & Data Model
 
-- [ ] **DAG-01**: Task can carry a workflow DAG definition with typed hops and edges
-- [ ] **DAG-02**: Each hop specifies a target role/agent, conditions, timeout, and auto-advance vs review behavior
+- [x] **DAG-01**: Task can carry a workflow DAG definition with typed hops and edges
+- [x] **DAG-02**: Each hop specifies a target role/agent, conditions, timeout, and auto-advance vs review behavior
 - [ ] **DAG-03**: DAG execution state (hop statuses, current position) persists on task frontmatter atomically
-- [ ] **DAG-04**: Workflow DAG is validated on creation (cycle detection, unreachable hops, missing roles)
+- [x] **DAG-04**: Workflow DAG is validated on creation (cycle detection, unreachable hops, missing roles)
 
 ### Execution Engine
 
@@ -23,7 +23,7 @@ Requirements for per-task workflow DAG execution. Each maps to roadmap phases.
 - [ ] **EXEC-05**: Skipped hops propagate skip to downstream dependents with no other satisfied inputs
 - [ ] **EXEC-06**: Parallel-eligible hops dispatch in sequence (serialized by OpenClaw constraint) without blocking each other
 - [ ] **EXEC-07**: Join hops support configurable join type (all predecessors vs any predecessor)
-- [ ] **EXEC-08**: Hop lifecycle follows state machine: pending → ready → dispatched → complete/failed/skipped
+- [x] **EXEC-08**: Hop lifecycle follows state machine: pending → ready → dispatched → complete/failed/skipped
 
 ### Workflow Authoring
 
@@ -87,10 +87,10 @@ Deferred to later milestones. Tracked but not in current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DAG-01 | Phase 10 | Pending |
-| DAG-02 | Phase 10 | Pending |
+| DAG-01 | Phase 10 | Complete |
+| DAG-02 | Phase 10 | Complete |
 | DAG-03 | Phase 10 | Pending |
-| DAG-04 | Phase 10 | Pending |
+| DAG-04 | Phase 10 | Complete |
 | EXEC-01 | Phase 12 | Pending |
 | EXEC-02 | Phase 12 | Pending |
 | EXEC-03 | Phase 12 | Pending |
@@ -98,7 +98,7 @@ Deferred to later milestones. Tracked but not in current roadmap.
 | EXEC-05 | Phase 11 | Pending |
 | EXEC-06 | Phase 12 | Pending |
 | EXEC-07 | Phase 11 | Pending |
-| EXEC-08 | Phase 10 | Pending |
+| EXEC-08 | Phase 10 | Complete |
 | TMPL-01 | Phase 14 | Pending |
 | TMPL-02 | Phase 14 | Pending |
 | TMPL-03 | Phase 14 | Pending |
