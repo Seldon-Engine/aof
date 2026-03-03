@@ -4,7 +4,7 @@
 
 - ✅ **v1.0 AOF Production Readiness** — Phases 1-3 (shipped 2026-02-26)
 - ✅ **v1.1 Stabilization & Ship** — Phases 4-9 (shipped 2026-02-27)
-- 🚧 **v1.2 Task Workflows** — Phases 10-15 (in progress)
+- 🚧 **v1.2 Task Workflows** — Phases 10-16 (in progress)
 
 ## Phases
 
@@ -43,6 +43,7 @@ See: `.planning/milestones/v1.1-ROADMAP.md` for full details
 - [x] **Phase 13: Timeout, Rejection, and Safety** — Per-hop timeout with escalation, rejection with downstream reset, restricted JSON DSL for agent-authored conditions (completed 2026-03-03)
 - [x] **Phase 14: Templates, Ad-Hoc API, and Artifacts** — Workflow templates in project config, agent-composed ad-hoc DAGs, hop-scoped artifact directories (completed 2026-03-03)
 - [x] **Phase 15: Migration and Documentation** — Gate-to-DAG lazy migration, user/developer/skill docs, gate reference cleanup, CLI reference update (completed 2026-03-03)
+- [ ] **Phase 16: Integration Wiring Fixes** — Forward executor to ProtocolRouter for immediate hop dispatch, pass workflowConfig to gate-to-DAG migration
 
 ## Phase Details
 
@@ -142,9 +143,22 @@ Plans:
 - [ ] 15-02-PLAN.md -- User guide (workflow-dags.md), developer docs (workflow-dag-design.md), example YAML rewrites + new examples
 - [ ] 15-03-PLAN.md -- Companion skill rewrite, gate reference cleanup across 14 docs, deprecation markers, CLI reference regeneration, file deletion
 
+### Phase 16: Integration Wiring Fixes
+**Goal**: Close 2 critical integration gaps found by milestone audit -- executor forwarding for immediate hop dispatch, and workflowConfig for gate-to-DAG migration
+**Depends on**: Phase 15
+**Requirements**: EXEC-03, SAFE-05
+**Gap Closure**: Closes integration gaps from v1.2-MILESTONE-AUDIT.md
+**Success Criteria** (what must be TRUE):
+  1. AOFService forwards executor and spawnTimeoutMs to ProtocolRouter, enabling immediate hop dispatch on session end (not just poll-cycle fallback)
+  2. task-store get() and list() hooks pass workflowConfig to migrateGateToDAG, enabling gate-format tasks to be lazily migrated to DAG format on load
+**Plans:** 0/1 plan
+
+Plans:
+- [ ] 16-01-PLAN.md -- Wire executor to ProtocolRouter + workflowConfig to migrateGateToDAG with integration tests
+
 ## Progress
 
-**Execution Order:** Phases 10-12 are sequential; 13 and 14 branch from 12 in parallel; 15 joins after both 13 and 14 complete.
+**Execution Order:** Phases 10-12 are sequential; 13 and 14 branch from 12 in parallel; 15 joins after both 13 and 14 complete; 16 follows 15 (gap closure).
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -163,3 +177,4 @@ Plans:
 | 13. Timeout, Rejection, and Safety | 3/3 | Complete   | 2026-03-03 | - |
 | 14. Templates, Ad-Hoc API, and Artifacts | 3/3 | Complete    | 2026-03-03 | - |
 | 15. Migration and Documentation | 3/3 | Complete    | 2026-03-03 | - |
+| 16. Integration Wiring Fixes | v1.2 | 0/1 | Not started | - |
