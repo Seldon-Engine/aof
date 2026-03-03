@@ -11,7 +11,12 @@ import {
   TaskWorkflow,
   validateDAG,
   initializeWorkflowState,
+  measureConditionComplexity,
+  collectHopReferences,
+  MAX_CONDITION_DEPTH,
+  MAX_CONDITION_NODES,
 } from "../workflow-dag.js";
+import type { ConditionExprType } from "../workflow-dag.js";
 import { EventType } from "../event.js";
 import { TaskFrontmatter } from "../task.js";
 import {
@@ -551,6 +556,199 @@ describe("validateDAG", () => {
     const errors = validateDAG(definition);
     expect(errors.length).toBeGreaterThan(0);
     expect(errors.some((e) => /escalateTo/i.test(e))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// measureConditionComplexity
+// ---------------------------------------------------------------------------
+describe("measureConditionComplexity", () => {
+  it("returns { maxDepth: 0, totalNodes: 1 } for a leaf condition", () => {
+    const leaf: ConditionExprType = { op: "eq", field: "x", value: 1 };
+    expect(measureConditionComplexity(leaf)).toEqual({ maxDepth: 0, totalNodes: 1 });
+  });
+
+  it("returns correct depth and count for nested and/or", () => {
+    // and(or(leaf, leaf), leaf, leaf) => depth=0 and, depth=1 or, depth=2 leaves under or
+    const expr: ConditionExprType = {
+      op: "and",
+      conditions: [
+        {
+          op: "or",
+          conditions: [
+            { op: "eq", field: "a", value: 1 },
+            { op: "eq", field: "b", value: 2 },
+          ],
+        },
+        { op: "eq", field: "c", value: 3 },
+        { op: "eq", field: "d", value: 4 },
+      ],
+    };
+    const result = measureConditionComplexity(expr);
+    expect(result.maxDepth).toBe(2);
+    expect(result.totalNodes).toBe(5);
+  });
+
+  it("returns correct depth for 'not' wrapper", () => {
+    const expr: ConditionExprType = {
+      op: "not",
+      condition: { op: "eq", field: "x", value: 1 },
+    };
+    expect(measureConditionComplexity(expr)).toEqual({ maxDepth: 1, totalNodes: 2 });
+  });
+
+  it("returns { maxDepth: 0, totalNodes: 1 } for literal true", () => {
+    const expr: ConditionExprType = { op: "true" };
+    expect(measureConditionComplexity(expr)).toEqual({ maxDepth: 0, totalNodes: 1 });
+  });
+
+  it("returns { maxDepth: 0, totalNodes: 1 } for hop_status leaf", () => {
+    const expr: ConditionExprType = { op: "hop_status", hop: "review", status: "complete" };
+    expect(measureConditionComplexity(expr)).toEqual({ maxDepth: 0, totalNodes: 1 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// collectHopReferences
+// ---------------------------------------------------------------------------
+describe("collectHopReferences", () => {
+  it("collects hop from hop_status operator", () => {
+    const expr: ConditionExprType = { op: "hop_status", hop: "review", status: "complete" };
+    expect(collectHopReferences(expr)).toEqual(["review"]);
+  });
+
+  it("collects hop from field path 'hops.X.result.y'", () => {
+    const expr: ConditionExprType = { op: "eq", field: "hops.deploy.result.success", value: true };
+    expect(collectHopReferences(expr)).toEqual(["deploy"]);
+  });
+
+  it("does not collect from non-hops field paths", () => {
+    const expr: ConditionExprType = { op: "eq", field: "task.status", value: "open" };
+    expect(collectHopReferences(expr)).toEqual([]);
+  });
+
+  it("collects from nested and/or conditions", () => {
+    const expr: ConditionExprType = {
+      op: "and",
+      conditions: [
+        { op: "hop_status", hop: "A", status: "complete" },
+        { op: "eq", field: "hops.B.result.x", value: 1 },
+      ],
+    };
+    const refs = collectHopReferences(expr);
+    expect(refs).toContain("A");
+    expect(refs).toContain("B");
+  });
+
+  it("collects from not conditions", () => {
+    const expr: ConditionExprType = {
+      op: "not",
+      condition: { op: "hop_status", hop: "review", status: "failed" },
+    };
+    expect(collectHopReferences(expr)).toEqual(["review"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateDAG — condition depth/complexity and hop reference validation
+// ---------------------------------------------------------------------------
+describe("validateDAG — condition validation", () => {
+  it("rejects conditions exceeding MAX_CONDITION_DEPTH (5)", () => {
+    // Build a condition with depth 6 (one deeper than allowed)
+    let expr: ConditionExprType = { op: "eq", field: "x", value: 1 };
+    for (let i = 0; i < 6; i++) {
+      expr = { op: "and", conditions: [expr] };
+    }
+
+    const definition = WorkflowDefinition.parse({
+      name: "deep",
+      hops: [{ id: "A", role: "r", condition: expr }],
+    });
+    const errors = validateDAG(definition);
+    expect(errors.some((e) => /nesting depth/.test(e))).toBe(true);
+  });
+
+  it("rejects conditions exceeding MAX_CONDITION_NODES (50)", () => {
+    // Build a flat and with 51 leaf conditions
+    const leaves: ConditionExprType[] = [];
+    for (let i = 0; i < 51; i++) {
+      leaves.push({ op: "eq", field: "x", value: i });
+    }
+    const expr: ConditionExprType = { op: "and", conditions: leaves };
+
+    const definition = WorkflowDefinition.parse({
+      name: "wide",
+      hops: [{ id: "A", role: "r", condition: expr }],
+    });
+    const errors = validateDAG(definition);
+    expect(errors.some((e) => /node count/.test(e))).toBe(true);
+  });
+
+  it("passes for conditions within depth and node limits", () => {
+    const expr: ConditionExprType = {
+      op: "and",
+      conditions: [
+        { op: "eq", field: "x", value: 1 },
+        { op: "or", conditions: [{ op: "eq", field: "y", value: 2 }] },
+      ],
+    };
+
+    const definition = WorkflowDefinition.parse({
+      name: "ok",
+      hops: [{ id: "A", role: "r", condition: expr }],
+    });
+    const errors = validateDAG(definition);
+    expect(errors).toEqual([]);
+  });
+
+  it("rejects hop_status referencing non-existent hop", () => {
+    const expr: ConditionExprType = { op: "hop_status", hop: "nonexistent", status: "complete" };
+
+    const definition = WorkflowDefinition.parse({
+      name: "bad-ref",
+      hops: [
+        { id: "A", role: "r" },
+        { id: "B", role: "r", dependsOn: ["A"], condition: expr },
+      ],
+    });
+    const errors = validateDAG(definition);
+    expect(errors.some((e) => /non-existent hop "nonexistent"/.test(e))).toBe(true);
+  });
+
+  it("rejects field path 'hops.missing.result.x' referencing non-existent hop", () => {
+    const expr: ConditionExprType = { op: "eq", field: "hops.missing.result.x", value: 1 };
+
+    const definition = WorkflowDefinition.parse({
+      name: "bad-field-ref",
+      hops: [
+        { id: "A", role: "r" },
+        { id: "B", role: "r", dependsOn: ["A"], condition: expr },
+      ],
+    });
+    const errors = validateDAG(definition);
+    expect(errors.some((e) => /non-existent hop "missing"/.test(e))).toBe(true);
+  });
+
+  it("passes for valid hop_status references", () => {
+    const expr: ConditionExprType = { op: "hop_status", hop: "A", status: "complete" };
+
+    const definition = WorkflowDefinition.parse({
+      name: "valid-ref",
+      hops: [
+        { id: "A", role: "r" },
+        { id: "B", role: "r", dependsOn: ["A"], condition: expr },
+      ],
+    });
+    const errors = validateDAG(definition);
+    expect(errors).toEqual([]);
+  });
+
+  it("MAX_CONDITION_DEPTH is 5", () => {
+    expect(MAX_CONDITION_DEPTH).toBe(5);
+  });
+
+  it("MAX_CONDITION_NODES is 50", () => {
+    expect(MAX_CONDITION_NODES).toBe(50);
   });
 });
 
