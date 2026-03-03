@@ -6,6 +6,7 @@
  */
 
 import type { Task, TaskStatus } from "../schemas/task.js";
+import type { WorkflowDefinition } from "../schemas/workflow-dag.js";
 
 /**
  * Core task store interface.
@@ -41,6 +42,8 @@ export interface ITaskStore {
     createdBy: string;
     parentId?: string;
     dependsOn?: string[];
+    /** Workflow definition (ad-hoc or template-resolved). Auto-validated and auto-initialized. */
+    workflow?: { definition: WorkflowDefinition; templateName?: string };
   }): Promise<Task>;
 
   /**
