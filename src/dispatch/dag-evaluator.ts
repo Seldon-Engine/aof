@@ -26,7 +26,6 @@ import type {
   WorkflowState,
   WorkflowStatus,
   HopStatus,
-  ConditionExprType,
 } from "../schemas/workflow-dag.js";
 
 import {
