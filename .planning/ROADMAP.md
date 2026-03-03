@@ -40,7 +40,7 @@ See: `.planning/milestones/v1.1-ROADMAP.md` for full details
 - [x] **Phase 10: DAG Schema Foundation** — Zod schemas for hops, workflow DAGs, execution state, and creation-time validation (completed 2026-03-03)
 - [x] **Phase 11: DAG Evaluator** — Pure-function DAG evaluation: readiness propagation, conditional logic, skip cascading, and hop lifecycle (completed 2026-03-03)
 - [x] **Phase 12: Scheduler Integration** — Scheduler dispatches hops as independent sessions, advances DAGs on completion, dual-mode gate/DAG coexistence (completed 2026-03-03)
-- [ ] **Phase 13: Timeout, Rejection, and Safety** — Per-hop timeout with escalation, rejection with downstream reset, restricted JSON DSL for agent-authored conditions
+- [x] **Phase 13: Timeout, Rejection, and Safety** — Per-hop timeout with escalation, rejection with downstream reset, restricted JSON DSL for agent-authored conditions (completed 2026-03-03)
 - [ ] **Phase 14: Templates, Ad-Hoc API, and Artifacts** — Workflow templates in project config, agent-composed ad-hoc DAGs, hop-scoped artifact directories
 - [ ] **Phase 15: Migration and Documentation** — Gate-to-DAG lazy migration, user/developer/skill docs, gate reference cleanup, CLI reference update
 
@@ -144,6 +144,6 @@ Plans:
 | 10. DAG Schema Foundation | 2/2 | Complete    | 2026-03-03 | - |
 | 11. DAG Evaluator | 2/2 | Complete    | 2026-03-03 | - |
 | 12. Scheduler Integration | 2/2 | Complete    | 2026-03-03 | - |
-| 13. Timeout, Rejection, and Safety | 2/3 | In Progress|  | - |
+| 13. Timeout, Rejection, and Safety | 3/3 | Complete   | 2026-03-03 | - |
 | 14. Templates, Ad-Hoc API, and Artifacts | v1.2 | 0/? | Not started | - |
 | 15. Migration and Documentation | v1.2 | 0/? | Not started | - |

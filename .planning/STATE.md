@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Task Workflows
 status: unknown
-last_updated: "2026-03-03T15:49:15.112Z"
+last_updated: "2026-03-03T16:03:52.594Z"
 progress:
   total_phases: 7
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 16
-  completed_plans: 15
+  completed_plans: 16
 ---
 
 # Project State
@@ -18,23 +18,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-02)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** v1.2 Task Workflows -- Phase 13 in progress (Timeout, Rejection & Safety)
+**Current focus:** v1.2 Task Workflows -- Phase 13 complete (Timeout, Rejection & Safety). Phase 14 next.
 
 ## Current Position
 
-Phase: 13 of 15 (Timeout, Rejection & Safety) -- IN PROGRESS
-Plan: 2 of 3 (13-02 complete)
-Status: In Progress
-Last activity: 2026-03-03 -- Completed plan 13-02 (Hop Timeout Checking and Escalation)
+Phase: 13 of 15 (Timeout, Rejection & Safety) -- COMPLETE
+Plan: 3 of 3 (13-03 complete)
+Status: Complete
+Last activity: 2026-03-03 -- Completed plan 13-03 (Rejection Cascade and Circuit Breaker)
 
-Progress: [██████████████░░] 50%
+Progress: [████████████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 7 (v1.2)
-- Average duration: 6min
-- Total execution time: 43min
+- Total plans completed: 9 (v1.2)
+- Average duration: 7min
+- Total execution time: 59min
 
 | Phase | Plan | Duration | Tasks | Files |
 |-------|------|----------|-------|-------|
@@ -46,6 +46,7 @@ Progress: [██████████████░░] 50%
 | 12    | 02   | 17min    | 2     | 6     |
 | 13    | 01   | 7min     | 2     | 8     |
 | 13    | 02   | 6min     | 2     | 3     |
+| 13    | 03   | 10min    | 2     | 5     |
 
 **Prior milestones:** v1.0 (7 plans), v1.1 (16 plans) -- 23 plans total across 9 phases
 
@@ -80,6 +81,9 @@ v1.2 execution decisions:
 - Phase 13-02: Escalation spawns session directly from escalateHopTimeout (contained, no dispatchDAGHop modification)
 - Phase 13-02: On spawn failure after force-complete, hop set to ready with escalated=true for poll retry
 - Phase 13-02: No executor with escalateTo: alert-only (cannot re-dispatch without executor)
+- Phase 13-03: Rejection path short-circuits normal evaluateDAG pipeline (steps 2-4 replaced by rejection logic)
+- Phase 13-03: Origin strategy creates minimal HopState (full clear of result/timestamps/agent)
+- Phase 13-03: readyHops after rejection includes root hops already set to ready by reset helpers
 
 v1.2 research decisions:
 - Zero new dependencies -- pure TypeScript/Zod DAG engine
@@ -106,5 +110,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-03
-Stopped at: Completed 13-02-PLAN.md (Hop Timeout Checking and Escalation). Plan 13-03 next (Rejection Runtime).
+Stopped at: Completed 13-03-PLAN.md (Rejection Cascade and Circuit Breaker). Phase 13 complete. Phase 14 next.
 Resume file: None
