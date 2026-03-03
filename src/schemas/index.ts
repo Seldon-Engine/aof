@@ -106,5 +106,18 @@ export {
   validateWorkflow,
 } from "./workflow.js";
 
+export {
+  ConditionExpr,
+  Hop,
+  WorkflowDefinition,
+  HopStatus,
+  HopState,
+  WorkflowStatus,
+  WorkflowState,
+  TaskWorkflow,
+  validateDAG,
+  initializeWorkflowState,
+} from "./workflow-dag.js";
+
 export type { Runbook } from "./runbook.js";
 export type { DeliverableSection, RunbookComplianceResult } from "./deliverable.js";
