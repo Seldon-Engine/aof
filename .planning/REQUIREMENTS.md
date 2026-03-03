@@ -19,7 +19,7 @@ Requirements for per-task workflow DAG execution. Each maps to roadmap phases.
 - [ ] **EXEC-01**: Scheduler dispatches each hop as an independent OpenClaw session (no nesting)
 - [ ] **EXEC-02**: On hop completion, scheduler evaluates DAG graph and advances eligible next hops
 - [ ] **EXEC-03**: Completion-triggered advancement dispatches next hop immediately (poll cycle as fallback)
-- [ ] **EXEC-04**: Conditional hops evaluate a JSON DSL expression to determine execute vs skip
+- [x] **EXEC-04**: Conditional hops evaluate a JSON DSL expression to determine execute vs skip
 - [ ] **EXEC-05**: Skipped hops propagate skip to downstream dependents with no other satisfied inputs
 - [ ] **EXEC-06**: Parallel-eligible hops dispatch in sequence (serialized by OpenClaw constraint) without blocking each other
 - [ ] **EXEC-07**: Join hops support configurable join type (all predecessors vs any predecessor)
@@ -94,7 +94,7 @@ Deferred to later milestones. Tracked but not in current roadmap.
 | EXEC-01 | Phase 12 | Pending |
 | EXEC-02 | Phase 12 | Pending |
 | EXEC-03 | Phase 12 | Pending |
-| EXEC-04 | Phase 11 | Pending |
+| EXEC-04 | Phase 11 | Complete |
 | EXEC-05 | Phase 11 | Pending |
 | EXEC-06 | Phase 12 | Pending |
 | EXEC-07 | Phase 11 | Pending |
