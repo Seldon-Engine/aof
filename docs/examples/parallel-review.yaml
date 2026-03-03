@@ -1,0 +1,73 @@
+# Parallel Review Workflow (DAG Format)
+#
+# Demonstrates the fan-out / fan-in pattern: after implementation,
+# multiple review hops run in parallel, then join before deployment.
+#
+# DAG structure:
+#   [implement] --> [code-review]     --+
+#              |                        |--> [deploy]
+#              +--> [security-review] --+
+#
+# Key DAG features demonstrated:
+# - Fan-out: implement fans out to code-review AND security-review
+# - Parallel execution: both reviews run concurrently (no edges between them)
+# - Fan-in (AND-join): deploy waits for ALL reviews to complete
+# - joinType: "all" on deploy ensures both reviews must finish
+#
+# This pattern is common when you need independent reviewers who should
+# not block each other but must all approve before proceeding.
+
+name: parallel-review
+
+hops:
+  # ========================================================================
+  # Hop 1: Implementation (root)
+  # ========================================================================
+  # Single root hop -- all review hops fan out from here.
+  - id: implement
+    role: developer
+    description: "Implement feature with tests"
+    timeout: 4h
+    escalateTo: tech-lead
+
+  # ========================================================================
+  # Hop 2: Code Review (parallel branch 1)
+  # ========================================================================
+  # Runs in parallel with security-review. Both depend only on implement,
+  # so they have no ordering constraint between them.
+  - id: code-review
+    role: architect
+    dependsOn: [implement]
+    canReject: true
+    rejectionStrategy: origin
+    description: "Review architecture, code quality, and test coverage"
+    timeout: 2h
+    escalateTo: tech-lead
+
+  # ========================================================================
+  # Hop 3: Security Review (parallel branch 2)
+  # ========================================================================
+  # Runs in parallel with code-review. Independent review track.
+  - id: security-review
+    role: security
+    dependsOn: [implement]
+    canReject: true
+    rejectionStrategy: origin
+    description: "Security audit: vulnerabilities, data handling, auth"
+    timeout: 2h
+    escalateTo: security-lead
+
+  # ========================================================================
+  # Hop 4: Deploy (AND-join)
+  # ========================================================================
+  # Fan-in point: waits for BOTH code-review and security-review.
+  # joinType: "all" (default) means deploy only becomes ready when
+  # all predecessors are complete or skipped.
+  # If either review rejects, the origin strategy resets everything.
+  - id: deploy
+    role: sre
+    dependsOn: [code-review, security-review]
+    joinType: all
+    description: "Deploy to production after all reviews pass"
+    timeout: 1h
+    escalateTo: ops-lead
