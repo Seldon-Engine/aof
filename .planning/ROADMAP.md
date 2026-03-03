@@ -151,10 +151,10 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. AOFService forwards executor and spawnTimeoutMs to ProtocolRouter, enabling immediate hop dispatch on session end (not just poll-cycle fallback)
   2. task-store get() and list() hooks pass workflowConfig to migrateGateToDAG, enabling gate-format tasks to be lazily migrated to DAG format on load
-**Plans:** 0/1 plan
+**Plans:** 1/1 plan
 
 Plans:
-- [ ] 16-01-PLAN.md -- Wire executor to ProtocolRouter + workflowConfig to migrateGateToDAG with integration tests
+- [ ] 16-01-PLAN.md -- Wire executor to ProtocolRouter + workflowConfig to migrateGateToDAG
 
 ## Progress
 
