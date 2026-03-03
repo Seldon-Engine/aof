@@ -117,7 +117,13 @@ export {
   TaskWorkflow,
   validateDAG,
   initializeWorkflowState,
+  measureConditionComplexity,
+  collectHopReferences,
+  MAX_CONDITION_DEPTH,
+  MAX_CONDITION_NODES,
 } from "./workflow-dag.js";
+
+export type { ConditionExprType } from "./workflow-dag.js";
 
 export type { Runbook } from "./runbook.js";
 export type { DeliverableSection, RunbookComplianceResult } from "./deliverable.js";
