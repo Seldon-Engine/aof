@@ -16,6 +16,8 @@ import { TaskFrontmatter, Task, isValidTransition } from "../schemas/task.js";
 import type { TaskStatus } from "../schemas/task.js";
 import type { ITaskStore } from "./interfaces.js";
 import { parseTaskFile, serializeTask, extractTaskSections, contentHash } from "./task-parser.js";
+import { validateDAG, initializeWorkflowState } from "../schemas/workflow-dag.js";
+import type { WorkflowDefinition, TaskWorkflow } from "../schemas/workflow-dag.js";
 import { hasCycle, addDependency, removeDependency } from "./task-deps.js";
 import { lintTasks } from "./task-validation.js";
 import { getTaskInputs as getInputs, getTaskOutputs as getOutputs, writeTaskOutput as writeOutput } from "./task-file-ops.js";
@@ -153,12 +155,28 @@ export class FilesystemTaskStore implements ITaskStore {
     createdBy: string;
     parentId?: string;
     dependsOn?: string[];
+    workflow?: { definition: WorkflowDefinition; templateName?: string };
   }): Promise<Task> {
     const now = new Date();
     const nowIso = now.toISOString();
     const id = await this.nextTaskId(now);
     const body = opts.body ?? "";
     const status: TaskStatus = "backlog";
+
+    // --- Workflow handling: auto-validate and auto-initialize ---
+    let resolvedWorkflow: TaskWorkflow | undefined;
+    if (opts.workflow?.definition) {
+      const dagErrors = validateDAG(opts.workflow.definition);
+      if (dagErrors.length > 0) {
+        throw new Error(`Workflow DAG invalid: ${dagErrors.join(", ")}`);
+      }
+      const state = initializeWorkflowState(opts.workflow.definition);
+      resolvedWorkflow = {
+        definition: opts.workflow.definition,
+        state,
+        ...(opts.workflow.templateName ? { templateName: opts.workflow.templateName } : {}),
+      };
+    }
 
     const frontmatter = TaskFrontmatter.parse({
       schemaVersion: 1,
@@ -182,6 +200,7 @@ export class FilesystemTaskStore implements ITaskStore {
       dependsOn: opts.dependsOn ?? [],
       metadata: opts.metadata ?? {},
       contentHash: contentHash(body),
+      ...(resolvedWorkflow ? { workflow: resolvedWorkflow } : {}),
     });
 
     const task: Task = { frontmatter, body };
