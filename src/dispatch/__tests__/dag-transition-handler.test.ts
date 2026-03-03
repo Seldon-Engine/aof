@@ -537,3 +537,120 @@ describe("dispatchDAGHop", () => {
     expect(task.frontmatter.workflow!.state.hops.implement.status).toBe("dispatched");
   });
 });
+
+// ---------------------------------------------------------------------------
+// handleDAGHopCompletion — Rejection Integration
+// ---------------------------------------------------------------------------
+
+describe("handleDAGHopCompletion — rejection", () => {
+  const mockedEvaluateDAG = vi.mocked(evaluateDAG);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("maps needs_review + canReject=true to rejected event", async () => {
+    const task = makeTask({
+      definition: {
+        name: "test-workflow",
+        hops: [
+          { id: "implement", role: "swe", dependsOn: [], joinType: "all", autoAdvance: true, canReject: false },
+          { id: "review", role: "qa", dependsOn: ["implement"], joinType: "all", autoAdvance: true, canReject: true, rejectionStrategy: "origin" },
+        ],
+      },
+      state: {
+        status: "running",
+        hops: {
+          implement: { status: "complete" },
+          review: { status: "dispatched", startedAt: "2026-03-03T00:30:00Z", agent: "qa" },
+        },
+      },
+    });
+
+    const runResult = makeRunResult({ outcome: "needs_review", notes: "Code quality issues" });
+
+    mockedEvaluateDAG.mockReturnValue({
+      state: {
+        status: "running",
+        hops: {
+          implement: { status: "ready" },
+          review: { status: "pending", rejectionCount: 1 },
+        },
+      },
+      changes: [
+        { hopId: "review", from: "dispatched", to: "pending", reason: "rejection_cascade_origin" },
+        { hopId: "implement", from: "complete", to: "ready", reason: "rejection_cascade_origin" },
+      ],
+      readyHops: ["implement"],
+    });
+
+    const logger = makeLogger();
+    const store = makeStore();
+
+    const result = await handleDAGHopCompletion(store, logger, task, runResult);
+
+    // evaluateDAG should have been called with rejected event
+    const evalInput = mockedEvaluateDAG.mock.calls[0]![0];
+    expect(evalInput.event.outcome).toBe("rejected");
+
+    // Should log rejection event
+    expect(logger.log).toHaveBeenCalledWith(
+      "dag.hop_rejected",
+      expect.any(String),
+      expect.objectContaining({
+        taskId: task.frontmatter.id,
+      }),
+    );
+
+    // reviewRequired should be false on rejection (rejection IS the review outcome)
+    expect(result.reviewRequired).toBe(false);
+
+    // Ready hops should be returned
+    expect(result.readyHops).toEqual(["implement"]);
+  });
+
+  it("maps needs_review + canReject=false to complete event", async () => {
+    const task = makeTask({
+      definition: {
+        name: "test-workflow",
+        hops: [
+          { id: "implement", role: "swe", dependsOn: [], joinType: "all", autoAdvance: true, canReject: false },
+          { id: "review", role: "qa", dependsOn: ["implement"], joinType: "all", autoAdvance: true, canReject: false },
+        ],
+      },
+      state: {
+        status: "running",
+        hops: {
+          implement: { status: "complete" },
+          review: { status: "dispatched", startedAt: "2026-03-03T00:30:00Z", agent: "qa" },
+        },
+      },
+    });
+
+    const runResult = makeRunResult({ outcome: "needs_review", notes: "Looks good" });
+
+    mockedEvaluateDAG.mockReturnValue({
+      state: {
+        status: "complete",
+        hops: {
+          implement: { status: "complete" },
+          review: { status: "complete" },
+        },
+        completedAt: "2026-03-03T01:00:00Z",
+      },
+      changes: [{ hopId: "review", from: "dispatched", to: "complete" }],
+      readyHops: [],
+      dagStatus: "complete",
+      taskStatus: "done",
+    });
+
+    const logger = makeLogger();
+    const store = makeStore();
+
+    await handleDAGHopCompletion(store, logger, task, runResult);
+
+    // evaluateDAG should have been called with complete event (not rejected)
+    const evalInput = mockedEvaluateDAG.mock.calls[0]![0];
+    expect(evalInput.event.outcome).toBe("complete");
+  });
+});
