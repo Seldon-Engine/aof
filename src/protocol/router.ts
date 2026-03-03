@@ -16,6 +16,7 @@ import { InMemoryTaskLockManager } from "./task-lock.js";
 import { parseProtocolMessage, type ProtocolLogger } from "./parsers.js";
 import { buildStatusReason, shouldAppendWorkLog, buildWorkLogEntry, appendSection } from "./formatters.js";
 import { cascadeOnCompletion } from "../dispatch/dep-cascader.js";
+import { handleDAGHopCompletion, dispatchDAGHop } from "../dispatch/dag-transition-handler.js";
 import {
   resolveAuthorizedAgent,
   checkAuthorization,
@@ -41,6 +42,10 @@ export interface ProtocolRouterDependencies {
    * Mirrors SchedulerConfig.cascadeBlocks. Default: false.
    */
   cascadeBlocks?: boolean;
+  /** Executor for dispatching DAG hops (optional — if absent, poll cycle handles dispatch). */
+  executor?: import("../dispatch/executor.js").GatewayAdapter;
+  /** Spawn timeout in ms for DAG hop dispatch (default 30s). */
+  spawnTimeoutMs?: number;
 }
 
 export class ProtocolRouter {
@@ -54,6 +59,8 @@ export class ProtocolRouter {
   private readonly lockManager: TaskLockManager;
   private readonly projectStoreResolver?: (projectId: string) => ITaskStore | undefined;
   private readonly cascadeBlocks: boolean;
+  private readonly executor?: import("../dispatch/executor.js").GatewayAdapter;
+  private readonly spawnTimeoutMs: number;
 
   constructor(deps: ProtocolRouterDependencies) {
     this.logger = deps.logger;
@@ -62,6 +69,8 @@ export class ProtocolRouter {
     this.lockManager = deps.lockManager ?? new InMemoryTaskLockManager();
     this.projectStoreResolver = deps.projectStoreResolver;
     this.cascadeBlocks = deps.cascadeBlocks ?? false;
+    this.executor = deps.executor;
+    this.spawnTimeoutMs = deps.spawnTimeoutMs ?? 30_000;
     this.handlers = {
       "completion.report": (envelope, store) =>
         this.lockManager.withLock(envelope.taskId, () => this.handleCompletionReport(envelope, store)),
@@ -279,24 +288,93 @@ export class ProtocolRouter {
     for (const task of inProgress) {
       const runResult = await readRunResult(this.store, task.frontmatter.id);
       if (!runResult) continue;
-      await applyCompletionOutcome(
-        task,
-        {
-          actor: runResult.agentId,
-          outcome: runResult.outcome,
-          notes: runResult.notes,
-          blockers: runResult.blockers,
-        },
-        this.store,
-        this.logger,
-        this.notifier,
-      );
-      await completeRunArtifact(this.store, task.frontmatter.id);
-      if (runResult.outcome === "done" && this.logger) {
+
+      if (task.frontmatter.workflow) {
+        // DAG path — route to DAG transition handler
         try {
-          await cascadeOnCompletion(task.frontmatter.id, this.store, this.logger);
+          await this.lockManager.withLock(task.frontmatter.id, async () => {
+            // 1. Evaluate DAG hop completion
+            const result = await handleDAGHopCompletion(
+              this.store,
+              this.logger as import("../events/logger.js").EventLogger,
+              task,
+              runResult,
+            );
+
+            // 2. Complete run artifact (same as gate path)
+            await completeRunArtifact(this.store, task.frontmatter.id);
+
+            // 3. Handle DAG completion
+            if (result.dagComplete) {
+              if (runResult.outcome === "done") {
+                // DAG completed successfully — transition to review -> done
+                await this.store.transition(task.frontmatter.id, "review", {
+                  reason: "DAG workflow completed successfully",
+                });
+                // Cascade on completion
+                if (this.logger) {
+                  try {
+                    await cascadeOnCompletion(task.frontmatter.id, this.store, this.logger as import("../events/logger.js").EventLogger);
+                  } catch (err) {
+                    console.error(`[AOF] cascadeOnCompletion failed for ${task.frontmatter.id}:`, err);
+                  }
+                }
+              } else {
+                // DAG failed — transition to blocked
+                await this.store.transition(task.frontmatter.id, "blocked", {
+                  reason: "DAG workflow failed: all hops failed or skipped",
+                });
+              }
+              return;
+            }
+
+            // 4. Handle review required (autoAdvance: false)
+            if (result.reviewRequired) {
+              await this.store.transition(task.frontmatter.id, "review", {
+                reason: "DAG hop requires review before advancing",
+              });
+              return;
+            }
+
+            // 5. Dispatch first ready hop immediately
+            if (result.readyHops.length > 0 && this.executor) {
+              await dispatchDAGHop(
+                this.store,
+                this.logger as import("../events/logger.js").EventLogger,
+                { spawnTimeoutMs: this.spawnTimeoutMs },
+                this.executor,
+                task,
+                result.readyHops[0]!,
+              );
+            }
+          });
         } catch (err) {
-          console.error(`[AOF] cascadeOnCompletion failed for ${task.frontmatter.id}:`, err);
+          // DAG errors must not crash the scheduler
+          console.error(
+            `[AOF] DAG handleSessionEnd failed for ${task.frontmatter.id}: ${(err as Error).message}`,
+          );
+        }
+      } else {
+        // Gate path (EXISTING, completely untouched)
+        await applyCompletionOutcome(
+          task,
+          {
+            actor: runResult.agentId,
+            outcome: runResult.outcome,
+            notes: runResult.notes,
+            blockers: runResult.blockers,
+          },
+          this.store,
+          this.logger,
+          this.notifier,
+        );
+        await completeRunArtifact(this.store, task.frontmatter.id);
+        if (runResult.outcome === "done" && this.logger) {
+          try {
+            await cascadeOnCompletion(task.frontmatter.id, this.store, this.logger as import("../events/logger.js").EventLogger);
+          } catch (err) {
+            console.error(`[AOF] cascadeOnCompletion failed for ${task.frontmatter.id}:`, err);
+          }
         }
       }
     }
