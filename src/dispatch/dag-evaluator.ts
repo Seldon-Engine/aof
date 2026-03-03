@@ -45,7 +45,7 @@ export interface HopEvent {
   /** ID of the hop that completed/failed/was skipped. */
   hopId: string;
   /** Outcome of the hop. */
-  outcome: "complete" | "failed" | "skipped";
+  outcome: "complete" | "failed" | "skipped" | "rejected";
   /** Arbitrary result data from the hop (stored on HopState.result). */
   result?: Record<string, unknown>;
 }
@@ -109,6 +109,13 @@ export interface DAGEvaluationResult {
   /** Suggested task status ("done" for complete, "failed" for failed). */
   taskStatus?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/** Default maximum rejection count before circuit-breaker triggers. */
+export const DEFAULT_MAX_REJECTIONS = 3;
 
 // ---------------------------------------------------------------------------
 // Internal Helpers
@@ -326,6 +333,115 @@ function checkDAGCompletion(state: WorkflowState): WorkflowStatus | undefined {
 }
 
 // ---------------------------------------------------------------------------
+// Rejection Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Reset ALL hops for origin rejection strategy.
+ *
+ * Every hop is reset to "pending" (or "ready" if root — empty dependsOn).
+ * Clears result, startedAt, completedAt, agent, correlationId on each hop.
+ * Preserves rejectionCount ONLY on the rejected hop (set to currentCount).
+ *
+ * @param definition - Workflow definition
+ * @param state - Mutable working copy of state
+ * @param changes - Accumulator for hop transitions
+ * @param rejectedHopId - The hop that was rejected
+ * @param currentCount - New rejectionCount for the rejected hop
+ * @param timestamp - ISO timestamp (unused but kept for consistency)
+ */
+function resetAllHopsForOrigin(
+  definition: WorkflowDefinition,
+  state: WorkflowState,
+  changes: HopTransition[],
+  rejectedHopId: string,
+  currentCount: number,
+  _timestamp: string,
+): void {
+  for (const hop of definition.hops) {
+    const prev = state.hops[hop.id]!;
+    const isRoot = hop.dependsOn.length === 0;
+    const newStatus: HopStatus = isRoot ? "ready" : "pending";
+
+    const prevStatus = prev.status;
+    state.hops[hop.id] = {
+      status: newStatus,
+      ...(hop.id === rejectedHopId ? { rejectionCount: currentCount } : {}),
+    };
+
+    if (prevStatus !== newStatus || hop.id === rejectedHopId) {
+      changes.push({
+        hopId: hop.id,
+        from: prevStatus,
+        to: newStatus,
+        reason: "rejection_cascade_origin",
+      });
+    }
+  }
+}
+
+/**
+ * Reset ONLY the rejected hop and its immediate dependsOn predecessors.
+ *
+ * Hops in the reset set have their result, startedAt, completedAt, agent,
+ * correlationId cleared. Their new status depends on whether their own
+ * dependencies are all satisfied (complete and outside the reset set).
+ *
+ * Hops NOT in the reset set remain untouched.
+ *
+ * @param definition - Workflow definition
+ * @param state - Mutable working copy of state
+ * @param changes - Accumulator for hop transitions
+ * @param rejectedHopId - The hop that was rejected
+ * @param currentCount - New rejectionCount for the rejected hop
+ * @param timestamp - ISO timestamp (unused but kept for consistency)
+ */
+function resetPredecessorHops(
+  definition: WorkflowDefinition,
+  state: WorkflowState,
+  changes: HopTransition[],
+  rejectedHopId: string,
+  currentCount: number,
+  _timestamp: string,
+): void {
+  const rejectedHop = definition.hops.find((h) => h.id === rejectedHopId)!;
+  const resetSet = new Set([rejectedHopId, ...rejectedHop.dependsOn]);
+
+  for (const hopId of resetSet) {
+    const hop = definition.hops.find((h) => h.id === hopId)!;
+    const prev = state.hops[hopId]!;
+    const prevStatus = prev.status;
+
+    // Determine new status: "ready" if all own deps are outside reset set and
+    // complete/satisfied; "pending" otherwise
+    let newStatus: HopStatus;
+    if (hop.dependsOn.length === 0) {
+      // Root hop — always ready
+      newStatus = "ready";
+    } else {
+      const allDepsSatisfied = hop.dependsOn.every((depId) => {
+        if (resetSet.has(depId)) return false; // Dep is being reset, not satisfied
+        const depStatus = state.hops[depId]?.status;
+        return depStatus === "complete" || depStatus === "skipped";
+      });
+      newStatus = allDepsSatisfied ? "ready" : "pending";
+    }
+
+    state.hops[hopId] = {
+      status: newStatus,
+      ...(hopId === rejectedHopId ? { rejectionCount: currentCount } : {}),
+    };
+
+    changes.push({
+      hopId,
+      from: prevStatus,
+      to: newStatus,
+      reason: "rejection_cascade_predecessors",
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main Evaluation Function
 // ---------------------------------------------------------------------------
 
@@ -350,7 +466,67 @@ export function evaluateDAG(input: DAGEvaluationInput): DAGEvaluationResult {
   // Build reverse adjacency index
   const downstreamIndex = buildDownstreamIndex(definition);
 
-  // --- 1. Apply primary hop event ---
+  // --- 1. Handle rejection (short-circuits normal flow) ---
+  if (event.outcome === "rejected") {
+    const hopDef = definition.hops.find((h) => h.id === event.hopId)!;
+    const currentCount = (newState.hops[event.hopId]?.rejectionCount ?? 0) + 1;
+
+    if (currentCount >= DEFAULT_MAX_REJECTIONS) {
+      // Circuit-breaker: fail the hop permanently
+      const prevStatus = newState.hops[event.hopId]?.status;
+      newState.hops[event.hopId] = {
+        ...newState.hops[event.hopId]!,
+        status: "failed",
+        completedAt: timestamp,
+        rejectionCount: currentCount,
+      };
+      changes.push({
+        hopId: event.hopId,
+        from: prevStatus!,
+        to: "failed",
+        reason: "circuit_breaker",
+      });
+      // Cascade skips downstream
+      cascadeSkips(definition, newState, changes, downstreamIndex, event.hopId, timestamp);
+    } else {
+      // Apply rejection strategy
+      const strategy = hopDef.rejectionStrategy ?? "origin";
+      if (strategy === "origin") {
+        resetAllHopsForOrigin(definition, newState, changes, event.hopId, currentCount, timestamp);
+      } else {
+        resetPredecessorHops(definition, newState, changes, event.hopId, currentCount, timestamp);
+      }
+    }
+
+    // Determine ready hops after reset/circuit-breaker
+    const readyHops = determineReadyHops(definition, newState);
+    // Also include root hops that are already "ready" from the reset
+    for (const hop of definition.hops) {
+      if (newState.hops[hop.id]?.status === "ready" && !readyHops.includes(hop.id)) {
+        readyHops.push(hop.id);
+      }
+    }
+
+    // Check DAG completion (may be failed after circuit-breaker)
+    const dagStatus = checkDAGCompletion(newState);
+    if (dagStatus) {
+      newState.status = dagStatus;
+      if (dagStatus === "complete" || dagStatus === "failed") {
+        newState.completedAt = timestamp;
+      }
+    }
+
+    const taskStatus =
+      dagStatus === "complete"
+        ? "done"
+        : dagStatus === "failed"
+          ? "failed"
+          : undefined;
+
+    return { state: newState, changes, readyHops, dagStatus, taskStatus };
+  }
+
+  // --- 2. Apply primary hop event (non-rejection) ---
   const prevStatus = newState.hops[event.hopId]?.status;
   newState.hops[event.hopId] = {
     ...newState.hops[event.hopId]!,
@@ -364,7 +540,7 @@ export function evaluateDAG(input: DAGEvaluationInput): DAGEvaluationResult {
     to: event.outcome as HopStatus,
   });
 
-  // --- 2. If hop failed/skipped, cascade skips downstream ---
+  // --- 3. If hop failed/skipped, cascade skips downstream ---
   if (event.outcome !== "complete") {
     cascadeSkips(
       definition,
@@ -376,7 +552,7 @@ export function evaluateDAG(input: DAGEvaluationInput): DAGEvaluationResult {
     );
   }
 
-  // --- 3. Evaluate conditions on newly eligible hops ---
+  // --- 4. Evaluate conditions on newly eligible hops ---
   const condContext = buildConditionContext(newState, context.task);
   evaluateNewlyEligibleConditions(
     definition,
@@ -387,14 +563,14 @@ export function evaluateDAG(input: DAGEvaluationInput): DAGEvaluationResult {
     timestamp,
   );
 
-  // --- 4. Determine newly ready hops ---
+  // --- 5. Determine newly ready hops ---
   const readyHops = determineReadyHops(definition, newState);
   for (const hopId of readyHops) {
     newState.hops[hopId] = { ...newState.hops[hopId]!, status: "ready" };
     changes.push({ hopId, from: "pending", to: "ready" });
   }
 
-  // --- 5. Check DAG completion ---
+  // --- 6. Check DAG completion ---
   const dagStatus = checkDAGCompletion(newState);
   if (dagStatus) {
     newState.status = dagStatus;
@@ -403,7 +579,7 @@ export function evaluateDAG(input: DAGEvaluationInput): DAGEvaluationResult {
     }
   }
 
-  // --- 6. Suggest task status ---
+  // --- 7. Suggest task status ---
   const taskStatus =
     dagStatus === "complete"
       ? "done"

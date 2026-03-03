@@ -78,15 +78,33 @@ function findDispatchedHop(task: Task): string | undefined {
  * Map a RunResult to a HopEvent for DAG evaluation.
  *
  * - done outcome -> complete
+ * - needs_review + canReject -> rejected
+ * - needs_review + !canReject -> complete (reviewer cannot reject)
  * - Any other outcome -> failed
  * - Notes become the hop result field
  *
  * @param runResult - Agent run result
  * @param hopId - Hop ID the run result corresponds to
+ * @param hopDef - Hop definition (needed for canReject check)
  * @returns HopEvent for evaluateDAG
  */
-function mapRunResultToHopEvent(runResult: RunResult, hopId: string): HopEvent {
-  const outcome = runResult.outcome === "done" ? "complete" : "failed";
+function mapRunResultToHopEvent(
+  runResult: RunResult,
+  hopId: string,
+  hopDef?: { canReject?: boolean },
+): HopEvent {
+  let outcome: HopEvent["outcome"];
+
+  if (runResult.outcome === "done") {
+    outcome = "complete";
+  } else if (runResult.outcome === "needs_review" && hopDef?.canReject) {
+    outcome = "rejected";
+  } else if (runResult.outcome === "needs_review") {
+    outcome = "complete";
+  } else {
+    outcome = "failed";
+  }
+
   const result = runResult.notes
     ? { notes: runResult.notes }
     : undefined;
@@ -176,13 +194,18 @@ export async function handleDAGHopCompletion(
     return { readyHops: [], dagComplete: false, reviewRequired: false };
   }
 
-  // 2. Map run result to HopEvent
-  const hopEvent = mapRunResultToHopEvent(runResult, hopId);
+  // 2. Find hop definition for canReject check
+  const hopDef = task.frontmatter.workflow!.definition.hops.find(
+    (h) => h.id === hopId,
+  );
 
-  // 3. Build evaluation context
+  // 3. Map run result to HopEvent (pass hop definition for rejection awareness)
+  const hopEvent = mapRunResultToHopEvent(runResult, hopId, hopDef);
+
+  // 4. Build evaluation context
   const evalContext = buildEvalContext(task);
 
-  // 4. Call evaluateDAG
+  // 5. Call evaluateDAG
   const evalResult = evaluateDAG({
     definition: task.frontmatter.workflow!.definition,
     state: task.frontmatter.workflow!.state,
@@ -190,30 +213,42 @@ export async function handleDAGHopCompletion(
     context: evalContext,
   });
 
-  // 5. Persist new state atomically
+  // 6. Persist new state atomically
   await persistWorkflowState(task, evalResult.state);
 
-  // 6. Log transition event
-  await logger.log("dag.hop_completed", runResult.agentId, {
-    taskId: task.frontmatter.id,
-    payload: {
-      hopId,
-      outcome: hopEvent.outcome,
-      readyHops: evalResult.readyHops,
-      dagStatus: evalResult.dagStatus,
-      taskStatus: evalResult.taskStatus,
-      changes: evalResult.changes,
-    },
-  });
+  // 7. Log event — rejection or completion
+  if (hopEvent.outcome === "rejected") {
+    await logger.log("dag.hop_rejected", runResult.agentId, {
+      taskId: task.frontmatter.id,
+      payload: {
+        hopId,
+        rejectionNotes: runResult.notes,
+        rejectionCount: evalResult.state.hops[hopId]?.rejectionCount,
+        strategy: hopDef?.rejectionStrategy ?? "origin",
+        readyHops: evalResult.readyHops,
+        changes: evalResult.changes,
+      },
+    });
+  } else {
+    await logger.log("dag.hop_completed", runResult.agentId, {
+      taskId: task.frontmatter.id,
+      payload: {
+        hopId,
+        outcome: hopEvent.outcome,
+        readyHops: evalResult.readyHops,
+        dagStatus: evalResult.dagStatus,
+        taskStatus: evalResult.taskStatus,
+        changes: evalResult.changes,
+      },
+    });
+  }
 
-  // 7. Check autoAdvance for review requirement
+  // 8. Check autoAdvance for review requirement
   const dagComplete = evalResult.taskStatus !== undefined;
   let reviewRequired = false;
 
+  // Rejection IS the review outcome — reviewRequired=false
   if (hopEvent.outcome === "complete") {
-    const hopDef = task.frontmatter.workflow!.definition.hops.find(
-      (h) => h.id === hopId,
-    );
     if (hopDef && !hopDef.autoAdvance) {
       reviewRequired = true;
     }
