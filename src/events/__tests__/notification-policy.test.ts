@@ -202,6 +202,7 @@ describe("SeverityResolver", () => {
     expect(ALWAYS_CRITICAL_EVENTS.has("task.abandoned")).toBe(true);
     expect(ALWAYS_CRITICAL_EVENTS.has("task.deadletter")).toBe(true);
     expect(ALWAYS_CRITICAL_EVENTS.has("gate_timeout_escalation")).toBe(true);
+    expect(ALWAYS_CRITICAL_EVENTS.has("dag.hop_timeout_escalation")).toBe(true);
   });
 
   it("neverSuppress returns true for ALWAYS_CRITICAL_EVENTS", () => {
