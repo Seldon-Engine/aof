@@ -382,6 +382,172 @@ Task body.
     expect(reportContent).toContain("## Structure");
   });
 
+  describe("workflow template DAG validation", () => {
+    it("returns no errors when workflowTemplates is absent", async () => {
+      const projectRoot = join(testRoot, "no-templates");
+      await bootstrapProject(projectRoot);
+
+      const record: ProjectRecord = {
+        id: "no-templates",
+        path: projectRoot,
+        manifest: {
+          id: "no-templates",
+          title: "No Templates",
+          status: "active",
+          type: "swe",
+          owner: { team: "swe", lead: "lead" },
+          participants: [],
+          routing: { intake: { default: "Tasks/Backlog" }, mailboxes: { enabled: true } },
+          memory: {
+            tiers: { bronze: "cold", silver: "warm", gold: "warm" },
+            allowIndex: { warmPaths: [] },
+            denyIndex: [],
+          },
+          links: { dashboards: [], docs: [] },
+        },
+      };
+
+      const result = await lintProject(record);
+
+      const templateIssues = result.issues.filter(
+        (i) => i.message.includes("Workflow template")
+      );
+      expect(templateIssues).toHaveLength(0);
+      expect(result.passed).toBe(true);
+    });
+
+    it("returns no errors when all templates have valid DAGs", async () => {
+      const projectRoot = join(testRoot, "valid-templates");
+      await bootstrapProject(projectRoot);
+
+      const record: ProjectRecord = {
+        id: "valid-templates",
+        path: projectRoot,
+        manifest: {
+          id: "valid-templates",
+          title: "Valid Templates",
+          status: "active",
+          type: "swe",
+          owner: { team: "swe", lead: "lead" },
+          participants: [],
+          routing: { intake: { default: "Tasks/Backlog" }, mailboxes: { enabled: true } },
+          memory: {
+            tiers: { bronze: "cold", silver: "warm", gold: "warm" },
+            allowIndex: { warmPaths: [] },
+            denyIndex: [],
+          },
+          links: { dashboards: [], docs: [] },
+          workflowTemplates: {
+            "standard-sdlc": {
+              name: "standard-sdlc",
+              hops: [
+                { id: "implement", role: "swe-backend", dependsOn: [], joinType: "all", autoAdvance: true, canReject: false },
+                { id: "review", role: "swe-architect", dependsOn: ["implement"], joinType: "all", autoAdvance: true, canReject: false },
+              ],
+            },
+          },
+        },
+      };
+
+      const result = await lintProject(record);
+
+      const templateIssues = result.issues.filter(
+        (i) => i.message.includes("Workflow template")
+      );
+      expect(templateIssues).toHaveLength(0);
+      expect(result.passed).toBe(true);
+    });
+
+    it("returns error for each template with invalid DAG (cycle)", async () => {
+      const projectRoot = join(testRoot, "invalid-templates");
+      await bootstrapProject(projectRoot);
+
+      const record: ProjectRecord = {
+        id: "invalid-templates",
+        path: projectRoot,
+        manifest: {
+          id: "invalid-templates",
+          title: "Invalid Templates",
+          status: "active",
+          type: "swe",
+          owner: { team: "swe", lead: "lead" },
+          participants: [],
+          routing: { intake: { default: "Tasks/Backlog" }, mailboxes: { enabled: true } },
+          memory: {
+            tiers: { bronze: "cold", silver: "warm", gold: "warm" },
+            allowIndex: { warmPaths: [] },
+            denyIndex: [],
+          },
+          links: { dashboards: [], docs: [] },
+          workflowTemplates: {
+            "cyclic-dag": {
+              name: "cyclic-dag",
+              hops: [
+                { id: "A", role: "r", dependsOn: ["B"], joinType: "all", autoAdvance: true, canReject: false },
+                { id: "B", role: "r", dependsOn: ["A"], joinType: "all", autoAdvance: true, canReject: false },
+              ],
+            },
+          },
+        },
+      };
+
+      const result = await lintProject(record);
+
+      const templateIssues = result.issues.filter(
+        (i) => i.message.includes("Workflow template")
+      );
+      expect(templateIssues.length).toBeGreaterThan(0);
+      expect(result.passed).toBe(false);
+    });
+
+    it("error messages include the template name for actionability", async () => {
+      const projectRoot = join(testRoot, "named-error-templates");
+      await bootstrapProject(projectRoot);
+
+      const record: ProjectRecord = {
+        id: "named-error-templates",
+        path: projectRoot,
+        manifest: {
+          id: "named-error-templates",
+          title: "Named Error Templates",
+          status: "active",
+          type: "swe",
+          owner: { team: "swe", lead: "lead" },
+          participants: [],
+          routing: { intake: { default: "Tasks/Backlog" }, mailboxes: { enabled: true } },
+          memory: {
+            tiers: { bronze: "cold", silver: "warm", gold: "warm" },
+            allowIndex: { warmPaths: [] },
+            denyIndex: [],
+          },
+          links: { dashboards: [], docs: [] },
+          workflowTemplates: {
+            "my-broken-template": {
+              name: "my-broken-template",
+              hops: [
+                { id: "A", role: "r", dependsOn: ["B"], joinType: "all", autoAdvance: true, canReject: false },
+                { id: "B", role: "r", dependsOn: ["A"], joinType: "all", autoAdvance: true, canReject: false },
+              ],
+            },
+          },
+        },
+      };
+
+      const result = await lintProject(record);
+
+      const templateIssues = result.issues.filter(
+        (i) => i.message.includes("Workflow template")
+      );
+      expect(templateIssues.length).toBeGreaterThan(0);
+      // Each error message must include the template name
+      for (const issue of templateIssues) {
+        expect(issue.message).toContain("my-broken-template");
+      }
+      expect(templateIssues[0].severity).toBe("error");
+      expect(templateIssues[0].category).toBe("workflow-templates");
+    });
+  });
+
   describe("hierarchy validation", () => {
     it("warns when parentId references non-existent project", async () => {
       const projectRoot = join(testRoot, "child-missing-parent");
