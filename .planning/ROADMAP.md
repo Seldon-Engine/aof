@@ -177,4 +177,4 @@ Plans:
 | 13. Timeout, Rejection, and Safety | 3/3 | Complete   | 2026-03-03 | - |
 | 14. Templates, Ad-Hoc API, and Artifacts | 3/3 | Complete    | 2026-03-03 | - |
 | 15. Migration and Documentation | 3/3 | Complete    | 2026-03-03 | - |
-| 16. Integration Wiring Fixes | 1/1 | Complete   | 2026-03-03 | - |
+| 16. Integration Wiring Fixes | 1/1 | Complete    | 2026-03-03 | - |
