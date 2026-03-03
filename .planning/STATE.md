@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Task Workflows
 status: executing
-stopped_at: Completed 15-02 (DAG Documentation)
-last_updated: "2026-03-03T19:48:44.093Z"
+stopped_at: Completed 15-03 (Documentation Pivot and Gate Deprecation) -- Phase 15 complete -- v1.2 milestone done
+last_updated: "2026-03-03T19:55:29.545Z"
 last_activity: 2026-03-03 -- Completed plan 15-01 (Gate-to-DAG lazy migration)
 progress:
   total_phases: 6
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 15
-  completed_plans: 14
+  completed_plans: 15
   percent: 100
 ---
 
@@ -58,6 +58,7 @@ Progress: [████████████████████] 100%
 | Phase 14 P02 | 3min | 2 tasks | 4 files |
 | Phase 15 P01 | 4min | 1 tasks | 4 files |
 | Phase 15 P02 | 7min | 2 tasks | 7 files |
+| Phase 15 P03 | 5min | 2 tasks | 21 files |
 
 ## Accumulated Context
 
@@ -116,6 +117,8 @@ v1.2 research decisions:
 - [Phase 14]: task.path guard throws early rather than producing invalid paths
 - [Phase 15]: migrateGateToDAG mutates task in-place; gate canReject maps to rejectionStrategy=origin; unparseable when expressions skip condition with warning
 - [Phase 15]: User guide replaces both workflow-gates.md and custom-gates.md in single document
+- [Phase 15]: Gate source files kept with @deprecated markers (remove in v1.3 per user decision)
+- [Phase 15]: OpenClaw gateway references preserved unchanged (gateway != workflow gate)
 
 ### Roadmap Evolution
 
@@ -133,6 +136,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-03T19:48:44.090Z
-Stopped at: Completed 15-02 (DAG Documentation)
+Last session: 2026-03-03T19:55:29.543Z
+Stopped at: Completed 15-03 (Documentation Pivot and Gate Deprecation) -- Phase 15 complete -- v1.2 milestone done
 Resume file: None
