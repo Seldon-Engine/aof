@@ -369,6 +369,49 @@ describe("TaskWorkflow", () => {
     expect(result.state.hops.implement.status).toBe("complete");
   });
 
+  it("parses TaskWorkflow with optional templateName string", () => {
+    const raw = {
+      definition: {
+        name: "sdlc",
+        hops: [
+          { id: "implement", role: "swe-backend" },
+          { id: "review", role: "swe-architect", dependsOn: ["implement"] },
+        ],
+      },
+      state: {
+        status: "pending",
+        hops: {
+          implement: { status: "ready" },
+          review: { status: "pending" },
+        },
+      },
+      templateName: "standard-sdlc",
+    };
+
+    const result = TaskWorkflow.parse(raw);
+    expect(result.templateName).toBe("standard-sdlc");
+  });
+
+  it("parses TaskWorkflow without templateName (backward compat)", () => {
+    const raw = {
+      definition: {
+        name: "sdlc",
+        hops: [
+          { id: "implement", role: "swe-backend" },
+        ],
+      },
+      state: {
+        status: "pending",
+        hops: {
+          implement: { status: "ready" },
+        },
+      },
+    };
+
+    const result = TaskWorkflow.parse(raw);
+    expect(result.templateName).toBeUndefined();
+  });
+
   it("rejects TaskWorkflow without definition", () => {
     expect(() =>
       TaskWorkflow.parse({

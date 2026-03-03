@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ProjectManifest, PROJECT_ID_REGEX } from "../project.js";
+import { ProjectManifest, PROJECT_ID_REGEX, TemplateNameKey } from "../project.js";
 
 describe("ProjectManifest", () => {
   it("validates a valid manifest with all required fields", () => {
@@ -142,6 +142,126 @@ describe("ProjectManifest", () => {
 
     const result = ProjectManifest.parse(raw);
     expect(result.parentId).toBeUndefined();
+  });
+});
+
+describe("ProjectManifest — workflowTemplates", () => {
+  const baseManifest = {
+    id: "test-project",
+    title: "Test Project",
+    type: "swe" as const,
+    owner: { team: "swe", lead: "lead" },
+  };
+
+  it("parses successfully without workflowTemplates (backward compat)", () => {
+    const result = ProjectManifest.parse(baseManifest);
+    expect(result.workflowTemplates).toBeUndefined();
+  });
+
+  it("parses with a valid workflowTemplates map containing named WorkflowDefinition objects", () => {
+    const raw = {
+      ...baseManifest,
+      workflowTemplates: {
+        "standard-sdlc": {
+          name: "standard-sdlc",
+          hops: [
+            { id: "implement", role: "swe-backend" },
+            { id: "review", role: "swe-architect", dependsOn: ["implement"] },
+          ],
+        },
+        "simple-review": {
+          name: "simple-review",
+          hops: [{ id: "review", role: "swe-architect" }],
+        },
+      },
+    };
+
+    const result = ProjectManifest.parse(raw);
+    expect(result.workflowTemplates).toBeDefined();
+    expect(Object.keys(result.workflowTemplates!)).toEqual([
+      "standard-sdlc",
+      "simple-review",
+    ]);
+    expect(result.workflowTemplates!["standard-sdlc"].name).toBe("standard-sdlc");
+    expect(result.workflowTemplates!["standard-sdlc"].hops).toHaveLength(2);
+  });
+
+  it("rejects workflowTemplates with invalid WorkflowDefinition shapes", () => {
+    const raw = {
+      ...baseManifest,
+      workflowTemplates: {
+        "bad-template": {
+          name: "bad-template",
+          hops: [], // WorkflowDefinition requires at least 1 hop
+        },
+      },
+    };
+
+    expect(() => ProjectManifest.parse(raw)).toThrow();
+  });
+
+  it("rejects workflowTemplates key with uppercase letters", () => {
+    const raw = {
+      ...baseManifest,
+      workflowTemplates: {
+        "BadName": {
+          name: "BadName",
+          hops: [{ id: "a", role: "r" }],
+        },
+      },
+    };
+
+    expect(() => ProjectManifest.parse(raw)).toThrow();
+  });
+
+  it("rejects workflowTemplates key starting with hyphen", () => {
+    const raw = {
+      ...baseManifest,
+      workflowTemplates: {
+        "-bad-start": {
+          name: "bad-start",
+          hops: [{ id: "a", role: "r" }],
+        },
+      },
+    };
+
+    expect(() => ProjectManifest.parse(raw)).toThrow();
+  });
+
+  it("accepts workflowTemplates key with lowercase alphanumeric and hyphens", () => {
+    const raw = {
+      ...baseManifest,
+      workflowTemplates: {
+        "my-template-123": {
+          name: "my-template-123",
+          hops: [{ id: "a", role: "r" }],
+        },
+      },
+    };
+
+    const result = ProjectManifest.parse(raw);
+    expect(result.workflowTemplates!["my-template-123"]).toBeDefined();
+  });
+});
+
+describe("TemplateNameKey", () => {
+  it("accepts lowercase alphanumeric with hyphens", () => {
+    expect(TemplateNameKey.parse("standard-sdlc")).toBe("standard-sdlc");
+    expect(TemplateNameKey.parse("review123")).toBe("review123");
+    expect(TemplateNameKey.parse("a")).toBe("a");
+    expect(TemplateNameKey.parse("0simple")).toBe("0simple");
+  });
+
+  it("rejects uppercase letters", () => {
+    expect(() => TemplateNameKey.parse("BadName")).toThrow(/lowercase/i);
+  });
+
+  it("rejects keys starting with hyphen", () => {
+    expect(() => TemplateNameKey.parse("-bad")).toThrow(/lowercase/i);
+  });
+
+  it("rejects empty string", () => {
+    expect(() => TemplateNameKey.parse("")).toThrow();
   });
 });
 

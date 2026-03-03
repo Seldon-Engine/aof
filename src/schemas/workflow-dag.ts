@@ -239,6 +239,8 @@ export const TaskWorkflow = z.object({
   definition: WorkflowDefinition,
   /** Mutable execution progress. */
   state: WorkflowState,
+  /** Template name for traceability (informational -- full definition is source of truth). */
+  templateName: z.string().optional(),
 });
 export type TaskWorkflow = z.infer<typeof TaskWorkflow>;
 

@@ -7,9 +7,15 @@
 
 import { z } from "zod";
 import { WorkflowConfig } from "./workflow.js";
+import { WorkflowDefinition } from "./workflow-dag.js";
 
 /** Valid project ID: [a-z0-9][a-z0-9-]{1,63} or special _inbox */
 export const PROJECT_ID_REGEX = /^(_inbox|[a-z0-9][a-z0-9-]{1,63})$/;
+
+/** Template name key: lowercase alphanumeric with hyphens, must start with [a-z0-9]. */
+export const TemplateNameKey = z.string().regex(/^[a-z0-9][a-z0-9-]*$/, {
+  message: "Template name must be lowercase alphanumeric with hyphens",
+});
 
 /** Project status. */
 export const ProjectStatus = z.enum(["active", "paused", "archived"]);
@@ -128,5 +134,7 @@ export const ProjectManifest = z.object({
   sla: ProjectSLA.optional(),
   /** Workflow configuration (multi-stage task progression). */
   workflow: WorkflowConfig.optional(),
+  /** Named workflow templates -- static WorkflowDefinition snapshots reusable across tasks. */
+  workflowTemplates: z.record(TemplateNameKey, WorkflowDefinition).optional(),
 });
 export type ProjectManifest = z.infer<typeof ProjectManifest>;
