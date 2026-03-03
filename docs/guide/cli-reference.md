@@ -339,6 +339,7 @@ Create a new pending task
 | `-a, --agent <agent>` | Target agent |  |
 | `--tags <tags>` | Comma-separated tags |  |
 | `--project <id>` | Project ID | `"_inbox"` |
+| `-w, --workflow <template>` | Workflow template name from project manifest |  |
 
 ---
 

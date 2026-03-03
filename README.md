@@ -45,7 +45,7 @@ See the **[Getting Started Guide](docs/guide/getting-started.md)** for a complet
 | Feature | Description | Docs |
 |---------|-------------|------|
 | Org chart governance | Declarative YAML defines agents, teams, teams of teams, routing rules, and memory scopes | [Configuration](docs/guide/configuration.md) |
-| Workflow gates | Multi-stage review gates with rejection loops | [Workflow Gates](docs/guide/workflow-gates.md) |
+| DAG workflows | Multi-stage review workflows with rejection loops and parallel fan-out | [Workflow DAGs](docs/guide/workflow-dags.md) |
 | Protocol system | Typed inter-agent messages: handoff, resume, status update, completion | [Protocols](docs/guide/protocols.md) |
 | Semantic memory | HNSW vector index with hybrid search and tiered curation | [Memory](docs/guide/memory.md) |
 | Recovery-first | Deadletter queue, task resurrection, lease expiration, drift detection | [Recovery](docs/guide/recovery.md) |

@@ -3,7 +3,7 @@ title: "Org Charts"
 description: "Declarative YAML definitions for agents, teams, roles, and routing in AOF."
 ---
 
-The **org chart** (`org/org-chart.yaml`) is the foundational declaration of your agent topology. It defines who exists, what they can do, how they're organized, and what memory they can access. The scheduler and gate evaluator use the org chart as the single source of truth for routing decisions.
+The **org chart** (`org/org-chart.yaml`) is the foundational declaration of your agent topology. It defines who exists, what they can do, how they're organized, and what memory they can access. The scheduler and DAG evaluator use the org chart as the single source of truth for routing decisions.
 
 ## Structure
 
@@ -16,7 +16,7 @@ orgUnits: []               # Org units (departments, squads) — P1.1+
 groups: []                 # Cross-cutting groups — P1.1+
 memberships: []            # Agent-to-unit memberships — P1.1+
 relationships: []          # Agent relationships (escalation, delegation) — P1.1+
-roles: {}                  # Role-to-agent mappings for workflow gates
+roles: {}                  # Role-to-agent mappings for DAG workflows
 routing: []                # Tag/priority-based dispatch rules
 memoryPools: {}            # Memory tier configuration
 defaults: {}               # Default policies
@@ -116,7 +116,7 @@ teams:
 
 ## Roles
 
-Roles are the bridge between abstract workflow gates and concrete agents. A gate specifies a `role`; the org chart maps that role to one or more agents:
+Roles are the bridge between abstract DAG workflows and concrete agents. A hop specifies a `role`; the org chart maps that role to one or more agents:
 
 ```yaml
 roles:
@@ -135,7 +135,7 @@ roles:
     agents:
       - swe-qa
     description: "Performs quality assurance and testing"
-    requireHuman: false          # true = gate requires human agent approval
+    requireHuman: false          # true = hop requires human agent approval
 
   po:
     agents:
@@ -144,7 +144,7 @@ roles:
     requireHuman: true           # Final approval must be human
 ```
 
-When a gate requires `role: reviewer`, AOF resolves this through the `roles` mapping to find the correct agent. This decouples workflow definitions from specific agent IDs — you can rotate agents without changing any workflow files.
+When a hop requires `role: reviewer`, AOF resolves this through the `roles` mapping to find the correct agent. This decouples workflow definitions from specific agent IDs — you can rotate agents without changing any workflow files.
 
 ## Routing Rules
 
@@ -240,7 +240,7 @@ relationships:
 
 ## Generating an SDLC Org Chart
 
-The `aof init` wizard performs a shallow import of your OpenClaw agents into a flat list. To structure these agents into a proper Software Development Life Cycle (SDLC) with teams, roles, routing rules, and workflow gates, we recommend using a **collaborative LLM prompt**.
+The `aof init` wizard performs a shallow import of your OpenClaw agents into a flat list. To structure these agents into a proper Software Development Life Cycle (SDLC) with teams, roles, routing rules, and DAG workflows, we recommend using a **collaborative LLM prompt**.
 
 After running `aof init`, hand the following prompt to your main agent (or architect agent) to interactively design your org chart:
 
