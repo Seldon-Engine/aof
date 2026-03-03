@@ -11,6 +11,10 @@
  * - All exceptions caught and logged (never throws)
  * - Invalid expressions evaluate to false (skip gate)
  *
+ * @deprecated Since v1.2. Gate conditional evaluator is superseded by DAG condition evaluator.
+ * Kept for backward compatibility during gate-to-DAG migration period.
+ * Will be removed in v1.3.
+ * @see {evaluateCondition} from "./dag-condition-evaluator.js"
  * @module gate-conditional
  */
 

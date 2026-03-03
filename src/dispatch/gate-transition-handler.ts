@@ -7,6 +7,11 @@
  *
  * This is the glue between the pure gate evaluation logic and the filesystem-backed
  * task store. Designed for atomic operations and resilience.
+ *
+ * @deprecated Since v1.2. Gate transition handler is superseded by DAG transition handler.
+ * Kept for backward compatibility during gate-to-DAG migration period.
+ * Will be removed in v1.3.
+ * @see {handleDAGTransition} from "./dag-transition-handler.js"
  */
 
 import { readFile } from "node:fs/promises";

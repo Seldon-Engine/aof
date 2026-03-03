@@ -6,6 +6,11 @@
  *
  * This is Progressive Disclosure Level 2 (Design Doc §4.2):
  * The task itself teaches the agent what's expected at this gate.
+ *
+ * @deprecated Since v1.2. Gate context builder is superseded by DAG context builder.
+ * Kept for backward compatibility during gate-to-DAG migration period.
+ * Will be removed in v1.3.
+ * @see {buildHopContext} from "./dag-context-builder.js"
  */
 
 import type { Gate, GateOutcome } from "../schemas/gate.js";

@@ -6,6 +6,11 @@
  *
  * These are pure type definitions with no logic — the foundation for gate evaluation
  * and workflow orchestration.
+ *
+ * @deprecated Since v1.2. Gate schema is superseded by DAG workflow schema.
+ * Kept for backward compatibility during gate-to-DAG migration period.
+ * Will be removed in v1.3.
+ * @see {WorkflowDefinition} from "./workflow-dag.js"
  */
 
 import { z } from "zod";
