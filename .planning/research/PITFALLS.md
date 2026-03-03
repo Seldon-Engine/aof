@@ -1,486 +1,445 @@
-# Domain Pitfalls: v1.1 Stabilization & Ship
+# Domain Pitfalls: Per-Task Workflow DAG Execution
 
-**Domain:** Adding memory scaling fix, installer/updater, CI pipeline, and multi-project verification to an existing TypeScript agent orchestration system
-**Researched:** 2026-02-26
-**Confidence:** HIGH (codebase inspection of all four subsystems + hnswlib-node behavior analysis + CI/release tooling research)
+**Domain:** Adding DAG-based workflow execution to filesystem-backed agent orchestration (AOF v1.2)
+**Researched:** 2026-03-02
+**Confidence:** HIGH (all pitfalls derived from direct source code analysis of existing scheduler, gate system, task store, and protocol router + domain expertise in DAG execution engines)
 
 ---
 
 ## Critical Pitfalls
 
-Mistakes that cause data loss, broken releases, or require rewrites.
+Mistakes that cause state corruption, data loss, or require architectural rewrites.
 
-### Pitfall 1: HNSW Index Rebuild Loses Data When SQLite and HNSW Drift Apart
+### Pitfall 1: Parallel Hop Dispatch Race in Poll-Based Scheduler
 
-**What goes wrong:**
-The `rebuildHnswFromDb()` function in `src/memory/index.ts` (lines 59-70) reads all rows from `vec_chunks` and calls `hnsw.rebuild()`. This is the recovery path when the `.dat` file is missing or corrupt. The pitfall: if a crash happens *between* a successful SQLite INSERT (inside the transaction in `VectorStore.insertChunk()`, line 172-193) and the subsequent `hnsw.add()` call (line 197), the SQLite row exists but the HNSW index doesn't have it. This is fine -- rebuild recovers it.
+**What goes wrong:** When a DAG hop completes and enables two or more parallel successor hops, the scheduler's single `poll()` cycle detects all eligible hops and dispatches them. The current scheduler dispatches actions sequentially within `executeActions()` (line 62 of `action-executor.ts`: `for (const action of actions)`). If two parallel hops target the same task's work directory for artifact handoff, or if one hop's dispatch failure triggers a rollback that corrupts the other hop's already-running state, the task enters an inconsistent state.
 
-But the **real danger is the reverse**: `ensureCapacity()` calls `this.index.resizeIndex(max * GROWTH_FACTOR)` (line 129). If `resizeIndex` succeeds, `addPoint` is called, and then the SQLite transaction *fails* (disk full, WAL corruption, constraint violation), the HNSW index has a vector that SQLite doesn't. On the next `searchWithHnsw()`, HNSW returns an ID, the SQL lookup (`WHERE id IN (...)`) returns no row for it, and it's silently dropped from results. Worse: if chunk IDs are reused after a delete-and-reinsert cycle, HNSW might return a stale vector's ID that now maps to a *different* chunk in SQLite. The user gets the wrong memory content.
-
-The current code adds to HNSW *outside* the SQLite transaction (line 197 is after the transaction closure on line 195), so there is no rollback coordination between the two stores.
-
-**Why it happens:**
-HNSW (via hnswlib-node) is a C++ data structure with no transaction semantics. It cannot participate in SQLite's transaction. The "add to HNSW after SQLite commit" pattern is the correct ordering (only add if commit succeeded), but there is no mechanism to detect or recover from partial failures in the other direction.
+**Why it happens:** The current scheduler was designed for one-task-one-dispatch. It has no concept of "dispatch group" where multiple hops belong to the same DAG instance and must be tracked together. The `buildDispatchActions()` function in `task-dispatcher.ts` builds a flat list of `SchedulerAction[]` with no grouping metadata. The `SchedulerAction` type (line 71 of `scheduler.ts`) has a single `taskId` field -- it cannot represent "dispatch hop B of task X."
 
 **Consequences:**
-- Search returns wrong content (stale HNSW ID maps to new SQLite row).
-- Search silently drops results (HNSW ID has no corresponding SQLite row).
-- Memory corruption is invisible -- user stores information, searches succeed, but results are wrong.
+- Partial DAG execution: hop A dispatched, hop B fails, no awareness that they're related
+- Artifact directory contention: parallel hops writing to the same task's `work/` directory
+- State divergence: task frontmatter says "hop B failed" but hop A is still running with an active lease
+- Impossible recovery: scheduler cannot determine which hops succeeded vs. failed without per-hop state tracking
 
 **Prevention:**
-1. After rebuild, verify HNSW count matches SQLite count: `SELECT COUNT(*) FROM vec_chunks` must equal `hnsw.count`. Log a warning and re-rebuild if they diverge.
-2. In `searchWithHnsw()` (line 279-310), the existing code already handles missing rows by only returning rows found in SQLite. Add a metric: if `hits.length !== rows.length`, log a drift warning.
-3. Add a `memory:verify` CLI command that compares HNSW state against SQLite and reports discrepancies.
-4. On daemon shutdown (the `stop` handler at line 152), always save HNSW *after* ensuring SQLite WAL is checkpointed (`PRAGMA wal_checkpoint(TRUNCATE)`). This prevents the scenario where HNSW is saved with state that SQLite hasn't flushed to disk.
+- Model parallel hops as **independent sub-dispatches** with their own tracking, NOT as mutations to the parent task's status. Each hop gets its own lease, its own correlation ID, its own state entry in the task frontmatter.
+- Add a `hopStatus` map to the task frontmatter (e.g., `hops: { "build": { status: "in-progress", lease: {...} }, "lint": { status: "in-progress", lease: {...} }, "test": { status: "waiting" } }`) so the scheduler can track parallel hop progress independently.
+- Dispatch parallel hops in a "best-effort" mode: if hop B fails to dispatch, hop A continues. The DAG advancement logic on the next poll re-evaluates and retries hop B. Do NOT require atomic all-or-nothing dispatch of parallel hops -- this would block working hops when one has a transient failure.
+- Give each hop its own subdirectory under the task's `work/` dir (e.g., `work/build/`, `work/lint/`) to eliminate filesystem contention.
 
-**Detection:**
-- Search results contain empty or mismatched content.
-- `hnsw.count` differs from `SELECT COUNT(*) FROM vec_chunks`.
-- Event log shows `memory.search` events with fewer results than expected.
+**Detection:** Integration test where two parallel hops are dispatched and one spawn fails. Verify the other hop completes and the failed hop is retried on next poll without corrupting shared state.
 
-**Phase to address:** Memory subsystem fix (first priority -- data integrity).
+**Phase to address:** DAG schema design phase (first). The hop tracking data model must be correct before any execution logic is written.
 
 ---
 
-### Pitfall 2: HNSW markDelete Accumulation Degrades Search Quality Over Time
+### Pitfall 2: Non-Atomic DAG State Updates on Filesystem
 
-**What goes wrong:**
-The `HnswIndex.remove()` method (line 55-59) calls `markDelete()`, which flags a node in the HNSW graph as deleted but does not remove it from the graph structure. Over time, with many updates and deletes (which are delete + insert), the index accumulates "tombstones" -- deleted nodes that still occupy graph edges.
+**What goes wrong:** The current task store uses `rename()` for atomic status transitions (line 182 of `task-mutations.ts`). DAG state is richer than a single status -- a hop completion may require updating: (1) the hop's entry in the hops map, (2) the task's routing to point to the next hop's agent, (3) the gate/hop history, (4) condition evaluation results for successor hops, (5) possibly the task-level status (if all hops are done). If the process crashes between writing the hop status update and the routing update, the task is in an inconsistent state: the hop is marked complete but the next hop's agent was never assigned.
 
-This is a known HNSW algorithm limitation documented in academic research: "After substantial sequences of delete, insert, and query operations, the current HNSW index manifests shortcomings where specific data points may become inaccessible" (the "unreachable points phenomenon"). The `update()` method (line 43-51) marks the old entry deleted then inserts with `replaceDeleted: true`, which reuses the slot but not the graph edges. After hundreds of update cycles, the graph topology degrades and nearest-neighbor accuracy drops silently.
-
-The INITIAL_CAPACITY is 10,000 and GROWTH_FACTOR is 2 (lines 9-10). Once the index has been resized to 20,000+ capacity but only has 5,000 live entries (the rest deleted), memory usage is 4x what it should be, and search must traverse deleted nodes to find live ones.
-
-**Why it happens:**
-HNSW indexes are append-only graph structures by design. Deletion is O(1) (just flag it), but reclaiming the graph edges from deleted nodes requires a full rebuild. hnswlib provides no incremental garbage collection.
+**Why it happens:** The existing gate system performs all updates in a single `writeFileAtomic()` call in `applyGateTransition()` (gate-transition-handler.ts line 107). This works because the gate system is linear -- conceptually one thing changes at a time. The temptation with DAG state is to break updates across multiple writes for clarity or because different parts of the state are managed by different functions.
 
 **Consequences:**
-- Search recall drops from ~95% to ~70% after thousands of update cycles.
-- Memory usage grows without bound (deleted nodes still consume RAM).
-- P99 search latency increases as the graph becomes sparse.
-- This is invisible in testing because tests use small indexes with few delete/update cycles.
+- Task file says hop A is "done" but routing still points to hop A's agent
+- Scheduler re-dispatches hop A (already complete) because routing was not updated
+- Orphaned state: hop A marked done, hop B never started, task stuck forever
+- Manual intervention required (editing YAML frontmatter by hand)
 
 **Prevention:**
-1. Track a `tombstoneRatio = (maxElements - liveCount) / maxElements`. When it exceeds 0.5 (50% dead), trigger a rebuild from SQLite.
-2. Add the rebuild-on-high-tombstone-ratio to the daemon's periodic maintenance cycle (alongside HNSW save).
-3. The existing `rebuild()` method (line 98-105) is correct for this: read all live chunks from SQLite, rebuild fresh. Wire it into a scheduled maintenance task.
-4. Log the tombstone ratio on every HNSW save so operators can see the trend.
-5. In the performance test (hnsw-index.test.ts line 207-243), add a test that does 5000 insert/delete cycles then verifies recall is still above 90%.
+- **All DAG state updates for a single hop completion MUST happen in one `writeFileAtomic()` call.** This is the existing pattern in `applyGateTransition()` -- extend it, do not replace it.
+- Design the DAG evaluator as a pure function (following the pattern of `evaluateGateTransition()` in `gate-evaluator.ts` lines 104-177) that returns ALL updates as a single result object. The handler function applies them atomically.
+- Never update hop status in one write and routing in another write.
+- The DAG evaluator should compute the complete new frontmatter state and return it. The handler writes once.
 
-**Detection:**
-- Agents report "I searched memory but found nothing relevant" for topics that should have matches.
-- HNSW `count` stays high even after bulk deletes.
-- Search latency gradually increases over weeks of operation.
+**Detection:** Crash-injection test: kill the process during `writeFileAtomic()` and verify the task file is either fully updated or fully unchanged. `write-file-atomic` guarantees this on POSIX via rename-of-temp-file, but only if ALL changes go through a single call.
 
-**Phase to address:** Memory subsystem fix (capacity planning).
+**Phase to address:** Hop execution handler phase. The `applyGateTransition()` pattern MUST be preserved and extended.
 
 ---
 
-### Pitfall 3: Installer Overwrites Running Daemon State
+### Pitfall 3: Cycle Detection That Misses DAG-Internal Cycles
 
-**What goes wrong:**
-The `selfUpdate()` function in `src/packaging/updater.ts` (lines 59-189) removes the old installation contents and copies new files into `aofRoot`. The `preservePaths` default is `["config", "data", "tasks", "events"]` (line 64). Critically absent from this list:
-- `daemon.pid` -- the PID file for the running daemon.
-- `memory.db` and `memory-hnsw.dat` -- the SQLite database and HNSW index.
-- `state/` -- scheduler state, lease files, heartbeat files.
-- `.aof/migrations.json` -- migration history.
+**What goes wrong:** The existing scheduler has O(n+e) DFS cycle detection at lines 169-209 of `scheduler.ts` that checks `task.frontmatter.dependsOn`. This operates on **inter-task** dependencies. The new per-task workflow DAG introduces **intra-task** hop dependencies (hop A -> hop B within one task). If the DAG schema allows hop-level edges or conditional branching that can create cycles (e.g., hop A -> hop B -> hop A via a loopback condition), the existing cycle detector will not catch it because it only examines task-level dependencies.
 
-If a user runs `aof update` while the daemon is running (which they will, because the daemon is supposed to run always-on under launchd/systemd):
-1. The update removes `daemon.pid` -- but the daemon process is still running.
-2. The update removes `memory.db` -- the daemon has an open file descriptor, so SQLite might survive on Linux (file still accessible via fd), but on macOS HFS+ the file is *immediately deleted* and the fd becomes invalid.
-3. After update, the user starts a "new" daemon -- now two daemons run, both claiming the same port and task store. File locks become critical.
-
-**Why it happens:**
-The updater was built as a standalone operation ("stop, update, restart") but there's no mechanism to stop the daemon before updating, and the `preservePaths` list doesn't cover all runtime state.
+**Why it happens:** Two separate dependency graphs coexist: (1) task-to-task deps (existing `dependsOn` array in frontmatter), (2) hop-to-hop deps (new DAG edges within a task). Teams forget to validate the second graph because the first graph already "has cycle detection."
 
 **Consequences:**
-- Data loss: SQLite database deleted while daemon has it open.
-- Dual daemon: old daemon still running, new daemon starts alongside it.
-- State corruption: lease files, heartbeat files removed mid-operation.
-- Migration history lost: updater doesn't know which migrations were applied.
+- Infinite loop: scheduler dispatches hop A, which completes, advances to hop B, which completes, advances back to hop A
+- Scheduler CPU spike on every poll as it re-evaluates the stuck DAG
+- Task never reaches terminal state, consumes concurrency slots forever
+- The existing `maxHops` or similar safety valve does not exist yet
 
 **Prevention:**
-1. **Gate the update on daemon stop.** `selfUpdate()` must check if the daemon is running (PID file + process verification) and refuse to proceed, or stop it automatically.
-2. Expand `preservePaths` to include ALL runtime state: `["config", "data", "tasks", "events", "state", "memory", ".aof"]`. Better: use an exclude-list (only replace `src/`, `dist/`, `package.json`, `node_modules/`) instead of a preserve-list.
-3. Add the SQLite database path to the preserve list explicitly: `memory.db`, `memory-hnsw.dat`.
-4. After update, run pending migrations automatically (`runMigrations()` from `src/packaging/migrations.ts`).
-5. On macOS, `launchctl bootout` the LaunchAgent before update, `launchctl bootstrap` after.
+- Validate the hop DAG at **template registration time** (when `project.yaml` is loaded) and at **task creation time** (when ad-hoc workflows are composed by agents). Reject any workflow that contains a cycle.
+- Use topological sort to validate: if the sort cannot produce a complete ordering, the DAG has a cycle. Store the topological order in the workflow definition for efficient advancement.
+- Add a `maxHopTransitions` safety limit per task (e.g., 50). If a task has executed more than `maxHopTransitions` hop completions, deadletter it with a "suspected cycle or runaway workflow" reason. This catches both true cycles and accidental infinite retry loops.
+- Keep the existing inter-task cycle detection completely untouched. It operates on a different graph and should not be aware of hop-level dependencies.
 
-**Detection:**
-- User reports "all my memories are gone" after update.
-- Two daemon processes visible in `ps`.
-- `aof daemon status` shows unexpected PID.
+**Detection:** Unit test: create a workflow with hop A -> hop B -> hop A. Schema validation must reject it at creation time. Integration test: create a workflow with conditional branches that, under all possible condition combinations, cannot cycle -- verify execution completes.
 
-**Phase to address:** Installer/updater (must be solved before the first public update).
+**Phase to address:** DAG schema validation phase (first phase, alongside schema design).
 
 ---
 
-### Pitfall 4: curl | sh Installer Fails on Partial Download Without Error
+### Pitfall 4: Condition Evaluation Security with Agent-Composed Workflows
 
-**What goes wrong:**
-A `curl | sh` installer streams the script directly into the shell. If the network connection drops mid-download, `sh` executes whatever it received -- which might be a truncated command. For example, if the script contains:
+**What goes wrong:** The existing `evaluateGateCondition()` in `gate-conditional.ts` uses `new Function()` to evaluate `when` clauses (line 94). This was designed for admin-authored conditions in `project.yaml`. The v1.2 feature introduces **agent-composed ad-hoc workflows** -- agents create workflow DAGs at task creation time via the `aof_dispatch` tool. If agents can inject arbitrary JavaScript expressions into hop conditions, the `Function` constructor sandbox can be escaped (it prevents direct `require()` but allows access to `this`, constructor chains, and prototype pollution).
 
-```bash
-rm -rf /tmp/aof-staging
-mkdir -p ~/.openclaw/aof
-cp -R /tmp/aof-staging/* ~/.openclaw/aof/
-```
-
-And the download cuts off after `rm -rf /tmp/aof-staging`, the user's staging directory is deleted but nothing is copied. The shell exits 0 (the `rm` succeeded). The user thinks the install worked.
-
-A more insidious variant: the server can detect when `curl` output is piped to `sh` (by timing the TCP read patterns) and could serve a different script to piped vs direct downloads. This is documented in security research.
-
-**Why it happens:**
-`curl | sh` doesn't buffer the entire script before execution. Shell executes lines as they arrive. There's no integrity check on the full script content.
+**Why it happens:** The existing condition evaluator was designed for a trust model where conditions come from `project.yaml`, which is human-reviewed. Agent-composed workflows change the trust model -- conditions now come from potentially untrusted agent output.
 
 **Consequences:**
-- Partial installation appears to succeed (exit 0).
-- Existing installation destroyed (cleanup ran but copy didn't).
-- User's trust in the install mechanism is broken.
+- Agent-injected condition like `this.constructor.constructor("return process")().exit()` crashes the scheduler daemon
+- Prototype pollution: `metadata.__proto__.polluted = true` taints all subsequent evaluations in the process
+- Information leak: conditions can read scheduler process environment variables via constructor chain
+- Denial of service: infinite loop in condition expression (the timeout check at line 113 runs AFTER execution, so it cannot stop a while(true) loop)
 
 **Prevention:**
-1. **Wrap the entire script in a function** that's called at the end. If download is interrupted, the function is never invoked. This is the standard defense used by Homebrew, rustup, and nvm:
-   ```bash
-   install_aof() {
-     # all install logic here
-   }
-   install_aof
-   ```
-2. Include a checksum verification step early in the script that downloads the tarball, verifies its SHA256, then extracts.
-3. Provide an alternative: `curl -fsSL https://aof.dev/install.sh -o install.sh && sh install.sh` -- download first, then execute.
-4. Use `set -euo pipefail` at the top so any command failure aborts the script.
-5. Add platform detection (macOS vs Linux, x86_64 vs arm64) at the start and fail fast with a clear message for unsupported platforms.
+- **Do NOT allow arbitrary JavaScript in agent-composed workflow conditions.** Use a restricted condition format:
+  - **Recommended:** JSON-based condition DSL (e.g., `{"op": "has_tag", "value": "security"}` or `{"op": "metadata_gt", "key": "dealSize", "value": 50000}`). This is safe, extensible, and easy to validate at schema level with Zod discriminated unions.
+  - Keep the existing `evaluateGateCondition()` JavaScript eval ONLY for template workflows loaded from `project.yaml` (admin-authored, trusted).
+  - Agent-composed workflows validate conditions against the JSON DSL schema at creation time. Reject any condition that does not match.
+- The existing timeout check (line 113 of `gate-conditional.ts`) is post-hoc -- it cannot stop infinite loops. Fix this independently by wrapping evaluation in a `vm.createContext()` with `vm.runInContext()` and a real timeout, or by moving to the JSON DSL which has no eval at all.
+- Freeze context objects before passing to eval: `Object.freeze(context.tags)`, `Object.freeze(context.metadata)`.
 
-**Detection:**
-- Users report `~/.openclaw/aof/` exists but is empty or missing key files.
-- `aof --version` fails after "successful" install.
+**Detection:** Security test: attempt to break out of condition sandbox with known payloads (constructor chain, prototype pollution, process access, infinite loop). All must return `false` without side effects. Test the JSON DSL rejects arbitrary strings.
 
-**Phase to address:** Installer (before any public distribution).
+**Phase to address:** Schema design phase (define the condition format) AND hop execution phase (enforce restrictions at runtime).
 
 ---
 
-### Pitfall 5: CI Native Addon Builds Fail on GitHub Actions (better-sqlite3 + hnswlib-node)
+### Pitfall 5: Backward Compatibility -- Linear Gates to DAG Migration
 
-**What goes wrong:**
-AOF depends on two native Node.js addons:
-- `better-sqlite3` -- requires C++ compilation via node-gyp.
-- `hnswlib-node` -- requires C++ compilation with NAPI bindings.
+**What goes wrong:** Existing tasks in production have `gate`, `gateHistory`, and `reviewContext` fields in their frontmatter (defined in `schemas/task.ts` lines 115-118). The existing gate evaluation system is deeply wired into the codebase:
+- `gate-evaluator.ts` reads `task.frontmatter.gate.current` (line 108)
+- `gate-transition-handler.ts` orchestrates gate transitions and calls `evaluateGateTransition()`
+- `gate-context-builder.ts` builds context for agents using gate fields
+- `assign-executor.ts` injects `gateContext` into `TaskContext` (lines 148-166)
+- `scheduler.ts` calls `checkGateTimeouts()` (line 244)
+- The protocol router processes completion reports by calling `handleGateTransition()`
 
-On GitHub Actions (Ubuntu), `npm ci` triggers native compilation. This fails when:
-1. Node.js version doesn't match prebuilt binary version (prebuild-install can't find a match, falls back to node-gyp compilation, which requires `python3`, `make`, `g++`).
-2. Node.js major version upgrade changes V8 APIs -- better-sqlite3 v12+ has documented failures on Node 24 and 25 due to deprecated V8 APIs.
-3. GitHub Actions' `ubuntu-latest` changes OS version (Ubuntu 22.04 -> 24.04) and the prebuild binaries are compiled for the old glibc.
+If the new DAG system replaces gate fields with hop fields, in-flight tasks (currently mid-workflow with `gate.current = "review"`) will break: the scheduler tries to advance them using DAG logic, but they have no `hops` field, causing a crash or silent drop.
 
-This creates the "works on my Mac, fails in CI" problem that blocks every pull request.
-
-**Why it happens:**
-Native addons need to match the exact Node.js ABI version + OS + architecture. Prebuilt binaries are published for common combinations but not all. When `prebuild-install` falls back to compilation, build tools must be installed.
+**Why it happens:** A naive replacement that removes gate-related code and adds hop-related code will crash on any task that still has the old format. Even if no tasks are mid-workflow at migration time, the gate schemas, validation functions, and evaluators are embedded in the Zod schemas, the scheduler, and the protocol router.
 
 **Consequences:**
-- CI is red on day one.
-- Every Node.js version bump risks breaking CI.
-- New contributors can't get tests passing.
-- Release pipeline is blocked.
+- In-flight tasks stuck: mid-gate tasks cannot advance because the gate evaluator was removed or modified incompatibly
+- Schema validation failures: old tasks fail Zod parse if gate fields are removed from the schema
+- Data loss: gateHistory (audit trail) lost if not preserved during migration
+- Silent failures: scheduler skips tasks it cannot evaluate, they rot in `in-progress` forever with active leases
 
 **Prevention:**
-1. Pin Node.js version in CI to match development (Node 22 LTS -- not `latest`, not `lts/*`). Use exact version: `node-version: '22.13.1'`.
-2. Install build tools in CI: `apt-get install -y python3 make g++` before `npm ci`.
-3. Cache `node_modules` in CI keyed by `package-lock.json` hash + OS + Node version. This avoids recompiling native addons on every run.
-4. Add a `postinstall` script that verifies native addons loaded: `node -e "require('better-sqlite3'); require('hnswlib-node')"`.
-5. Test on both `ubuntu-latest` and `macos-latest` in the CI matrix, since the installer targets both platforms.
-6. Pin `ubuntu-22.04` explicitly rather than `ubuntu-latest` to avoid surprise OS upgrades.
+- **Phase 1: Make the DAG schema a superset of the gate schema.** Keep `gate`, `gateHistory`, `reviewContext` as valid (optional) fields in `TaskFrontmatter`. Add new `workflow` (inline DAG definition), `hopStatus` (per-hop state map), and `currentHops` (active hop IDs) fields alongside them. Zod validates both old and new formats.
+- **Phase 2: Dual-mode evaluator.** The scheduler and protocol router check: if task has inline `workflow` with `hopStatus`, use DAG evaluator. If task has `gate` field but no `workflow`, use existing `evaluateGateTransition()`. If neither, use simple completion (task -> done). This is a simple if/else at the callsite, not a complex abstraction.
+- **Phase 3: Migration tool (optional, deferred).** A CLI command `aof migrate-gates` that converts linear gate workflows to equivalent DAG workflows (each gate becomes a sequential hop). Run manually after confirming no tasks are mid-flight. Not required for v1.2 -- the dual-mode evaluator handles coexistence.
+- **Never delete the gate evaluator code during v1.2.** Mark it as legacy with JSDoc annotations but keep it fully functional.
+- The existing `WorkflowConfig` schema (schemas/workflow.ts) defines the PROJECT-level workflow template. The new per-task inline workflow is a DIFFERENT thing -- a task-level DAG definition. Use a different field name to avoid confusion (`workflow` vs the existing `routing.workflow` string reference).
 
-**Detection:**
-- CI workflow fails at `npm ci` or `npm test` with C++ compilation errors.
-- Tests pass locally but fail in CI with `Error: Cannot find module 'better-sqlite3'`.
+**Detection:** Integration test: create a task with old-format gate fields, run the new scheduler, verify it evaluates correctly using the legacy path. Create a task with new DAG fields, verify it uses the new path. Create both types, run scheduler, verify both advance correctly in the same poll cycle.
 
-**Phase to address:** CI pipeline (first step -- everything else depends on CI being green).
-
----
-
-### Pitfall 6: release-it Only Reads Last Commit for Version Bump and Changelog
-
-**What goes wrong:**
-The `@release-it/conventional-changelog` plugin determines the version bump type (major/minor/patch) from commit messages between the last git tag and HEAD. But it has a documented issue: "only the last commit made has effect on version bump and written to changelog." If a developer squash-merges a PR, the individual `feat:` and `fix:` commits are lost -- only the merge commit message matters. If the merge commit says "Merge pull request #42" (no conventional commit prefix), the plugin:
-1. Cannot determine bump type (defaults to patch or none).
-2. Generates an empty changelog entry.
-3. Creates a tag that doesn't reflect the actual changes.
-
-Additionally, in GitHub Actions, `actions/checkout@v4` defaults to `fetch-depth: 1` (shallow clone). With only one commit visible, the plugin has no history to compute the diff between tags. It sees "one commit since last tag" and produces a minimal changelog.
-
-**Why it happens:**
-Conventional changelog tools assume linear history with conventional commit messages on every commit. Squash merges, rebase workflows, and shallow clones all violate this assumption.
-
-**Consequences:**
-- Changelog is empty or misleading.
-- Version bumps don't reflect actual changes (breaking change shipped as patch).
-- Git tag conflicts when the computed version matches an existing tag.
-- Release process fails silently (exit 0, but wrong version published).
-
-**Prevention:**
-1. In the CI workflow, use `fetch-depth: 0` in `actions/checkout` to get full git history.
-2. Configure squash merge commit message format in GitHub repo settings to use conventional commit format: `feat: PR title (#42)`.
-3. Add a pre-release check that verifies the computed changelog is non-empty before tagging.
-4. Use `release-it`'s `--dry-run` in CI to preview the changelog and version bump before actually releasing.
-5. Add git tag conflict detection: before `release-it` runs, check `git tag -l "v${version}"` and abort if it exists.
-6. Consider using `commit-and-tag-version` as an alternative that handles prerelease tag conflicts automatically.
-
-**Detection:**
-- Releases appear with empty changelogs.
-- Version numbers skip unexpectedly (1.0.0 -> 1.0.1 when a `feat:` was expected to bump to 1.1.0).
-- CI release job fails with "tag already exists."
-
-**Phase to address:** CI pipeline (release automation).
+**Phase to address:** MUST be addressed in the schema design phase (first phase) by making schemas backward-compatible. The dual-mode evaluator goes in the scheduler integration phase.
 
 ---
 
 ## Moderate Pitfalls
 
-### Pitfall 7: HNSW Rebuild During Startup Blocks Daemon for Minutes
+Issues that cause bugs, performance problems, or significant rework but not data loss.
 
-**What goes wrong:**
-`registerMemoryModule()` in `src/memory/index.ts` (lines 88-98) calls `rebuildHnswFromDb()` synchronously during plugin registration if the `.dat` file is missing or corrupt. For a database with 50,000+ chunks (not unreasonable after weeks of agent operation), this rebuild takes 30-60 seconds. During this time, the daemon's startup is blocked -- no health endpoint, no task polling, no agent dispatching. The OS supervisor (launchd/systemd) may interpret this as a failed start and kill the process, triggering an infinite restart loop.
+### Pitfall 6: Poll-Based Advancement Latency for Multi-Hop DAGs
+
+**What goes wrong:** The current scheduler polls at 30-second intervals. In a linear gate workflow, a task with 3 gates takes at minimum 3 poll cycles to complete (90 seconds) even if each gate's agent completes instantly. A DAG with 5 sequential hops takes 5 poll cycles (2.5 minutes minimum). For complex DAGs with 10+ sequential hops, the minimum end-to-end latency becomes unacceptable.
+
+**Why it happens:** The poll-based scheduler was designed for task lifecycle management (backlog -> ready -> in-progress -> done), where each transition happens at human timescales (hours between stages). Workflow hops happen at agent timescales (seconds to minutes per hop). The 30-second poll interval was appropriate for the original use case but creates artificial latency when hops should chain immediately.
+
+**Consequences:**
+- A 5-sequential-hop workflow takes 2.5+ minutes even when all agents complete in seconds
+- Users perceive the system as slow and unresponsive
+- Agents idle waiting for the next poll to dispatch them their next piece of work
+- Temptation to reduce poll interval globally, increasing filesystem I/O for ALL tasks
 
 **Prevention:**
-1. Start the daemon *without* HNSW (fallback to `sqlite-vec` search, which the code already supports -- `searchWithSqliteVec()` on line 313).
-2. Rebuild HNSW in the background after startup. Swap the index reference atomically when rebuild completes.
-3. Set a startup timeout in the LaunchAgent plist that exceeds expected rebuild time (120s).
-4. Log progress during rebuild: "Rebuilding HNSW index: 15000/50000 vectors..."
+- **Do NOT reduce the global poll interval.** It would increase filesystem scan load for all tasks, including ones with no DAG at all.
+- Implement **completion-triggered advancement**: when an agent completes a hop (calls `aof_task_complete` or the protocol router processes a completion report), the completion handler immediately evaluates the DAG and dispatches the next hop(s) without waiting for the next poll. The poll cycle becomes a **fallback safety net** that catches missed advancements.
+- This is architecturally straightforward: `handleGateTransition()` in `gate-transition-handler.ts` is already called synchronously on completion (not during poll). The new `handleHopCompletion()` function can follow the same pattern: evaluate DAG -> determine next hops -> dispatch immediately.
+- Keep the poll as a safety net: it catches cases where the completion-triggered path fails (e.g., process crash between hop completion write and next hop dispatch).
+- The `executeAssignAction()` function in `assign-executor.ts` is already callable outside the poll cycle -- it just needs to be wired into the completion handler.
 
-**Detection:**
-- Daemon takes >30s to start.
-- Health endpoint returns nothing for the first minute after `aof daemon start`.
-- launchd logs show repeated start/kill cycles.
+**Detection:** Latency test: measure end-to-end time for a 5-hop sequential workflow. With poll-only advancement, expect ~150s. With completion-triggered advancement, expect ~5-10s (agent processing time only).
 
-**Phase to address:** Memory subsystem fix.
+**Phase to address:** Hop execution/advancement phase. Design the completion handler to do immediate advancement, with poll as fallback.
 
 ---
 
-### Pitfall 8: Installer Doesn't Detect or Preserve Existing Memory Database
+### Pitfall 7: Template vs. Ad-Hoc Workflow Schema Divergence
 
-**What goes wrong:**
-The `install()` function in `src/packaging/installer.ts` runs `npm ci` in the target directory. If the AOF data directory (`~/.openclaw/aof/`) already exists with a `memory.db`, the installer doesn't know about it -- `preservePaths` in the installer refers to paths relative to the npm package directory, not the data directory. The installer and data directory are separate locations.
+**What goes wrong:** Templates (defined in `project.yaml` via the existing `WorkflowConfig` schema) and ad-hoc workflows (composed by agents at task creation time, stored inline in task frontmatter) use different code paths for validation and storage. Over time, templates get features that ad-hoc workflows don't support (or vice versa), creating a behavioral split. Agents composing ad-hoc workflows hit validation errors that templates don't, or templates support condition types that ad-hoc workflows silently ignore.
 
-The real problem: the `curl | sh` installer might set up a fresh `~/.openclaw/aof/` directory, overwriting any existing configuration. The `selfUpdate()` in `updater.ts` preserves paths within `aofRoot`, but `aofRoot` might be the npm install location, not `~/.openclaw/aof/`.
+**Why it happens:** Templates are validated at project load time via `validateWorkflow()` (schemas/workflow.ts line 77). Ad-hoc workflows would be validated at task creation time via the `aof_dispatch` tool. Different validation timing + different code paths + different storage locations = different behavior over time.
+
+**Consequences:**
+- Agent creates an ad-hoc workflow that works, then someone creates a template with the same structure that fails validation (or vice versa)
+- Bug reports about "inconsistent workflow behavior" that are actually validation differences
+- Feature additions require updating two validation paths and two storage paths
 
 **Prevention:**
-1. During install, detect if `~/.openclaw/aof/` already exists. If it does, print: "Found existing AOF data at ~/.openclaw/aof/. Preserving configuration and memories."
-2. Never touch the data directory during an npm package update. The installer should only modify the package directory (`~/Projects/AOF/` or wherever npm installs).
-3. Add a `--clean` flag that explicitly opts into wiping existing data (with confirmation prompt).
-4. Document the separation: package files vs runtime data vs configuration.
+- **One Zod schema, one validation function.** Both templates and ad-hoc workflows MUST use the identical Zod schema (a new `WorkflowDAG` schema) and the same validation function.
+- Templates are stored in `project.yaml` and referenced by name in `routing.workflow`. Ad-hoc workflows are stored inline in the task's frontmatter. But the schema is the same.
+- The `aof_dispatch` tool should accept a `workflow` parameter that is either: (a) a string template name (resolved from project.yaml), or (b) an inline workflow DAG object (validated against the same `WorkflowDAG` schema).
+- At dispatch time, if a template name is provided, resolve it to the full DAG definition and embed it in the task frontmatter. The scheduler only ever reads the embedded definition -- it never goes back to `project.yaml` to resolve templates. This means template changes don't affect in-flight tasks.
 
-**Detection:**
-- User reports "my memories disappeared" after reinstall.
-- `memory.db` is missing but the chunks directory still exists.
+**Detection:** Schema conformance test: generate valid workflow DAG objects, verify they pass validation whether used as a template or as an inline definition. Verify error messages are identical.
 
-**Phase to address:** Installer/updater.
+**Phase to address:** Schema design phase. Define one schema used for both paths.
 
 ---
 
-### Pitfall 9: Project Routing Fails Silently When Manifest ID Doesn't Match Directory Name
+### Pitfall 8: Artifact Handoff Filesystem Contention Between Hops
 
-**What goes wrong:**
-In `src/projects/registry.ts` (lines 135-139), if `manifest.id !== dirName`, the project is loaded with an error but *no manifest*. Downstream code that checks `record.manifest` will skip this project entirely -- no routing, no tools, no memory pool. The user creates a project directory `my-project/`, writes `project.yaml` with `id: myproject` (missing hyphen), and the project silently doesn't exist in the system.
+**What goes wrong:** The design specifies "artifact handoff via task work directory." The existing task store creates `inputs/`, `work/`, `outputs/` subdirectories per task (task-store.ts lines 138-142 in `ensureTaskDirs()`). Teams assume hop B can read hop A's outputs by reading files from the shared `work/` directory. Problems: (1) parallel hops share the same `work/` directory, causing filename collisions, (2) hop A might still be writing when hop B starts reading, (3) there is no convention for which subdirectory each hop uses, (4) large artifacts accumulate in the task directory across all hops.
 
-The error message is stored in `record.error` but nothing surfaces it to the user unless they run a lint command. Task dispatch to this project silently falls through to `_inbox` or is dropped.
+**Why it happens:** The current `inputs/`/`work/`/`outputs/` convention was designed for a single agent working on a single task. It has no concept of per-hop artifact namespacing. The `ensureTaskDirs()` function creates flat directories with no hop-scoped structure.
+
+**Consequences:**
+- Race conditions: hop B reads partial files that hop A is still writing
+- Name collisions: parallel hops A and B both write `results.json` to `work/`, last writer wins
+- Wrong directory: hop B looks in `work/` but hop A wrote to `outputs/`
+- Directory bloat: every hop's artifacts accumulate forever
 
 **Prevention:**
-1. On daemon startup, log all project discovery errors at WARN level -- not just store them in the record.
-2. Add a `projects:validate` step to `aof init` and `aof daemon start` that checks for ID/directory mismatches.
-3. Consider auto-fixing: if manifest ID doesn't match directory name and there's no other project with that ID, suggest the fix: "Project 'my-project' has manifest ID 'myproject'. Fix manifest or rename directory."
-4. Add to the project linter (`src/projects/lint.ts`) a specific check that emits a prominent error for this case.
+- Define a clear artifact contract per hop:
+  - Each hop writes to `work/<hop-id>/outputs/`
+  - The DAG advancement logic (not the agent) copies or symlinks predecessor outputs to successor's `work/<hop-id>/inputs/`
+  - Each hop reads from `work/<hop-id>/inputs/`
+- Alternative simpler approach: pass artifacts by reference, not by value. The task body includes file paths; agents read/write to those paths. The DAG advancement logic does not copy files, it just updates the task body with the paths from the previous hop's outputs. This avoids filesystem management complexity.
+- Either way: the task's top-level `outputs/` directory receives the final hop's outputs only. Intermediate hop outputs stay in `work/<hop-id>/`.
 
-**Detection:**
-- Agent dispatched to a project gets routed to `_inbox` instead.
-- `aof projects list` shows the project with an error status that nobody reads.
+**Detection:** Integration test: parallel hops A and B each write to `work/<hop-id>/outputs/`. Verify no filename collision. Successor hop C reads from `work/C/inputs/` and finds artifacts from both A and B.
 
-**Phase to address:** Projects verification.
+**Phase to address:** Artifact handoff design (sub-phase of execution logic).
 
 ---
 
-### Pitfall 10: Project Memory Pools Are Not Isolated -- State Leakage Between Projects
+### Pitfall 9: DAG Deadlock from Skipped Conditional Hops
 
-**What goes wrong:**
-The memory module (`src/memory/index.ts`) creates a *single* `VectorStore` and `HybridSearchEngine` per daemon instance. All projects share the same SQLite database (`memory.db`). The `pool` field on chunks is meant to separate them, but search queries in `searchWithHnsw()` (line 279) search the ENTIRE HNSW index -- there is no pool filtering at the HNSW level. Pool filtering would need to happen after HNSW returns results, in the SQL step. But the current SQL (`WHERE id IN (...)`) doesn't filter by pool either.
+**What goes wrong:** A DAG with conditional branches can create implicit deadlocks. Example: hop C depends on both hop A and hop B. Hop A has condition `when: metadata.type === 'backend'`. Hop B has condition `when: metadata.type === 'frontend'`. For a task where `metadata.type === 'backend'`, hop B's condition is false so it is skipped. But hop C still waits for both A and B to complete. Since B will never run, hop C deadlocks.
 
-This means: Agent A working on Project Alpha searches memory and gets results from Project Beta's memory pool. For a multi-tenant or multi-project setup, this is information leakage.
+**Why it happens:** Cycle detection (topological sort) verifies there are no circular dependencies, but it does NOT verify that all dependency paths are satisfiable under all condition combinations. This is a **reachability problem**, not a cycle problem. The existing gate system avoids this because gates are linear -- a skipped gate just advances to the next one (gate-evaluator.ts lines 205-220). DAGs with parallel branches and join points introduce this new failure mode.
+
+**Consequences:**
+- Task permanently stuck: hop C waits for hop B which was skipped and will never complete
+- Scheduler reports no errors (no cycle detected, no timeout yet)
+- Only discovered after SLA violation fires hours later
+- Manual intervention: someone must edit the task frontmatter to mark hop B as "skipped"
 
 **Prevention:**
-1. Add pool filtering to `searchWithHnsw()`: after HNSW returns candidate IDs, add `AND pool = ?` to the SQL query that hydrates the results.
-2. Consider per-pool HNSW indexes (separate `.dat` files) for true isolation. This trades memory for correctness.
-3. At minimum, add pool-scoped search to the `HybridSearchEngine`: `search(query, { pool: "project-alpha" })`.
-4. Add a test that inserts chunks into two pools and verifies search only returns results from the queried pool.
+- When a hop is skipped (condition evaluates to false), the DAG advancement logic MUST **propagate the skip through the dependency graph**. If hop B is skipped, all downstream hops that depend on B should treat B's dependency as satisfied (skipped = done for dependency purposes).
+- Implement this rule: a hop is eligible for dispatch when all of its predecessors are either "done" or "skipped".
+- Document this clearly in the workflow spec: "Skipped hops are treated as completed for dependency resolution."
+- Add a "stuck DAG" detector in the scheduler: if a task has active hops but no hop has advanced in the last N poll cycles, and no hop is currently in-progress, emit an alert. This catches deadlocks that the skip-propagation logic misses.
+- For template validation: verify that for each possible condition combination, at least one path from start to end is satisfiable. This is exponential in the number of conditions, so limit to templates with fewer than 12 conditional hops (covers practical use cases).
 
-**Detection:**
-- Agent finds memories from a different project.
-- Memory search returns irrelevant results that belong to another team/project context.
+**Detection:** Unit test: DAG with a conditional skip that creates a dependency deadlock. Verify the advancement logic resolves it by treating the skipped hop as satisfied. Test both direct dependency (C depends on skipped B) and transitive dependency (D depends on C which depends on skipped B).
 
-**Phase to address:** Projects verification (critical for multi-project correctness).
+**Phase to address:** DAG advancement logic phase. The skip-propagation rule is core to correct DAG execution.
 
 ---
 
-### Pitfall 11: CI Test Flakiness From Pre-existing Failures
+### Pitfall 10: Scheduler Poll Scan Cost Scaling with DAG Complexity
 
-**What goes wrong:**
-The test suite currently has 11 failing tests and 13 pending tests (out of 2433). The failures are in:
-- `runDaemonStep` (2 failures) -- daemon wizard tests.
-- `OpenClawAdapter` (9 failures) -- gateway adapter tests.
+**What goes wrong:** The current `poll()` function calls `store.list()` which scans ALL status directories and reads + parses EVERY `.md` task file (task-store.ts lines 241-288, full directory scan with `readdir()` + `readFile()` per file). For each task with a DAG workflow, the scheduler must now also evaluate the DAG to determine which hops are eligible for dispatch. With 100 tasks, each having a 10-hop DAG, the scheduler is potentially evaluating 1000 hop eligibility checks per poll cycle, on top of the filesystem I/O.
 
-If CI is set up to fail on *any* test failure, the pipeline will never be green. If CI is set up to tolerate some failures (e.g., `--passWithNoTests`), real regressions will be hidden in the noise.
+**Why it happens:** `store.list()` has no caching, no indexing, no incremental scanning. The current system works because task counts are modest (dozens). DAG evaluation adds per-task compute overhead on top of per-task I/O.
+
+**Consequences:**
+- Poll cycles exceed 30s, causing overlapping polls (the daemon does not have a guard against this)
+- Filesystem I/O spikes every 30 seconds
+- Scheduler latency increases linearly with (number of tasks * average hops per task)
+- On slow filesystems (network mounts, encrypted volumes), severe degradation
 
 **Prevention:**
-1. Fix or skip the 11 known failures *before* enabling CI. Mark them with `it.skip` and a tracking comment: `// TODO(AOF-xxx): Fix after gateway adapter refactor`.
-2. CI must require 0 failures (no "expected failures" threshold). Skipped tests are acceptable; failed tests are not.
-3. Add a CI step that counts skipped tests and fails if the count *increases* (prevents test-skip creep).
-4. Separate unit tests from integration tests in CI. Unit tests must be deterministic. Integration tests (which need a gateway) run on `workflow_dispatch` only (as the existing `e2e-tests.yml` already does).
+- **Do NOT evaluate DAGs inside the hot poll path for tasks that have not changed.** Only evaluate DAGs for tasks whose `updatedAt` timestamp changed since last poll evaluation. Cache the last-seen `updatedAt` per task ID across poll cycles.
+- The existing `allTasks` list is fetched once at the top of `poll()` (line 130). Use this cached list for all DAG evaluations within the cycle. Do not call additional `store.get()` calls during DAG evaluation.
+- For the completion-triggered advancement path (Pitfall 6 mitigation), most DAG evaluations happen outside the poll cycle entirely, dramatically reducing poll-time work.
+- Do not evaluate DAGs for tasks in terminal states (`done`, `cancelled`, `deadletter`). These are scanned by `store.list()` but should be filtered out before DAG evaluation.
+- Long-term (v2): consider a filesystem watcher (fsevents/inotify) for incremental change detection instead of full directory scans. But this is out of scope for v1.2.
 
-**Detection:**
-- CI is red from day one and nobody investigates because "those tests were already failing."
-- A real regression is merged because it was hidden among the known failures.
+**Detection:** Performance benchmark: create 100 tasks with 10-hop DAGs in various states. Measure poll cycle duration. Target: under 5 seconds (leaving 25s headroom within the 30s interval).
 
-**Phase to address:** CI pipeline (prerequisite -- clean baseline).
+**Phase to address:** Scheduler integration phase. Efficiency must be designed in from the start.
 
 ---
 
-### Pitfall 12: Migration Framework Has No Atomicity Guarantee
+### Pitfall 11: Lease System Is Per-Task, Not Per-Hop
 
-**What goes wrong:**
-`runMigrations()` in `src/packaging/migrations.ts` (lines 60-119) runs migrations sequentially. If migration 3 of 5 fails, migrations 1 and 2 have already been applied and recorded in `migrations.json`. The error is thrown, but the system is now in a partially migrated state. There is no transaction wrapping the batch of migrations, and the `down()` methods are optional (`down?: ...` on line 15) -- so there may be no way to reverse the partial application.
+**What goes wrong:** The current lease system tracks a single lease per task: `lease?: TaskLease` in the TaskFrontmatter schema (schemas/task.ts line 100). `TaskLease` has one `agent` field (line 41). When parallel hops run, multiple agents work on the same task simultaneously. Each agent needs its own lease to prevent the scheduler from reclaiming the task, but the schema only allows one lease.
 
-Worse: `recordMigration()` (lines 138-153) reads, modifies, and writes `migrations.json` as JSON with no file locking. If the daemon crashes during this write (which is a `writeFile`, not an atomic rename), the JSON file could be truncated/corrupt, losing the migration history entirely.
+**Why it happens:** The lease system was designed for the one-task-one-agent model. `acquireLease()` in `store/lease.ts` transitions the task to `in-progress` and sets a single lease. `isLeaseActive()` in `lease-manager.ts` checks the single lease. `startLeaseRenewal()` renews the single lease. None of these functions are hop-aware.
+
+**Consequences:**
+- When parallel hop B's agent acquires a lease, it overwrites hop A's lease. Hop A's heartbeat renewal fails because the lease agent no longer matches.
+- When the scheduler checks for expired leases, it sees hop B's lease and considers hop A's agent as having no lease. Hop A gets reclaimed (requeued to ready) while still running.
+- `isLeaseActive()` returns true for hop B's agent but false for hop A's, causing duplicate dispatches.
 
 **Prevention:**
-1. Use atomic file writes for `migrations.json`: write to a temp file, then `rename()` (which is atomic on POSIX).
-2. Add a `--dry-run` flag to `runMigrations()` that validates all migrations can be applied without actually running them.
-3. Consider wrapping multiple migrations in a SQLite transaction where possible (for database migrations).
-4. Record migration state *before* each migration runs (as "in-progress"), then update to "applied" after. This lets recovery detect interrupted migrations.
-5. Always provide `down()` methods for critical migrations (schema changes, data transformations).
+- Extend the lease model to support per-hop leases. Two options:
+  - **Option A (recommended):** Add a `hopId` field to `TaskLease` and change `lease?: TaskLease` to `leases?: TaskLease[]` (array). Each hop dispatch creates a lease entry with the hop ID. Lease renewal, expiry, and cleanup all filter by hop ID. This is a schema change but preserves the existing lease infrastructure.
+  - **Option B:** Do not modify the task-level lease at all. Instead, store hop leases in the task's `metadata` field (e.g., `metadata.hopLeases: { "build": { agent: "swe-backend", expiresAt: "..." } }`). This avoids a schema change but puts lease state in an untyped bag.
+- **Option A is cleaner** because it keeps lease operations type-safe and avoids scattering lease logic across metadata. The existing `acquireLease()` / `releaseLease()` / `isLeaseActive()` functions get a `hopId` parameter (optional for backward compatibility -- omitting it means task-level lease, matching current behavior).
+- The task-level `status` should only transition to `in-progress` when the FIRST hop is dispatched, and only transition out of `in-progress` when ALL active hops are complete or the task is explicitly blocked/cancelled.
 
-**Detection:**
-- Update fails partway and `aof` won't start because half the migrations were applied.
-- `migrations.json` is empty or contains truncated JSON.
+**Detection:** Integration test: dispatch two parallel hops for the same task. Verify both agents have active leases. Verify neither agent's lease expiry triggers reclaim of the other agent's hop.
 
-**Phase to address:** Installer/updater (migration integrity).
+**Phase to address:** Schema design phase (lease model extension) and hop execution phase (lease function modifications).
 
 ---
 
 ## Minor Pitfalls
 
-### Pitfall 13: Installer Uses execSync Which Blocks Event Loop
+Issues that cause developer friction, test failures, or minor user-facing bugs.
 
-**What goes wrong:**
-`install()` in `src/packaging/installer.ts` (line 76-83) uses `execSync("npm ci", ...)`. On a slow network or with many dependencies, this blocks for 30+ seconds. If this runs during an update while the daemon is still handling requests, the event loop is frozen.
+### Pitfall 12: Event Schema Bloat in JSONL Logs
+
+**What goes wrong:** Each hop transition emits a `gate_transition` event (gate-transition-handler.ts line 194). A 10-hop DAG emits 10+ transition events per task execution. With 50 tasks/day, that is 500+ events/day just for hop transitions, on top of existing `scheduler.poll`, `dispatch.matched`, `sla.violation`, and other events. Daily JSONL files grow significantly, and event replay for state recovery becomes slower.
 
 **Prevention:**
-Use `child_process.execFile` with `{ shell: true }` (async). Stream stdout/stderr for progress indication.
+- Use compact event payloads for hop transitions. Include only the delta (`fromHop`, `toHop`, `outcome`), not the full DAG state.
+- Emit a single `workflow.completed` summary event when the entire DAG finishes, with the full hop execution history embedded. Individual `hop.transition` events are operational detail; the summary is the semantic record.
+- Use new event type names (`hop.transition`, `hop.dispatched`, `workflow.completed`, `workflow.failed`) to distinguish from the existing gate events (`gate_transition`). Do not reuse gate event names for different semantics.
 
-**Phase to address:** Installer.
+**Phase to address:** Event design (part of schema phase). Define event shapes before implementing handlers.
 
 ---
 
-### Pitfall 14: extractTarball Is a Stub
+### Pitfall 13: Test Explosion from DAG Execution Path Combinatorics
 
-**What goes wrong:**
-`extractTarball()` in `src/packaging/updater.ts` (lines 338-345) contains only `await mkdir(targetDir, { recursive: true })` and a comment: "Placeholder: in real implementation, extract tarball to targetDir." If the updater is used before this is implemented, it will "succeed" but install an empty directory.
+**What goes wrong:** A DAG with N hops and C conditional hops has O(2^C) possible execution paths. Writing explicit test cases for every path is infeasible for DAGs with more than 5 conditions. Teams either (a) under-test and miss edge cases in condition/skip logic, or (b) spend excessive time writing repetitive tests.
 
 **Prevention:**
-Either implement extraction (using Node.js `tar` package or `child_process.execFile("tar", ["-xzf", ...])`) or throw `new Error("extractTarball not implemented")` so it fails loudly.
+- Use property-based testing (vitest has no built-in property testing, but `fast-check` integrates easily): generate random valid DAGs, execute them through the evaluator, verify invariants:
+  - No hop can be "in-progress" without a lease
+  - No hop can be "done" without all predecessors "done" or "skipped"
+  - All hops eventually reach a terminal state (done, skipped, or failed)
+  - The DAG completes in at most N hop transitions (where N is the total number of hops)
+- Test the DAG evaluator (pure function, no I/O) exhaustively with property-based tests. Test the handler (I/O integration) with a handful of representative DAGs (linear, diamond, wide-parallel, deep-conditional).
+- Define core invariants as runtime assertions that run in the DAG evaluator during development/testing mode but are no-ops in production.
 
-**Phase to address:** Installer/updater (blocking -- the entire update mechanism doesn't work without this).
+**Phase to address:** Testing strategy, defined alongside schema design, implemented alongside execution phases.
 
 ---
 
-### Pitfall 15: Project Linter Writes Report to state/ That May Not Exist
+### Pitfall 14: OpenClaw No-Nested-Sessions Constraint Leaks Into DAG Design
 
-**What goes wrong:**
-`writeLintReport()` in `src/projects/lint.ts` (line 113) writes to `join(record.path, "state", "lint-report.md")`. If the project was just created or the `state/` directory doesn't exist (bootstrapping failed, or it's a legacy project), `writeFile` throws ENOENT. The lint result is computed but never persisted, and the error may propagate up and skip remaining projects.
+**What goes wrong:** OpenClaw does not support nested agent sessions. The scheduler must advance hops between **independent, sequential sessions** (one session per hop dispatch). Teams designing the DAG system may inadvertently assume agents can spawn sub-agents or call into other agents' sessions to do hop handoffs. This creates a dependency on functionality that does not exist in the OpenClaw gateway.
 
 **Prevention:**
-Add `await mkdir(join(record.path, "state"), { recursive: true })` before `writeFile`. Or call `bootstrapProject()` as a prerequisite.
+- Treat each hop as a completely independent agent session. The ONLY communication channel between hops is the task file (frontmatter + body + work directory). No in-session IPC, no agent-to-agent calls, no shared session state.
+- The scheduler (not any agent) is responsible for hop advancement. Agents call `aof_task_complete` with their hop outcome. The scheduler evaluates the DAG and dispatches the next hop.
+- Document this constraint prominently in the workflow design spec and in the agent-facing API documentation.
+- The `GatewayAdapter.spawnSession()` interface (executor.ts) spawns exactly one session for one hop. The DAG advancement logic calls `spawnSession()` once per eligible hop.
 
-**Phase to address:** Projects verification.
+**Phase to address:** Architecture design (documented constraint) and execution phase (enforced in protocol router).
+
+---
+
+### Pitfall 15: Workflow Name Collision Between Templates and Inline Definitions
+
+**What goes wrong:** A template in `project.yaml` is named "deploy-pipeline". An agent creates an ad-hoc inline workflow and the task's `routing.workflow` field says `"deploy-pipeline"`. When the scheduler resolves the workflow, which definition wins -- the project template or the inline definition?
+
+**Prevention:**
+- Clear resolution rule: **inline workflow definitions in task frontmatter always take precedence over template references.** If a task has both an inline workflow and a `routing.workflow` string, the inline definition is used.
+- Template resolution happens at dispatch time, not at execution time. When `aof_dispatch` is called with a template name, the template is resolved from `project.yaml`, expanded into the full DAG definition, and embedded inline in the task frontmatter. After that point, the task carries its own workflow definition and the template name is metadata only.
+- This means template changes do NOT affect in-flight tasks (a task created with template v1 keeps v1 even if the template is updated to v2).
+
+**Phase to address:** Schema design phase. Define the resolution rule in the schema spec.
 
 ---
 
 ## Phase-Specific Warnings
 
-| Phase Topic | Likely Pitfall | Mitigation |
-|-------------|---------------|------------|
-| Memory HNSW fix | Rebuild causes data loss (Pitfall 1) | Verify count parity between HNSW and SQLite after every rebuild |
-| Memory HNSW fix | Tombstone accumulation (Pitfall 2) | Track tombstone ratio, trigger periodic rebuild when >50% |
-| Memory HNSW fix | Startup blocked by rebuild (Pitfall 7) | Use sqlite-vec fallback, rebuild HNSW asynchronously post-startup |
-| Memory HNSW fix | Cross-project memory leakage (Pitfall 10) | Add pool filtering to HNSW search path |
-| Installer | Overwrites running daemon (Pitfall 3) | Gate update on daemon stop, expand preservePaths |
-| Installer | Partial download executes (Pitfall 4) | Wrap script in function, use checksums |
-| Installer | Memory DB not preserved (Pitfall 8) | Separate package dir from data dir, never touch ~/.openclaw/aof/ |
-| Installer | extractTarball is a stub (Pitfall 14) | Implement before shipping |
-| Installer | Migrations not atomic (Pitfall 12) | Atomic file writes, in-progress tracking |
-| CI pipeline | Native addon build failures (Pitfall 5) | Pin Node version, install build tools, cache node_modules |
-| CI pipeline | Changelog generation broken (Pitfall 6) | fetch-depth: 0, conventional commit enforcement |
-| CI pipeline | Pre-existing test failures (Pitfall 11) | Fix or skip known failures before enabling CI |
-| Projects | Manifest ID mismatch silent failure (Pitfall 9) | Log warnings on startup, validate in init |
-| Projects | Memory pool leakage (Pitfall 10) | Pool-scoped HNSW search |
-| Projects | Lint report write fails (Pitfall 15) | Ensure state/ exists before writing |
+| Phase Topic | Likely Pitfall | Mitigation | Severity |
+|-------------|---------------|------------|----------|
+| DAG schema design | Pitfall 3 (cycle detection), Pitfall 5 (backward compat), Pitfall 7 (schema divergence), Pitfall 11 (lease model) | Validate DAG at creation; superset schema; one schema for all; per-hop leases | CRITICAL |
+| Hop execution handler | Pitfall 2 (non-atomic writes), Pitfall 1 (parallel dispatch race) | Single writeFileAtomic per hop completion; per-hop state tracking in frontmatter | CRITICAL |
+| Scheduler DAG advancement | Pitfall 6 (poll latency), Pitfall 9 (deadlock from skipped hops), Pitfall 10 (scan cost) | Completion-triggered advancement; skip = done for deps; cache task state across polls | MODERATE |
+| Condition evaluation | Pitfall 4 (security with agent-composed conditions) | JSON DSL for agent conditions; keep JS eval only for admin templates | CRITICAL |
+| Artifact handoff | Pitfall 8 (directory contention) | Per-hop subdirectories under work/; explicit input/output contract | MODERATE |
+| Backward compatibility | Pitfall 5 (gate-to-DAG migration) | Dual-mode evaluator; keep gate code as legacy; CLI migration tool (optional) | CRITICAL |
+| Event logging | Pitfall 12 (JSONL bloat) | Compact hop events; summary event on DAG completion; new event type names | MINOR |
+| Testing | Pitfall 13 (combinatorial explosion) | Property-based testing with fast-check; invariant assertions | MINOR |
 
-## Integration-Specific Gotchas
+---
 
-| Integration Point | Mistake | Correct Approach |
-|-------------------|---------|------------------|
-| HNSW + SQLite | Assuming they're always in sync | They drift. Always rebuild from SQLite as source of truth. Add parity checks. |
-| HNSW resize + transaction | HNSW add outside SQLite transaction | Correct ordering (add after commit), but need drift detection for edge cases |
-| Installer + launchd | Updating files while daemon runs | Stop daemon before update. On macOS: `launchctl bootout` first. |
-| Installer + npm | Using `npm install` when lockfile exists | Use `npm ci` for reproducible installs. Fallback to `npm install` only when no lockfile. Already correct in code (line 62-68). |
-| CI + native addons | Relying on prebuild binaries | They may not exist for your Node+OS combo. Always have build tools installed. |
-| CI + changelog | Shallow clone | Conventional changelog needs full history. `fetch-depth: 0` is mandatory. |
-| Project registry + routing | Assuming all discovered projects have valid manifests | Filter to `record.manifest !== undefined` before routing. Log the rest. |
-| Project memory + search | Assuming pool field provides isolation | Pool is metadata only. HNSW search is global. Must add SQL filter. |
-| Self-update + migration | Assuming migrations are idempotent | They may not be. Track in-progress state. Use down() for rollback. |
+## AOF-Specific Integration Concerns
 
-## "Looks Done But Isn't" Checklist (v1.1 specific)
+These are specific to how the DAG system must integrate with AOF's existing modules.
 
-- [ ] **HNSW capacity fix:** `ensureCapacity()` resizes the index -- but there is no parity check between HNSW and SQLite after resize. Verify: insert 10,001 items (exceeding INITIAL_CAPACITY), search confirms all items are findable.
-- [ ] **HNSW persistence:** Save/load round-trips the index -- but `rebuildHnswFromDb()` is the only recovery path if the file is corrupt. Verify: corrupt the `.dat` file, restart daemon, confirm all memories are still searchable.
-- [ ] **Installer preservePaths:** Lists "config, data, tasks, events" -- but misses memory.db, state/, .aof/. Verify: run update, confirm all runtime state survives.
-- [ ] **extractTarball:** Is a stub (Pitfall 14). Verify: the update mechanism actually extracts files.
-- [ ] **CI native builds:** Tests pass locally -- but native addons may fail to compile on GitHub Actions. Verify: CI runs `npm ci && npm test` successfully on ubuntu-22.04.
-- [ ] **Changelog generation:** release-it is configured -- but shallow clone produces empty changelog. Verify: CI release produces a non-empty CHANGELOG.md entry.
-- [ ] **Project routing:** Projects are discovered -- but memory search doesn't filter by pool. Verify: search within project A doesn't return project B's memories.
-- [ ] **Project manifest validation:** Invalid projects get error records -- but errors are not surfaced to users. Verify: create a project with mismatched ID, confirm the user sees a warning.
+### Concern A: ITaskStore Contract Does Not Model Hop State
 
-## Recovery Strategies
+The `ITaskStore` interface (store/interfaces.ts) has no methods for hop-level operations. All state changes go through `update()` (metadata patch), `transition()` (status change), or raw `writeFileAtomic()` in handlers.
 
-| Pitfall | Recovery Cost | Recovery Steps |
-|---------|---------------|----------------|
-| HNSW/SQLite drift (Pitfall 1) | LOW | Delete `.dat` file, restart daemon. HNSW rebuilds from SQLite automatically. |
-| Tombstone degradation (Pitfall 2) | LOW | Force rebuild: delete `.dat` file and restart. Or add a `memory:rebuild` CLI command. |
-| Update overwrites daemon state (Pitfall 3) | HIGH | If memory.db is lost, it's gone. Must restore from backup (if `createBackup()` ran) or from original markdown files via re-indexing. |
-| Partial installer execution (Pitfall 4) | MEDIUM | Re-run installer. If data directory was corrupted, restore from backup or re-initialize. |
-| CI native build failure (Pitfall 5) | LOW | Pin Node version, add build tools to CI config. No data loss. |
-| Wrong version bump (Pitfall 6) | MEDIUM | Delete the wrong tag (`git tag -d v1.1.1 && git push origin :v1.1.1`), fix changelog, re-release. |
-| Startup blocked by rebuild (Pitfall 7) | LOW | Wait. Or increase launchd timeout. Or delete `.dat` file and use sqlite-vec fallback. |
-| Lost memory DB on reinstall (Pitfall 8) | HIGH | Re-index from source files. Curated memories (manually stored by agents) are lost permanently. |
-| Manifest ID mismatch (Pitfall 9) | LOW | Edit `project.yaml` to match directory name. Re-run `aof projects lint`. |
-| Memory pool leakage (Pitfall 10) | LOW | No data loss. Fix search query. Results were wrong but data is intact. |
-| Pre-existing test failures hide regressions (Pitfall 11) | MEDIUM | Audit test history. May need to revert recent merges if a regression was hidden. |
-| Partial migration (Pitfall 12) | HIGH | Manual intervention to determine which migrations applied. May need to manually edit migrations.json and re-run. |
+**Mitigation:** Hop state lives in the task frontmatter, managed via `update()` or direct writes in the hop transition handler. Do NOT add hop-specific methods to `ITaskStore` -- this would expand the interface for a feature-specific concern. Instead, the DAG handler reads the task, computes new state, and writes the full task atomically. The store is a dumb persistence layer.
+
+### Concern B: VALID_TRANSITIONS State Machine vs. Hop States
+
+The `VALID_TRANSITIONS` map in `schemas/task.ts` (lines 137-146) defines task-level status transitions. Hop states (waiting, in-progress, done, skipped, failed) are a SEPARATE state machine that should NOT be conflated with task-level status.
+
+**Mitigation:** Hop status lives in the task's frontmatter `hopStatus` map, NOT in the filesystem directory structure. Task-level directory moves (`rename()`) only happen for task-level transitions:
+- First hop dispatched: `ready -> in-progress` (directory move)
+- All hops complete: `in-progress -> done` (directory move, or `in-progress -> review` if there's a review hop)
+- Task blocked: `in-progress -> blocked` (directory move)
+- Hop-level state changes: frontmatter write only (NO directory move)
+
+This preserves the existing state machine and filesystem layout while adding DAG state as frontmatter metadata.
+
+### Concern C: Protocol Router Completion Path Needs Hop Awareness
+
+The protocol router in `src/protocol/router.ts` processes completion reports from agents. Currently it calls `handleGateTransition()` for gate-enabled tasks. For DAG-enabled tasks, it must call a new `handleHopCompletion()` function. The router needs to distinguish between the two.
+
+**Mitigation:** In the protocol router's completion handling:
+1. Read the task
+2. If task has `hopStatus` field (inline DAG), call `handleHopCompletion()`
+3. Else if task has `gate` field, call `handleGateTransition()` (existing legacy path)
+4. Else, call simple completion (task -> done)
+
+The completion report from the agent must include the `hopId` so the handler knows which hop completed. Add `hopId?: string` to the completion report schema.
+
+### Concern D: GatewayAdapter.spawnSession TaskContext Needs Hop Metadata
+
+The `TaskContext` interface in `executor.ts` currently has `taskId`, `taskPath`, `agent`, `priority`, `routing`, `projectId`, `projectRoot`, `taskRelpath`, and `gateContext`. For DAG hops, the spawned agent needs to know which hop it's executing and what the hop's specific instructions/role are.
+
+**Mitigation:** Add `hopId?: string` and `hopContext?: { role: string; description?: string; predecessors: string[] }` to `TaskContext`. The `assign-executor.ts` code that builds `TaskContext` (lines 136-145) adds this when dispatching a hop. The `gateContext` field is preserved for backward compatibility with the legacy gate path.
+
+### Concern E: The `routing.workflow` Field Already Exists
+
+The `TaskRouting` schema (schemas/task.ts line 67) already has `workflow: z.string().optional()` which is used to reference a template workflow name from `project.yaml`. The new inline DAG definition needs a DIFFERENT field name.
+
+**Mitigation:** Use `workflowDef` (or `pipeline`, or `dag`) for the inline DAG definition in the task frontmatter. Keep `routing.workflow` as the template name reference. At dispatch time, if `routing.workflow` is set and `workflowDef` is not, resolve the template and populate `workflowDef`. After dispatch, the scheduler only reads `workflowDef`.
+
+---
 
 ## Sources
 
-- Codebase inspection: `src/memory/store/hnsw-index.ts`, `src/memory/store/vector-store.ts`, `src/memory/index.ts`, `src/packaging/installer.ts`, `src/packaging/updater.ts`, `src/packaging/migrations.ts`, `src/projects/registry.ts`, `src/projects/resolver.ts`, `src/projects/lint.ts`
-- [hnswlib markDelete unreachable points phenomenon](https://arxiv.org/html/2407.07871v2) -- academic research on HNSW deletion degradation
-- [hnswlib markDelete behavior (GitHub issue #275)](https://github.com/nmslib/hnswlib/issues/275) -- markDelete does not remove graph edges
-- [hnswlib resizeIndex (GitHub issue #39)](https://github.com/nmslib/hnswlib/issues/39) -- resize without save/reload
-- [better-sqlite3 Node.js 24+ build failures (GitHub issue #1411)](https://github.com/WiseLibs/better-sqlite3/issues/1411) -- native addon compilation breaking changes
-- [better-sqlite3 GitHub Actions install failure (GitHub issue #716)](https://github.com/WiseLibs/better-sqlite3/issues/716)
-- [release-it/conventional-changelog only reads last commit (GitHub issue #16)](https://github.com/release-it/conventional-changelog/issues/16)
-- [release-it changelog before version bump (GitHub issue #830)](https://github.com/release-it/release-it/issues/830)
-- [curl | sh partial execution attack](https://snakesecurity.org/blog/pipepunisher-exploiting-shell-install-scripts/) -- PIPE abuse in shell installers
-- [curl | sh server-side detection](https://www.lesinskis.com/dont-pipe-curl-into-bash.html) -- servers can detect piped execution
-- [BetterCLI installer patterns](https://bettercli.org/design/distribution/self-executing-installer/) -- function-wrapping defense
-- [launchd: daemon must not self-daemonize](https://www.launchd.info/) -- launchd process tracking requirements
-- Test suite output: 2433 total, 2409 passed, 11 failed, 13 pending (as of 2026-02-26)
+All pitfalls derived from direct source code analysis of the AOF codebase at `/Users/xavier/Projects/AOF/src/`:
+
+- `dispatch/scheduler.ts` -- poll cycle, cycle detection, gate timeout checks (HIGH confidence)
+- `dispatch/gate-evaluator.ts` -- pure gate evaluation, role enforcement, condition skip logic (HIGH confidence)
+- `dispatch/gate-transition-handler.ts` -- gate I/O orchestration, atomic writes (HIGH confidence)
+- `dispatch/gate-conditional.ts` -- condition evaluation via Function constructor, timeout model (HIGH confidence)
+- `dispatch/gate-context-builder.ts` -- gate context injection for agents (HIGH confidence)
+- `dispatch/task-dispatcher.ts` -- dispatch action building, throttle checks (HIGH confidence)
+- `dispatch/action-executor.ts` -- sequential action execution loop (HIGH confidence)
+- `dispatch/assign-executor.ts` -- agent session spawning, lease acquisition, correlation IDs (HIGH confidence)
+- `store/task-store.ts` -- filesystem task CRUD, ensureTaskDirs, directory layout (HIGH confidence)
+- `store/task-mutations.ts` -- atomic transition via rename(), writeFileAtomic pattern (HIGH confidence)
+- `store/interfaces.ts` -- ITaskStore contract (HIGH confidence)
+- `schemas/task.ts` -- task frontmatter schema, valid transitions, gate/lease fields (HIGH confidence)
+- `schemas/gate.ts` -- gate types, history entries, review context (HIGH confidence)
+- `schemas/workflow.ts` -- workflow config schema, validation function (HIGH confidence)
+
+Domain expertise on DAG execution engines, filesystem atomicity guarantees, and workflow scheduler design patterns (MEDIUM confidence -- training data, not verified against external sources for this specific combination of constraints).
 
 ---
-*Pitfalls research for: AOF v1.1 Stabilization & Ship*
-*Researched: 2026-02-26*
-*Supersedes: v1.0 pitfalls research from 2026-02-25 (those pitfalls remain valid; this document covers v1.1-specific additions)*
+
+*Pitfalls research for: AOF v1.2 per-task workflow DAG execution*
+*Researched: 2026-03-02*
+*Supersedes: v1.1 pitfalls (those remain valid for their respective subsystems; this document covers v1.2 DAG-specific pitfalls)*

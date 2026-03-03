@@ -1,261 +1,251 @@
 # Project Research Summary
 
-**Project:** AOF v1.1 Stabilization & Ship
-**Domain:** TypeScript plugin for agentic orchestration — stabilization milestone
-**Researched:** 2026-02-26
+**Project:** AOF v1.2 Per-Task Workflow DAG Execution
+**Domain:** DAG-based workflow engine for multi-agent orchestration plugin
+**Researched:** 2026-03-02
 **Confidence:** HIGH
 
 ## Executive Summary
 
-AOF v1.1 is a stabilization-and-ship milestone for an existing TypeScript agent orchestration plugin. The codebase is substantially built: scheduler, daemon, MCP tools, memory pipeline, packaging subsystem, and project routing scaffolding all exist. The v1.1 work is not greenfield development — it is finding and closing the gap between "code exists" and "code ships reliably." The four objectives are: fix a P0 HNSW memory crash, create a `curl | sh` installer, add CI with release automation, and verify multi-project task routing end-to-end.
+AOF v1.2 replaces the linear gate-based workflow system with per-task workflow DAGs -- directed acyclic graphs of "hops" that support conditional branching and logical parallelism. This is not a greenfield build. The existing codebase has a complete gate evaluation system (schemas, evaluator, context builder, transition handler, timeout/escalation, protocol router integration) that serves as both the foundation and the backward-compatibility constraint. The work is a schema evolution and scheduler integration problem, not a "DAG library" problem. All four research tracks converge on the same conclusion: zero new runtime dependencies are needed. The existing Zod + TypeScript + filesystem task store + poll-based scheduler provides everything required. Topological sort is 30 lines; hop lifecycle is a lookup table; condition evaluation extends the existing sandboxed evaluator.
 
-The recommended approach follows a strict dependency order: memory first (standalone P0 fix with no upstream dependencies), CI second (creates the release pipeline that the installer depends on), project routing verification third (benefits from CI for test validation), and the installer last (depends on CI producing release tarball artifacts). This order is unambiguous and driven by hard technical dependencies, not priority opinion. Deviating from it — for instance, building the installer before CI creates release artifacts — produces an installer that has nothing to download.
+The recommended approach builds in strict dependency order: schemas first (everything depends on data shapes), pure DAG evaluator second (algorithmic core with no I/O, easy to test exhaustively), scheduler integration third (connects DAG to dispatch), completion handling fourth (closes the dispatch-complete-advance loop), and templates/API last (user-facing features on top of working machinery). A critical architectural decision constrains the entire design: OpenClaw does not support nested agent sessions. Each hop must be an independent scheduler dispatch. "Parallel" in the DAG means no ordering dependency, not simultaneous execution -- the scheduler serializes physical dispatch to one hop at a time per task. This simplifies the lease model and eliminates race conditions on task state, but means multi-branch DAGs execute branches sequentially.
 
-The key risks are concentrated in two areas: data integrity and release mechanics. On the data side, the HNSW index and SQLite database can drift out of sync after crashes, and the update mechanism has a critical path where it can delete the live SQLite database while the daemon holds an open file descriptor. On the release side, `release-it` requires a full git history (`fetch-depth: 0` in CI) to generate accurate changelogs, and 11 pre-existing test failures must be resolved before CI can ever be green. None of these are novel problems — all have well-established mitigations documented in the research — but each must be addressed explicitly or it will resurface during the first public release.
+The top risks are: (1) non-atomic DAG state updates on the filesystem causing task corruption if hop status and routing are written in separate calls -- mitigated by preserving the existing single-writeFileAtomic pattern from gate transitions; (2) backward compatibility breakage for in-flight gate-based tasks -- mitigated by a dual-mode evaluator that detects gate vs. DAG tasks and routes to the appropriate code path, keeping all gate code intact; (3) condition evaluation security when agents compose ad-hoc workflows with arbitrary JavaScript expressions -- mitigated by restricting agent-authored conditions to a safe JSON DSL while keeping full JavaScript evaluation only for admin-authored templates; and (4) DAG deadlocks from skipped conditional hops blocking join points -- mitigated by treating skipped hops as satisfied for dependency resolution.
 
 ## Key Findings
 
 ### Recommended Stack
 
-The stack requires no changes. All four v1.1 features are delivered with the existing dependency tree (`hnswlib-node` 3.0.0, `better-sqlite3` 12.6.2, `sqlite-vec` 0.1.7-alpha.2, `release-it` 19.2.4, `vitest`, `tsc`). The work is three new files and modifications to five existing ones. The most important stack constraint is the Node.js version pin: Node 22.x is required everywhere — in the `engines` field, in CI, and in the installer's prerequisite check. Node 24 and 25 have documented `better-sqlite3` build failures due to V8 API changes, and this constraint must not be relaxed.
+No new npm dependencies. The entire v1.2 DAG engine builds on the existing stack. The decision to build in-house rather than adopt external libraries (graphlib, xstate, bull, temporal) is well-justified: AOF DAGs are small (5-20 hops), the filesystem-based store is incompatible with Redis-backed job queues, and the existing codebase already has the patterns needed (cycle detection, sandboxed eval, atomic writes, concurrency tracking).
 
-**Core technologies:**
-- `hnswlib-node` 3.0.0: HNSW approximate nearest-neighbor index — already installed; `resizeIndex`/`getIdsList` APIs confirmed from installed type definitions; 3.0.0 is the latest release (no upgrade available)
-- `better-sqlite3` 12.6.2: SQLite for chunk metadata, FTS, and vec search fallback — already installed; has prebuilt binaries for Node 22 ubuntu-latest; do NOT use Node 24/25
-- `sqlite-vec` 0.1.7-alpha.2: Vector search fallback in SQLite — already installed; ships precompiled; do NOT replace HNSW with this (10x slower, alpha quality)
-- `release-it` 19.2.4 + `@release-it/conventional-changelog`: changelog generation and GitHub Releases — already fully configured in `.release-it.json`; do NOT switch to release-please or semantic-release
-- GitHub Actions: CI and release automation — already in use for docs workflow; no new CI platform needed
-- POSIX sh (`#!/bin/sh`): curl-pipe-sh installer entry point — wider compatibility than bash; established pattern from nvm/pnpm
+**Core technologies (unchanged):**
+- `zod` ^3.24.0: DAG schema definition with `.superRefine()` for cycle detection and reachability validation at parse time
+- `yaml` ^2.7.0: Parse workflow templates from `project.yaml`
+- `write-file-atomic` ^7.0.0: Atomic hop state updates preserving crash-safety guarantees
+- `vitest` ^3.0.0: Unit tests for DAG evaluator, integration tests for scheduler; consider `fast-check` for property-based testing of DAG execution paths
 
-**New files to create (no new npm dependencies):**
-- `scripts/install.sh` — POSIX shell curl-pipe-sh entry point
-- `.github/workflows/ci.yml` — test on PR/push to main
-- `.github/workflows/release.yml` — manual release automation with tarball artifact
+**New modules to create (6 files):**
+- `src/schemas/workflow-dag.ts` -- Hop + WorkflowDAG Zod schemas
+- `src/schemas/dag-state.ts` -- HopState + DAGState runtime schemas
+- `src/dispatch/dag-evaluator.ts` -- Pure DAG evaluation function (no I/O)
+- `src/dispatch/dag-validator.ts` -- Cycle detection, reachability, orphan detection
+- `src/dispatch/hop-context-builder.ts` -- Build agent context for hop dispatch
+- `src/dispatch/dag-completion-handler.ts` -- DAG-aware completion processing
 
-**Existing files to modify:**
-- `src/memory/store/hnsw-index.ts` — fix capacity handling in `load()` and `rebuild()`
-- `src/memory/index.ts` — improve error logging in `rebuildHnswFromDb()`
-- `src/packaging/updater.ts` — implement `extractTarball()` stub (currently placeholder)
-- `src/openclaw/adapter.ts` + `src/mcp/tools.ts` — add `projectId` param and project tools
+**Existing modules to extend (7 files):**
+- `src/schemas/task.ts` -- Add `dagState` field to TaskFrontmatter
+- `src/schemas/project.ts` -- Add `workflows` map for named DAG templates
+- `src/dispatch/scheduler.ts` -- Add DAG hop dispatch step to poll cycle
+- `src/protocol/router.ts` -- Branch completion handling for DAG vs. gate tasks
+- `src/dispatch/assign-executor.ts` -- Inject hop context alongside gate context
+- `src/dispatch/escalation.ts` -- Extend timeout checking for hops
+- `src/schemas/event.ts` -- Add hop-level event types
 
 ### Expected Features
 
-The four table-stakes features for v1.1 are entirely internal-facing. No new user-visible feature is being added — this milestone makes existing features work correctly and makes the project installable by people other than the author.
+**Must have (table stakes -- required to replace linear gates):**
+- Hop schema evolving from Gate (id, role, dependsOn, when, canReject, timeout, escalateTo)
+- Per-task workflow DAG schema with inline definition and template reference modes
+- DAG validation at creation time (cycles, reachability, role resolution, unique IDs)
+- Scheduler DAG advancement (evaluate graph on hop completion, dispatch next eligible hops)
+- Hop completion and outcome handling (complete, blocked, needs_review with same-hop rejection)
+- Artifact handoff between hops via hop-scoped directories (outputs/<hopId>/)
+- Pre-defined workflow templates in project.yaml (workflowTemplates map)
+- Agent API for composing ad-hoc workflows at task creation (MCP tool extension)
+- Workflow execution state tracking (per-hop status in task frontmatter)
+- Backward-compatible migration from linear gates (dual-mode evaluator, gate code preserved)
 
-**Must have (table stakes):**
-- HNSW index dynamic capacity — P0 broken; inserts crash, search returns empty; AOF cannot function without working memory
-- Installer shell script (`scripts/install.sh`) — v1.1 goal is "installable by others"; without this only the author can run AOF
-- CI pipeline (ci.yml + release.yml) — no CI means no confidence in releases; also a prerequisite for installer tarball artifacts; blocked on fixing 11 pre-existing test failures first
-- Multi-project task routing verification — project subsystem scaffolding exists but end-to-end dispatch has never been verified; three specific gaps identified: no `projectId` param on `aof_dispatch`, no pool filtering in HNSW search, dispatcher project awareness unconfirmed
-
-**Should have (differentiators — achievable within v1.1):**
-- HNSW health dashboard (`aof memory health`) — no other orchestrator surfaces vector index health; LOW complexity; enabled by memory fix
-- Memory rebuild CLI command (`aof memory rebuild`) — `HnswIndex.rebuild()` exists, just needs CLI wiring; LOW complexity
-- OpenClaw auto-detection in installer — `detectOpenClaw()` already exists in `openclaw-cli.ts`; LOW complexity
-- Changelog in GitHub Releases — already configured in release-it; needs `"infile": "CHANGELOG.md"` and CI trigger
+**Should have (differentiators -- high value, implement if time allows):**
+- Parallel hop execution with fork/join semantics (logical parallelism with serial dispatch)
+- Conditional branching based on hop output (extend `when` context with hopResults)
+- Workflow visualization in CLI (ASCII DAG with hop states)
+- Hop-level retry with configurable backoff
+- Per-hop and workflow-level SLA timeouts
+- Completion-triggered DAG advancement (bypass poll latency for immediate hop chaining)
 
 **Defer to v2+:**
-- Auto-update mechanism — explicitly deferred in PROJECT.md; risk of breaking running daemons
-- Memory search reranker — explicitly deferred to v1.2 in PROJECT.md
-- Memory tier auto-compaction — explicitly deferred to v2
-- npm publish — explicitly disabled in release-it config; AOF is a plugin, not a package
-- Homebrew formula, multi-platform binaries, Windows/PowerShell support
-- Visual project dashboard, OpenClaw version compatibility checks
+- LLM-driven DAG evaluation (violates deterministic control plane constraint)
+- Cross-task workflow orchestration (PROJECT.md defers to v2)
+- Workflow versioning per task (always use latest, detect drift)
+- Visual DAG editor (CLI-only for v1)
+- Workflow inheritance/composition (keep templates flat and explicit)
+- Event-driven hop triggers (AOF is poll-based)
+- Nested workflows / sub-workflows (flatten the DAG; use separate tasks with dependsOn)
+- Dynamic hop insertion into running workflows (agents define full DAG at creation time)
 
 ### Architecture Approach
 
-AOF is a TypeScript ESM plugin loaded into the OpenClaw gateway process. The build uses `tsc` (not a bundler) because native modules (`better-sqlite3`, `hnswlib-node`) cannot be reliably bundled. All v1.1 changes are surgical modifications to existing components — no new subsystems, no new service registrations, no new data stores. The HNSW fix is two method changes in one class. The CI pipeline is two YAML files. The installer adds one shell script plus implements the existing `extractTarball()` stub. The project routing work adds a `projectId` parameter to two tool registrations and adds pool filtering to one search method.
+The architecture preserves AOF's existing patterns while adding DAG capability as a parallel code path. The DAG evaluator is a pure function (no I/O, deterministic, testable) that takes task state + workflow definition + completion event and returns all state updates as a single result object. The handler applies updates atomically via writeFileAtomic. DAG tasks stay in `in-progress` status throughout their workflow execution; individual hops cycle through pending -> ready -> dispatched -> complete within the task's dagState frontmatter. The scheduler dispatches one hop at a time per task (OpenClaw no-nested-sessions constraint), picking the highest-priority ready hop on each poll cycle.
 
-**Major components and v1.1 changes:**
-1. `src/memory/store/hnsw-index.ts` — HNSW wrapper: **FIX** `load()` to call `ensureCapacity()` after loading persisted index; **FIX** `rebuild()` to use `Math.ceil(chunks.length * 1.5)` headroom minimum instead of exact count
-2. `src/memory/index.ts` — Memory module registration: **IMPROVE** error logging in `rebuildHnswFromDb()` so silent failures surface to operators
-3. `src/packaging/updater.ts` — Self-update engine: **IMPLEMENT** `extractTarball()` stub (currently placeholder at lines 338-345; entire update mechanism is broken without this)
-4. `scripts/install.sh` — **NEW** curl-pipe-sh entry point: detect OS/arch, check Node >= 22, download release tarball, verify SHA256, extract, run `node dist/cli/index.js install`
-5. `.github/workflows/ci.yml` — **NEW**: typecheck + test + build on push/PR to main; pin Node 22, ubuntu-22.04; cache npm
-6. `.github/workflows/release.yml` — **NEW**: tarball artifact creation on tag push; `fetch-depth: 0` mandatory
-7. `src/openclaw/adapter.ts` + `src/mcp/tools.ts` — **ADD** `projectId` param to `aof_dispatch`; **ADD** `aof_project_list`, `aof_project_info`, `aof_project_create` tools (Zod schemas, both surfaces)
-8. `src/memory/store/vector-store.ts` or `hybrid-search.ts` — **ADD** pool filtering (`AND pool = ?`) to HNSW search path so project memory pools are actually isolated
-
-**Patterns to follow:** Zod schema first for all new tool parameters; `api.registerTool()` with JSON Schema for OpenClaw tools; `server.registerTool()` with Zod for MCP tools; atomic `rename()` for all file writes; never read/write `openclaw.json` directly — use `openclaw-cli.ts` wrapper; do not bundle the plugin (use `tsc` only).
+**Major components:**
+1. **WorkflowDAG schema** (`workflow-dag.ts`) -- Zod schema defining hops with adjacency-list edges (dependsOn on each hop), validated with .superRefine() for cycle detection and reachability
+2. **DAGState schema** (`dag-state.ts`) -- Per-hop runtime state (pending/ready/dispatched/complete/rejected/blocked/skipped) stored in task frontmatter
+3. **DAG evaluator** (`dag-evaluator.ts`) -- Pure function: input is (task, workflow, event), output is (hop updates, ready hops, optional task status change). Core algorithm: apply event, evaluate conditionals, propagate readiness, handle rejection with downstream reset, check DAG completion
+4. **DAG validator** (`dag-validator.ts`) -- Topological sort via Kahn's algorithm for cycle detection; reachability check; orphan detection; role resolution against org chart
+5. **Hop context builder** (`hop-context-builder.ts`) -- Builds agent dispatch context including hop description, role, predecessor output paths
+6. **DAG completion handler** (`dag-completion-handler.ts`) -- Wired into protocol router; detects dagState on task, calls evaluator, applies updates atomically, releases lease
+7. **Scheduler DAG dispatch** (modifications to `scheduler.ts`) -- New step in poll cycle scanning dagState.hops for ready hops on in-progress DAG tasks
 
 ### Critical Pitfalls
 
-1. **HNSW/SQLite drift causes silent memory corruption** — HNSW and SQLite have no transaction coordination; a crash between SQLite commit and HNSW add leaves stale entries that map to wrong chunks or return missing rows. After every rebuild, verify `hnsw.count === SELECT COUNT(*) FROM vec_chunks`. Treat SQLite as the authoritative source of truth; rebuild HNSW from it, never the reverse. Recovery: delete `.dat` file and restart — HNSW rebuilds from SQLite automatically.
+1. **Non-atomic DAG state updates corrupt tasks** -- A hop completion requires updating hop status, routing, and potentially task status. If these happen in separate writeFileAtomic calls, a crash between writes leaves the task inconsistent. Prevention: the DAG evaluator returns ALL updates as a single result object; the handler writes once. Preserve the existing `applyGateTransition()` single-write pattern.
 
-2. **Update overwrites live memory.db while daemon holds it open** — The updater's `preservePaths` list (`["config", "data", "tasks", "events"]`) misses `memory.db`, `memory-hnsw.dat`, `state/`, and `.aof/`. On macOS, deleting an open file invalidates the fd immediately. Expand preservePaths to cover all runtime state; use an exclude-list approach (only replace `dist/`, `package.json`, `node_modules/`); gate update on daemon stop (`launchctl bootout` before, `launchctl bootstrap` after). Recovery cost: HIGH — deleted memory.db cannot be recovered without backups.
+2. **Backward compatibility breakage for in-flight gate tasks** -- The gate evaluator, transition handler, context builder, and scheduler timeout checker are deeply wired into the codebase. Removing or modifying them for DAG support breaks existing tasks mid-workflow. Prevention: dual-mode evaluator (detect dagState vs. gate field); keep all gate code intact as legacy; new DAG code in separate files; mutual exclusivity enforced at schema level (task has dagState OR gate, never both).
 
-3. **curl | sh partial download executes truncated commands** — If the network drops mid-download, `sh` executes whatever was received. Wrap the entire installer in a function called at the end (standard nvm/Homebrew defense); use `set -euo pipefail`; verify tarball SHA256 before extraction. Provide download-first alternative: `curl -fsSL .../install.sh -o install.sh && sh install.sh`.
+3. **Condition evaluation security with agent-composed workflows** -- The existing `new Function()` evaluator was designed for admin-authored conditions from project.yaml. Agent-composed workflows change the trust model. Prevention: restrict agent-authored conditions to a JSON-based DSL validated by Zod discriminated unions; keep JavaScript eval only for admin-authored template conditions; freeze context objects before eval.
 
-4. **CI native addon builds fail on GitHub Actions** — `better-sqlite3` and `hnswlib-node` require C++ compilation; failures occur when Node version doesn't match prebuilt binary ABI or build tools are absent. Pin `ubuntu-22.04` (not `ubuntu-latest`); pin `node-version: '22'`; build tools (`python3`, `make`, `g++`) are pre-installed on ubuntu-22.04; cache `node_modules` keyed by lockfile hash + OS + Node version.
+4. **DAG deadlock from skipped conditional hops** -- When a conditional hop evaluates to false and is skipped, join points that depend on it deadlock forever. Prevention: treat skipped hops as satisfied (equivalent to complete) for dependency resolution. Add a "stuck DAG" detector: if no hop has advanced in N poll cycles, emit alert.
 
-5. **release-it generates empty changelog with shallow git clone and pre-existing test failures block CI** — `@release-it/conventional-changelog` needs full history; `actions/checkout@v4` defaults to `fetch-depth: 1`. Use `fetch-depth: 0` in the release workflow. Separately: 11 pre-existing test failures (in `runDaemonStep` and `OpenClawAdapter` suites) must be fixed or `.skip`-ped before CI can ever be green. CI must require 0 failures — no "expected failures" threshold.
+5. **Poll-based advancement latency for multi-hop DAGs** -- A 5-sequential-hop workflow takes 2.5+ minutes at 30-second poll intervals even when agents complete instantly. Prevention: implement completion-triggered advancement where the hop completion handler immediately evaluates the DAG and dispatches the next hop. Keep the poll cycle as a safety-net fallback.
 
 ## Implications for Roadmap
 
-Based on research, the phase structure is unambiguous because of hard technical dependencies. Do not reorder.
+Based on research, the build order follows a strict dependency chain. Each phase is independently testable and delivers incremental value.
 
-### Phase 1: Memory Fix + Test Stabilization
+### Phase 1: Schema Foundation
 
-**Rationale:** Memory is the only P0 production breakage — AOF cannot function without working HNSW. This is a standalone fix with no dependencies on any other v1.1 work. Test stabilization runs in parallel and is a prerequisite for Phase 2 CI being useful.
+**Rationale:** Everything depends on data shapes. Schema changes are additive (optional fields on existing types) and low-risk. Getting schemas right before building runtime logic prevents rework. DAG validation belongs here because invalid DAGs must be rejected at creation time, not at runtime.
 
-**Delivers:** A working memory subsystem (inserts no longer crash, search returns correct results, save/load round-trip is safe, `rebuildHnswFromDb` failures surface to logs) and a clean test suite (0 failures, known issues marked `.skip` with tracking comments referencing issue numbers).
+**Delivers:** Complete type definitions for hops, workflow DAGs, DAG execution state, and hop lifecycle. Validated backward compatibility with existing gate-based tasks. DAG cycle detection and reachability checking.
 
-**Addresses:** Table stakes feature: HNSW dynamic capacity. Enables differentiators: memory health dashboard, memory rebuild CLI command. Enables Phase 3 (project memory isolation depends on working HNSW + pool filtering).
+**Addresses:** Table stakes: Hop schema (#1), Per-task DAG schema (#2), DAG validation (#3), Workflow state tracking schema (#9)
 
-**Avoids:**
-- Pitfall 1 (HNSW/SQLite drift — add parity check after every rebuild; log drift warnings during search)
-- Pitfall 2 (tombstone accumulation — add tombstone ratio tracking; trigger rebuild when >50% deleted)
-- Pitfall 7 (startup blocked by rebuild — use sqlite-vec fallback immediately, rebuild HNSW asynchronously post-startup)
-- Pitfall 10 (cross-project memory leakage — add `AND pool = ?` to SQL query in HNSW search path)
-- Pitfall 11 (pre-existing test failures hide regressions — fix or `.skip` all 11 known failures before CI)
+**Avoids:** Pitfall 3 (cycle detection), Pitfall 5 (backward compat -- superset schema), Pitfall 7 (template/ad-hoc schema divergence -- one Zod schema for both), Pitfall 11 (lease model -- define per-hop lease extension), Pitfall 15 (naming collision -- define resolution rule)
 
-**Key implementation tasks:**
-- Fix `hnsw-index.ts` `load()`: call `ensureCapacity()` after `readIndexSync` to guarantee headroom on a freshly-loaded index
-- Fix `hnsw-index.ts` `rebuild()`: use `Math.max(Math.ceil(chunks.length * 1.5), INITIAL_CAPACITY)` instead of exact count
-- Add post-rebuild parity check: `hnsw.count === SELECT COUNT(*) FROM vec_chunks`; log WARNING if they diverge
-- Add diagnostic getter `get capacity(): number { return this.index.getMaxElements(); }`
-- Add error logging in `memory/index.ts` `rebuildHnswFromDb()` — silent fallthrough currently masks broken state
-- Add pool filtering to `searchWithHnsw()` SQL query
-- Fix or `.skip` all 11 known test failures in `runDaemonStep` and `OpenClawAdapter` suites
-- Add capacity edge-case tests: insert 10,001 vectors, search succeeds; save/load/search still works; rebuild at exact count
+**Stack elements:** Zod .superRefine(), discriminated unions, Kahn's algorithm for topological sort
 
-### Phase 2: CI Pipeline
+### Phase 2: DAG Evaluator (Pure Logic)
 
-**Rationale:** CI validates all subsequent work and creates the release artifacts that the installer depends on. Without CI creating a GitHub Release with a tarball, the installer has nothing to download. The Phase 1 test cleanup is a hard prerequisite — CI is useless if it starts red.
+**Rationale:** The algorithmic core has zero I/O dependencies and can be tested exhaustively in isolation with fixture DAGs. Building and proving correctness of the pure evaluation logic before wiring it into the scheduler eliminates the hardest debugging problem (is the bug in the algorithm or the integration?).
 
-**Delivers:** Green CI on push/PR to main, automated release workflow that produces a tarball artifact on tag push, conventional commit changelog in GitHub Releases.
+**Delivers:** Pure function that evaluates DAG state transitions: readiness propagation, conditional evaluation, skip propagation, rejection with downstream reset, DAG completion detection, circuit breaker for rejection loops.
 
-**Addresses:** Table stakes feature: CI pipeline with changelog. Enables table stakes feature: installer (by creating tarball artifacts). Enables differentiator: changelog in GitHub Releases.
+**Addresses:** Core of table stakes #4 (Scheduler DAG advancement logic), skip-as-satisfied semantics, rejection routing
 
-**Avoids:**
-- Pitfall 5 (native addon build failures — pin Node 22, ubuntu-22.04; cache `node_modules` keyed by lockfile hash + OS + Node version)
-- Pitfall 6 (empty changelog from shallow clone — use `fetch-depth: 0` in release workflow; configure GitHub squash merge to use conventional commit format)
-- Pitfall 11 (pre-existing failures — must be clean from Phase 1 before CI is enabled)
+**Avoids:** Pitfall 9 (deadlock from skipped hops -- skip propagation rule), Pitfall 4 (condition security -- JSON DSL for agent conditions alongside JS eval for admin templates)
 
-**Key implementation tasks:**
-- Create `.github/workflows/ci.yml`: typecheck + test + build on push/PR to main; pin `ubuntu-22.04` (not `ubuntu-latest`) and Node 22; cache npm with lockfile hash
-- Create `.github/workflows/release.yml`: triggered on tag push or `workflow_dispatch` with bump-type input; `fetch-depth: 0`; produces `aof-${version}.tar.gz` including `dist/`, `prompts/`, `skills/`, `openclaw.plugin.json`, `package.json`; attaches tarball to GitHub Release via `softprops/action-gh-release`
-- Verify `npm run build`, `npm run typecheck`, `npm test` all work non-interactively in CI
-- Optionally enable `"infile": "CHANGELOG.md"` in `.release-it.json` for persistent changelog
-- Run `release-it --dry-run` before first real release to preview changelog and version bump
+**Test strategy:** Property-based testing with fast-check: generate random valid DAGs, execute through evaluator, verify invariants (no hop complete without predecessors done/skipped, all hops eventually terminal, DAG completes in at most N transitions). Fixture DAGs: linear, diamond, wide-parallel, deep-conditional, single-hop, all-skipped.
 
-### Phase 3: Multi-Project Routing Verification
+### Phase 3: Scheduler Integration and Hop Dispatch
 
-**Rationale:** The projects subsystem has the most code-exists-but-unverified gaps of any area in v1.1. Placing it here — after CI — means the new integration tests run in CI immediately and regressions are caught. Working memory (Phase 1) enables pool isolation verification. This phase closes three identified hard gaps in the tool registration layer.
+**Rationale:** Depends on schemas (Phase 1) and evaluator (Phase 2). This connects the DAG engine to the live scheduler. The scheduler gains a new step in its poll cycle: scanning dagState.hops for ready hops on in-progress tasks. The assign executor gains hop context injection.
 
-**Delivers:** Verified end-to-end multi-project dispatch (create project → dispatch task with projectId → task lands in correct project directory → scheduler picks it up from project-specific store → spawned agent receives project context). Plus: pool-filtered memory search so projects do not leak memories across boundaries.
+**Delivers:** Working end-to-end flow for linear DAGs: task creation with workflow reference -> scheduler initializes dagState -> dispatches root hop -> agent completes -> scheduler advances DAG -> dispatches next hop -> DAG completes -> task transitions to review/done.
 
-**Addresses:** Table stakes feature: multi-project task routing. Closes three identified gaps: missing `projectId` param on `aof_dispatch`, missing pool filtering in HNSW search path, unconfirmed dispatcher project-store wiring.
+**Addresses:** Table stakes #4 (Scheduler DAG advancement), table stakes #5 (Hop completion handling)
 
-**Avoids:**
-- Pitfall 9 (manifest ID mismatch silent failure — log all discovery errors at WARN on startup; add validation in `aof init` and `aof daemon start`)
-- Pitfall 10 (memory pool leakage — pool filtering already addressed in Phase 1; verify here with integration tests)
-- Pitfall 15 (lint report write fails — ensure `state/` directory exists before `writeLintReport()` calls `writeFile`)
+**Avoids:** Pitfall 2 (non-atomic writes -- single writeFileAtomic per hop completion), Pitfall 1 (parallel dispatch race -- serial dispatch, one hop at a time), Pitfall 10 (scan cost -- only evaluate DAGs for tasks with changed updatedAt), Pitfall 14 (no-nested-sessions -- each hop is independent dispatch)
 
-**Key implementation tasks:**
-- Add `projectId` parameter to `aof_dispatch` in both `src/openclaw/adapter.ts` and `src/mcp/tools.ts` (Zod schema first)
-- Add project tools with Zod schemas, both OpenClaw and MCP surfaces: `aof_project_list`, `aof_project_info`, `aof_project_create`
-- Read and verify `initializeProjects()` in `AOFService` — confirm it creates per-project `FilesystemTaskStore` instances pointing to `<vaultRoot>/Projects/<id>/Tasks/`
-- Verify scheduler `triggerPoll` iterates all `projectStores.values()` not just the single default store
-- Verify `task-dispatcher.ts` passes `projectId`/`projectRoot` from store through to `TaskContext`
-- Add startup logging for project discovery errors (currently stored silently in `record.error`)
-- Fix `src/projects/lint.ts` `writeLintReport()`: add `mkdir(join(record.path, "state"), { recursive: true })` before `writeFile`
-- Write integration tests: create project → dispatch with projectId → verify task lands in project dir → verify scheduler picks it up → verify memory search respects pool
+**Architecture component:** dag-dispatcher.ts, dag-completion-handler.ts, modifications to scheduler.ts, protocol/router.ts, assign-executor.ts
 
-### Phase 4: Installer
+### Phase 4: Timeout, Escalation, and Rejection Handling
 
-**Rationale:** Last because it depends on Phase 2 (CI must produce release tarball artifacts before installer can download them) and benefits from Phase 1 being done (installer installs a working memory subsystem). The TypeScript packaging infrastructure is substantially complete — the two gaps are the shell entry point and the `extractTarball()` stub.
+**Rationale:** Edge cases built on the working happy path from Phases 1-3. Rejection is the most complex flow: it must reset the target hop AND all downstream hops to pending, increment the circuit breaker counter, and handle the case where a rejected hop has parallel siblings still running.
 
-**Delivers:** A working `curl -fsSL https://raw.githubusercontent.com/demerzel-ops/aof/main/scripts/install.sh | sh` that installs AOF on a machine with Node >= 22 and OpenClaw already installed. Handles clean install, upgrade, and reinstall/repair cases. Running the installer twice does not corrupt state.
+**Delivers:** Per-hop timeout detection and escalation. Rejection with configurable target (same hop, origin, named predecessor). Downstream hop reset on rejection. Circuit breaker that deadletters after N rejection cycles. Hop-level retry with backoff.
 
-**Addresses:** Table stakes feature: curl-pipe-sh installer. Makes AOF installable by users other than the author.
+**Addresses:** Table stakes #5 (rejection/blocked handling), differentiators (hop-level retry, per-hop SLA, workflow-level SLA)
 
-**Avoids:**
-- Pitfall 3 (update overwrites running daemon — expand `preservePaths` to `["config", "data", "tasks", "events", "state", "memory", ".aof"]`; gate update on daemon stop with `launchctl bootout`)
-- Pitfall 4 (partial download executes — wrap entire installer in a function; `set -euo pipefail`; SHA256 checksum before extract)
-- Pitfall 8 (memory DB not preserved — separate package directory from `~/.openclaw/aof/` data directory; never touch data dir during install)
-- Pitfall 12 (migration not atomic — write `migrations.json` to temp file then `rename()`; record "in-progress" state before each migration)
-- Pitfall 14 (extractTarball is a stub — implement before shipping; throw `new Error("extractTarball not implemented")` as interim guard)
-- Pitfall 13 (execSync blocks event loop — use async `execFile` with streamed stdout/stderr for progress)
+**Avoids:** Pitfall 9 (deadlock -- already handled in Phase 2 evaluator, verified here in integration)
 
-**Key implementation tasks:**
-- Implement `extractTarball()` in `src/packaging/updater.ts` using `child_process.execFile("tar", ["-xzf", tarball, "-C", targetDir])` or the `tar` npm package
-- Expand `preservePaths` in `selfUpdate()` to include all runtime state; prefer exclude-list over preserve-list
-- Add daemon-running check to `selfUpdate()` — check PID file + process verification; stop daemon before update on macOS (`launchctl bootout`)
-- Fix repo URL placeholder in `channels.ts` (currently `"aof/aof"`, needs `"demerzel-ops/aof"`)
-- Create `scripts/install.sh`: POSIX sh, entire body wrapped in `install_aof() { ... }; install_aof`, `set -euo pipefail`, detect darwin/linux + arm64/x64, check `node --version >= 22`, download latest stable release tarball via GitHub API, verify SHA256, extract to `~/.openclaw/workspace/package/node_modules/aof/`, run `node dist/cli/index.js install`
-- Use atomic file writes for `migrations.json`; add in-progress state tracking
-- Test all three install cases on a fresh account: clean install, upgrade, reinstall/repair
-- Test partial download defense: truncate the script mid-download and verify nothing executes
+### Phase 5: Templates, Ad-Hoc API, and Artifact Handoff
+
+**Rationale:** User-facing features built on the complete internal machinery. Templates require the project manifest schema extension. Ad-hoc API requires MCP tool modifications. Artifact handoff requires the hop-scoped directory convention. These are independent of each other and can be built in parallel.
+
+**Delivers:** workflowTemplates map in project.yaml with named DAG templates. Template resolution at dispatch time (expand template into task frontmatter). Inline workflow definition via MCP task creation tool. Per-hop artifact directories (outputs/<hopId>/). Predecessor output path injection into hop context.
+
+**Addresses:** Table stakes #6 (artifact handoff), #7 (templates), #8 (ad-hoc API)
+
+**Avoids:** Pitfall 7 (schema divergence -- same Zod schema validates both templates and inline), Pitfall 8 (directory contention -- per-hop subdirectories under work/)
+
+### Phase 6: Migration, Completion-Triggered Advancement, and Polish
+
+**Rationale:** Migration is last because all schemas must be stable. Completion-triggered advancement is an optimization that bypasses poll latency. CLI visualization is polish.
+
+**Delivers:** Gate-to-DAG conversion utility (CLI command). Lazy migration for in-flight gate tasks. Completion-triggered hop advancement (bypass 30s poll latency). Workflow status CLI command with ASCII DAG visualization. Event schema for hop lifecycle events.
+
+**Addresses:** Table stakes #10 (migration), differentiators (completion-triggered advancement, CLI visualization)
+
+**Avoids:** Pitfall 5 (migration -- lazy migration with dual-mode evaluator already in place from Phase 3), Pitfall 6 (poll latency -- completion-triggered advancement), Pitfall 12 (event bloat -- compact hop events with summary on DAG completion)
 
 ### Phase Ordering Rationale
 
-- **Memory first** because it is the only P0 production breakage with no upstream dependencies. It is the most isolated change (two method fixes in one class file).
-- **CI second** because it is the hard prerequisite for the installer (installer downloads release tarballs that CI creates) and provides immediate feedback on Phase 3 integration tests. Phase 1 test cleanup must be complete before CI goes live.
-- **Projects third** because the code exists but has never been wired end-to-end; CI validates the new integration tests automatically; working memory (Phase 1) enables pool isolation verification.
-- **Installer last** because it depends on CI artifacts (tarball), benefits from memory being fixed (ships working memory), and has the most complex operational concerns (daemon lifecycle, data preservation, macOS launchd).
+- **Schemas first** because every other phase depends on the data shapes. A wrong schema discovered in Phase 4 forces rework of Phases 2-3.
+- **Pure evaluator second** because it is the algorithmic heart with zero integration risk. Testing it exhaustively before integration eliminates the hardest class of bugs.
+- **Scheduler integration third** because it proves the end-to-end flow works. Linear DAGs exercised here are a strict superset of what linear gates provide, proving the replacement works.
+- **Rejection/timeout fourth** because these are edge cases on the happy path. Building them after the happy path works means failures in this phase do not block forward progress.
+- **Templates/API/artifacts fifth** because these are user-facing features that should only ship when the engine underneath is proven correct.
+- **Migration last** because schemas must be stable and the dual-mode evaluator must be proven before migrating any production data.
 
 ### Research Flags
 
-Phases with well-documented patterns (skip research-phase):
+Phases likely needing deeper research during planning:
 
-- **Phase 2 (CI Pipeline):** GitHub Actions for Node.js TypeScript projects is extremely well-documented. release-it is already fully configured in `.release-it.json`. The native addon build considerations are explicitly documented in PITFALLS.md with specific mitigations. No unknowns.
-- **Phase 3 (Projects Verification):** Pattern is code reading and integration test writing against existing architecture. No novel external APIs. The architecture document has explicit file-level, method-level change instructions.
+- **Phase 3 (Scheduler Integration):** The interaction between DAG hop dispatch and existing concurrency tracking (maxConcurrentDispatches, inProgressByTeam) needs careful design. How does a hop dispatch count against concurrency limits? Does each hop consume one slot? Research needed on the specific scheduler poll code paths to confirm the integration points.
+- **Phase 4 (Rejection Handling):** Rejection with downstream reset when parallel siblings are still running is a complex state transition. The evaluator must handle: hop A and hop B both depend on hop C; hop A completes; hop B rejects to hop C; hop A's completion is now stale. Need to verify the exact semantics (does hop A re-run too?).
+- **Phase 5 (Artifact Handoff):** The hop-scoped directory convention (outputs/<hopId>/) interacts with the existing RunArtifact.artifactPaths structure. Need to verify whether the existing task store's ensureTaskDirs and writeTaskOutput methods can be extended or need wrapping.
 
-Phases that may benefit from targeted research during planning:
+Phases with standard patterns (skip research-phase):
 
-- **Phase 4 (Installer) — minor flag:** The `extractTarball()` implementation choice (Node.js `tar` npm package vs `child_process.execFile("tar", ...)`) is worth a targeted investigation. The `tar` package adds a dependency but gives progress events and cross-platform compatibility; `execFile` has zero new dependencies but less control and requires `tar` to be installed. Also: GPG signature verification for release tarballs should be explicitly scoped in or out in Phase 4 planning.
-- **Phase 1 (Memory Fix) — minor flag:** The async HNSW rebuild on startup (start daemon with sqlite-vec fallback, rebuild HNSW in background, swap reference atomically) requires a concurrency design decision: should search queries during rebuild use the old (potentially corrupt) HNSW index or fall through to sqlite-vec? The sqlite-vec fallback path already exists; the question is the swap trigger and locking model.
+- **Phase 1 (Schema Foundation):** Zod schema design with .superRefine() is well-documented. Topological sort is textbook. Backward-compatible schema extension via optional fields is a standard pattern already used throughout AOF.
+- **Phase 2 (DAG Evaluator):** Pure function evaluation with fixture-based testing is a well-established pattern. The existing gate-evaluator.ts provides the exact template to follow.
+- **Phase 6 (Migration):** Lazy migration with schema version detection is the pattern already used in the codebase. The dual-mode evaluator from Phase 3 handles coexistence.
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | All dependencies verified from installed `node_modules`; type definitions read directly; version constraints confirmed from issue trackers; no new dependencies needed |
-| Features | HIGH | Codebase examined directly; gaps identified at file/line level; feature gaps verified against actual code not assumed; anti-features backed by explicit PROJECT.md deferrals |
-| Architecture | HIGH | All claims verified against source code with file paths, line numbers, and method signatures cited; build chain confirmed (tsc, not tsdown, despite project description) |
-| Pitfalls | HIGH | Root causes traced to specific file/line; test suite failure counts exact (11 failures, 13 pending, 2433 total as of 2026-02-26); recovery costs assessed |
+| Stack | HIGH | Zero new dependencies needed; all capabilities confirmed from existing installed packages; Zod .superRefine() and discriminated unions verified available in ^3.24.0 |
+| Features | MEDIUM-HIGH | Table stakes derived from direct codebase analysis (existing gate system) plus ecosystem patterns (Temporal, Airflow, Step Functions). Differentiator priority (parallel execution as primary DAG value) is a judgment call, not a verified requirement. |
+| Architecture | HIGH | All integration points mapped at file/method level from direct source code analysis. Build order respects verified dependency chains. The pure-evaluator + handler pattern replicates the proven gate-evaluator + gate-transition-handler split. |
+| Pitfalls | HIGH | All critical pitfalls derived from direct source code analysis with specific file/line references. Mitigation strategies map to existing patterns already proven in the gate system. |
 
 **Overall confidence:** HIGH
 
 ### Gaps to Address
 
-- **`initializeProjects()` internals unconfirmed:** The research notes the full method body was not loaded (the visible portion of `aof-service.ts` ends before the method implementation). Phase 3 planning must read this method completely before writing integration tests. If the method has gaps, Phase 3 becomes implementation work, not just verification.
+- **Parallel dispatch semantics under OpenClaw constraint:** The no-nested-sessions constraint forces serial hop dispatch within a task. This means "parallel" DAG branches execute sequentially. The research is clear on this constraint, but the user-facing documentation must make this explicit to avoid confusion. During Phase 3 planning, decide whether to name this "logical parallelism" or find a term that sets correct expectations.
 
-- **`aof install` CLI command existence:** The architecture research calls for `src/cli/commands/install.ts` as "NEW or MODIFY" — the exact current state of the CLI command layer is not confirmed. Phase 4 planning should read the existing CLI command directory before scoping the install/update commands.
+- **Hop-level lease model details:** The research identifies that the current single-lease-per-task model needs extension for DAG tasks, but the exact implementation (leases array vs. metadata bag vs. simplified single-lease-with-hopId) needs to be decided during Phase 1 schema design. The ARCHITECTURE.md recommends keeping one active hop at a time, which simplifies this to a single lease with a hopId field.
 
-- **`channels.ts` repo URL placeholder:** Currently uses `"aof/aof"`. The real repo is `"demerzel-ops/aof"`. This must be confirmed and corrected before Phase 4 so the installer fetches from the correct GitHub Release URL.
+- **Condition evaluation trust boundary:** The research recommends a JSON DSL for agent-authored conditions and JavaScript eval for admin-authored template conditions. The exact JSON DSL operators and schema need to be defined during Phase 1. This is a design decision, not a research gap -- the operators should match what `when` expressions currently evaluate (tag checks, metadata comparisons, hop result status checks).
 
-- **Tombstone ratio trigger threshold:** The 50% threshold for HNSW rebuild is derived from academic research on graph degradation but has not been validated against AOF's actual workload patterns. Treat this as a configurable value in Phase 1 rather than hardcoding.
+- **Artifact handoff implementation detail:** The research proposes hop-scoped directories (outputs/<hopId>/), but the exact interaction with the existing RunArtifact.artifactPaths structure and the ITaskStore.writeTaskOutput method is unconfirmed. Phase 5 planning should read these methods to determine the exact extension needed.
 
-- **Memory pool isolation scope:** The research identifies that the HNSW search path lacks pool filtering, but the exact location of the fix (whether in `vector-store.ts`, `hybrid-search.ts`, or the search calling code) needs to be confirmed by reading those files during Phase 3 planning.
+- **Rejection semantics for parallel branches:** When a hop rejects back to a predecessor and parallel sibling branches have already completed, should those siblings re-run? The ARCHITECTURE.md says "reset ALL downstream hops to pending," which implies yes. This needs explicit confirmation during Phase 4 planning because it affects how much work is repeated on a rejection.
 
 ## Sources
 
-### Primary (HIGH confidence)
-- `node_modules/hnswlib-node/lib/index.d.ts` — confirmed `resizeIndex`, `getIdsList`, `getCurrentCount`, `getMaxElements`, `markDelete`, `addPoint` (replaceDeleted) API surface
-- `src/memory/store/hnsw-index.ts`, `src/memory/index.ts` — root cause analysis for capacity and silent failure bugs at specific line numbers
-- `src/packaging/updater.ts` — confirmed `extractTarball()` stub at lines 338-345; confirmed `preservePaths` gap
-- `src/projects/registry.ts` — confirmed manifest ID mismatch behavior at lines 135-139
-- `src/openclaw/adapter.ts`, `src/mcp/tools.ts` — confirmed missing `projectId` parameter in tool registrations
-- `src/service/aof-service.ts` — confirmed `projectStores` map and `projectStoreResolver` wiring
-- [hnswlib-node API documentation](https://yoshoku.github.io/hnswlib-node/doc/classes/HierarchicalNSW.html) — `resizeIndex`, `readIndexSync` signatures
-- [better-sqlite3 Node.js 24+ build failures (issue #1411)](https://github.com/WiseLibs/better-sqlite3/issues/1411) — confirmed Node 22 pin requirement
-- Test suite output: 2433 total, 2409 passed, 11 failed, 13 pending (as of 2026-02-26)
+### Primary (HIGH confidence -- direct source code analysis)
+- `src/schemas/workflow.ts` -- existing WorkflowConfig with linear gate sequences
+- `src/schemas/gate.ts` -- Gate, GateHistoryEntry, ReviewContext, GateTransition types
+- `src/schemas/task.ts` -- TaskFrontmatter with gate, gateHistory, reviewContext, VALID_TRANSITIONS
+- `src/schemas/project.ts` -- ProjectManifest with workflow field
+- `src/dispatch/scheduler.ts` -- poll loop, dependency gating, concurrency tracking, cycle detection
+- `src/dispatch/gate-evaluator.ts` -- pure function gate evaluation pattern
+- `src/dispatch/gate-conditional.ts` -- sandboxed condition evaluation via Function constructor
+- `src/dispatch/gate-transition-handler.ts` -- atomic gate state application via writeFileAtomic
+- `src/dispatch/task-dispatcher.ts` -- dispatch action building
+- `src/dispatch/assign-executor.ts` -- agent session spawning, lease acquisition, correlation IDs
+- `src/dispatch/action-executor.ts` -- sequential action execution loop
+- `src/store/task-store.ts` -- filesystem task CRUD, ensureTaskDirs
+- `src/store/task-mutations.ts` -- atomic transition via rename()
+- `src/store/interfaces.ts` -- ITaskStore contract
+- `src/protocol/router.ts` -- completion report handling
+- `src/schemas/run.ts` -- RunArtifact with artifactPaths
+- `src/schemas/protocol.ts` -- CompletionReportPayload, HandoffRequestPayload
+- `docs/dev/workflow-gates-design.md` -- existing design doc (section 11.4 defers parallel to v2)
 
-### Secondary (MEDIUM confidence)
-- [hnswlib dynamic capacity issue #39](https://github.com/nmslib/hnswlib/issues/39) — resize behavior rationale from upstream C++ maintainer
-- [hnswlib markDelete behavior (issue #275)](https://github.com/nmslib/hnswlib/issues/275) — markDelete does not remove graph edges
-- [release-it/conventional-changelog issue #16](https://github.com/release-it/conventional-changelog/issues/16) — only reads last commit for version bump
-- [nvm install script](https://github.com/nvm-sh/nvm) — reference for curl-pipe-sh function-wrapping pattern
-- [pnpm install script](https://pnpm.io/installation) — POSIX sh pattern reference
-- [GitHub Actions release automation guide (2026-02-02)](https://oneuptime.com/blog/post/2026-02-02-github-actions-release-automation/view) — workflow patterns
-- [sqlite-vec maintenance status (issue #226)](https://github.com/asg017/sqlite-vec/issues/226) — maintainer confirmed limited bandwidth; validates keeping HNSW as primary
-
-### Tertiary (LOW confidence, used for validation only)
-- [Enhancing HNSW for Real-Time Updates (arxiv 2407.07871v2)](https://arxiv.org/html/2407.07871v2) — graph degradation from deletions; tombstone threshold recommendation needs validation against AOF workload
-- [curl | sh partial execution attack](https://snakesecurity.org/blog/pipepunisher-exploiting-shell-install-scripts/) — partial download risk documentation
+### Secondary (MEDIUM confidence -- domain expertise from training data)
+- Apache Airflow DAG execution model -- scheduler-driven DAG advancement, task instance states, XCom
+- AWS Step Functions -- ASL, Choice/Parallel states, InputPath/OutputPath
+- Temporal workflow patterns -- activities, task queues, child workflows, retries
+- Prefect flow execution -- task runs, state transitions, result persistence
+- Dagster op execution -- ops, IOManagers, asset materialization
+- Kahn's algorithm for topological sort -- standard O(V+E) DAG processing
+- BPMN join semantics -- AND-join (all), OR-join (any) patterns
 
 ---
-*Research completed: 2026-02-26*
+*Research completed: 2026-03-02*
 *Ready for roadmap: yes*

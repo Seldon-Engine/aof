@@ -1,15 +1,33 @@
 # Technology Stack
 
-**Project:** AOF v1.1 Stabilization & Ship
-**Researched:** 2026-02-26
-**Scope:** Stack additions/changes for memory HNSW fix, curl|sh installer, CI pipeline, project verification
-**Confidence:** HIGH (no new dependencies needed; all changes use existing installed packages)
+**Project:** AOF v1.2 Per-Task Workflow DAG Execution
+**Researched:** 2026-03-02
+**Scope:** Stack additions/changes for DAG execution engine, conditional branching, parallel hop dispatch, workflow composition API, hop lifecycle state machine
+**Confidence:** HIGH (zero new runtime dependencies; all capabilities buildable with existing Zod + TypeScript)
 
 ---
 
-## Executive Decision: No New Dependencies
+## Executive Decision: Build In-House, No New Dependencies
 
-All four v1.1 features can be delivered with the existing dependency tree. This is the most important finding of this research. The problems are in AOF's wrapper code and missing workflow/script files, not in missing libraries.
+The per-task workflow DAG engine requires **zero new npm dependencies**. The existing stack (Zod schemas, TypeScript, filesystem task store, deterministic scheduler) provides everything needed. This is not a "DAG library" problem -- it is a schema evolution and scheduler integration problem.
+
+**Why not use an external DAG library:**
+
+| Rejected Library | Why Not |
+|------------------|---------|
+| `graphlib` / `dagre` | Unmaintained (last release 2021). AOF's DAG is simple (tens of nodes, not thousands). Topological sort is ~30 lines of TypeScript. Adding a dependency for this is over-engineering. |
+| `xstate` v5 | State machines for hop lifecycle are tempting, but xstate brings 40KB+ of runtime, actor model complexity, and a learning curve. AOF's hop states are a simple enum with 5-6 transitions -- a switch statement or lookup table suffices. The existing gate evaluator is already a pure-function state machine without xstate. |
+| `bull` / `bullmq` | Job queue libraries assume Redis. AOF is filesystem-based with no external databases. Fundamentally incompatible constraint. |
+| `temporal` / `inngest` | Workflow-as-code platforms with server dependencies. AOF is a single-machine plugin. Massive over-engineering. |
+| `p-limit` / `p-queue` | For parallel hop dispatch limiting. AOF already has throttle.ts with concurrency tracking. Adding another concurrency library creates dual control planes. |
+
+**What we build instead:**
+
+1. **DAG data structure** -- adjacency list as a plain `Record<string, string[]>` (hop ID to successor hop IDs), validated by Zod. Topological sort is a simple DFS (~30 lines).
+2. **Hop lifecycle** -- enum-based state transitions validated by a lookup table (same pattern as `VALID_TRANSITIONS` in `task.ts`).
+3. **Condition evaluator** -- extend the existing `evaluateGateCondition()` from `gate-conditional.ts`. Already has sandboxed JS eval with timeout protection.
+4. **Parallel dispatch tracking** -- extend the existing `pendingDispatches` counter in `task-dispatcher.ts` to track multiple hops per task.
+5. **Workflow schema** -- Zod discriminated unions and `.superRefine()` for DAG validation (cycle detection, reachability).
 
 ```bash
 # Nothing new to install.
@@ -18,383 +36,369 @@ npm ci   # verify clean state
 
 ---
 
-## Area 1: Memory HNSW Fix/Scaling
+## Core Stack Components for DAG Execution
 
-### Existing Stack (retain as-is)
+### 1. DAG Schema (Zod Extension)
 
-| Technology | Installed Version | Purpose |
-|------------|-------------------|---------|
-| hnswlib-node | 3.0.0 | HNSW approximate nearest-neighbor index |
-| better-sqlite3 | 12.6.2 | SQLite bindings for chunk metadata + FTS |
-| sqlite-vec | 0.1.7-alpha.2 | Vector search fallback in SQLite |
+**Existing:** `WorkflowConfig` in `src/schemas/workflow.ts` defines linear gate sequences.
 
-### Bug Analysis
+**New:** `WorkflowDAG` schema that replaces linear gates with a hop graph.
 
-The `HnswIndex` wrapper at `src/memory/store/hnsw-index.ts` has an `ensureCapacity()` method that calls `resizeIndex(max * GROWTH_FACTOR)` when `count >= max`. This is architecturally correct. The hnswlib-node 3.0.0 API confirmed from installed type definitions (`node_modules/hnswlib-node/lib/index.d.ts`):
+| Component | Technology | Purpose | Why This Approach |
+|-----------|-----------|---------|-------------------|
+| `HopSchema` | Zod `z.object()` | Individual hop definition (agent, role, conditions) | Extends existing `Gate` schema pattern. Agents already understand gates. |
+| `WorkflowDAG` | Zod `z.object()` with `.superRefine()` | DAG structure with edges, validation | `.superRefine()` allows custom validation (cycle detection, reachability) at parse time. No separate validation step needed. |
+| `WorkflowTemplate` | Zod `z.object()` | Pre-defined workflow in `project.yaml` | Extends existing `WorkflowConfig` location in `ProjectManifest` |
+| `TaskWorkflow` | Zod `z.object()` | Per-task workflow instance with runtime state | New field on `TaskFrontmatter`, parallel to existing `gate` field |
+
+**Schema design decision -- adjacency list, not edge list:**
 
 ```typescript
-// Confirmed available in hnswlib-node 3.0.0:
-resizeIndex(newMaxElements: number): void;  // grows capacity in-place
-getCurrentCount(): number;                   // includes deleted elements in count
-getMaxElements(): number;                    // current capacity ceiling
-getIdsList(): number[];                      // live (non-deleted) IDs only
-markDelete(label: number): void;
-unmarkDelete(label: number): void;
+// CHOSEN: Adjacency list (hop defines its own successors)
+// Why: Each hop is self-contained. No separate edges array to keep in sync.
+// Easy to validate: every successor reference must point to a valid hop ID.
+const HopSchema = z.object({
+  id: z.string().min(1),
+  role: z.string().min(1),
+  next: z.array(z.string()).default([]),       // successor hop IDs
+  when: z.string().optional(),                  // condition for THIS hop's activation
+  joinType: z.enum(["any", "all"]).default("all"), // parallel join strategy
+  // ... other fields from Gate (timeout, escalateTo, description, etc.)
+});
+
+// REJECTED: Edge list (separate edges array)
+// Why not: Requires cross-referencing two arrays. Easy to have orphaned edges.
+// More complex validation. No benefit for graphs under 50 nodes.
 ```
 
-**Root cause candidates (in order of likelihood):**
+**Integration point:** The `ProjectManifest` schema in `src/schemas/project.ts` already has `workflow: WorkflowConfig.optional()`. This evolves to support both legacy `WorkflowConfig` (linear gates) and new `WorkflowDAG` (DAG hops) via a discriminated union or version field.
 
-1. **Rebuild creates zero-headroom index.** `rebuild()` uses `Math.max(chunks.length, INITIAL_CAPACITY)` as capacity. If chunks.length > 10,000, capacity == count. The next `add()` hits `ensureCapacity()`, but if `getCurrentCount()` includes deleted-but-not-reclaimed elements from the old index, the count can exceed capacity before `ensureCapacity` checks.
+**Backward compatibility strategy:** Keep `WorkflowConfig` as-is. Add `workflowDAG` as a new optional field. If both are present, `workflowDAG` takes precedence. The gate evaluator continues to work for legacy tasks. Migration path: existing gate sequences map trivially to DAGs (linear chain of hops).
 
-2. **Load path loses capacity headroom.** `hnsw.load(filePath)` creates a new `HierarchicalNSW` with `readIndexSync()`. The loaded index preserves the maxElements from when it was saved. If saved at full capacity, the next insert races with resize.
+### 2. Hop Lifecycle State Machine
 
-3. **Deleted-element count inflation.** HNSW's `getCurrentCount()` counts all elements including marked-as-deleted. Over time with updates (mark-delete + add-with-replace), the internal count grows even though live element count is stable. Eventually count exceeds max without triggering resize (because count was already above max after load).
+**Existing pattern:** `VALID_TRANSITIONS` in `src/schemas/task.ts` -- a lookup table `Record<TaskStatus, readonly TaskStatus[]>`. Pure data, no library.
 
-### Fix Approach (no new deps)
+**New:** `HOP_VALID_TRANSITIONS` -- same pattern for hop states.
 
-| Change | File | What |
-|--------|------|------|
-| Add headroom to rebuild | `hnsw-index.ts` | `rebuild()` uses `chunks.length * 1.5 + 1000` instead of exact count |
-| Pre-check capacity on add | `hnsw-index.ts` | `ensureCapacity()` checks `count >= max - 1` (one slot of headroom) |
-| Add compaction method | `hnsw-index.ts` | New `compact()` that rebuilds from `getIdsList()` + `getPoint()`, reclaiming deleted slots |
-| Periodic HNSW save | `index.ts` | Save every N inserts (not just on shutdown), configurable via memory config |
-| Rebuild on capacity error | `hnsw-index.ts` | Catch `addPoint` failure, trigger `rebuild()` from live IDs, retry insert |
+| Hop State | Description | Valid Next States |
+|-----------|-------------|-------------------|
+| `pending` | Not yet eligible (predecessors incomplete) | `ready` |
+| `ready` | All predecessors complete, eligible for dispatch | `dispatched`, `skipped` |
+| `dispatched` | Agent session spawned | `complete`, `failed`, `blocked` |
+| `complete` | Hop finished successfully | (terminal) |
+| `failed` | Hop failed (will retry or deadletter) | `ready`, `deadletter` |
+| `blocked` | Hop blocked on external dependency | `ready`, `deadletter` |
+| `skipped` | Hop skipped due to condition evaluation | (terminal) |
+| `deadletter` | Hop permanently failed | (terminal) |
 
-**Key insight:** `getIdsList()` returns only live (non-deleted) IDs. Combined with `getPoint(label)` to retrieve vectors, this enables a clean rebuild that reclaims all deleted-element slots. This is the compaction strategy.
+```typescript
+// Same pattern as existing VALID_TRANSITIONS -- no xstate needed
+const HOP_VALID_TRANSITIONS: Record<HopStatus, readonly HopStatus[]> = {
+  pending:     ["ready"],
+  ready:       ["dispatched", "skipped"],
+  dispatched:  ["complete", "failed", "blocked"],
+  complete:    [],
+  failed:      ["ready", "deadletter"],
+  blocked:     ["ready", "deadletter"],
+  skipped:     [],
+  deadletter:  [],
+} as const;
+```
 
-### What NOT to change
+**Why not xstate:** The hop lifecycle has 8 states and ~12 transitions. xstate's value is in complex statecharts with nested/parallel states, guards, actions, and delayed transitions. AOF's hop states are flat with no nesting. The existing pure-function gate evaluator pattern (`evaluateGateTransition()` in `gate-evaluator.ts`) proves this works without a state machine library. The same approach scales to hop lifecycle.
 
-| Rejected Change | Why |
-|-----------------|-----|
-| Drop HNSW, use sqlite-vec only | sqlite-vec is alpha (0.1.7-alpha.2), maintainer has limited bandwidth per [issue #226](https://github.com/asg017/sqlite-vec/issues/226). HNSW is ~10x faster for search. |
-| Switch to usearch/vectorlite | Bug is in AOF's wrapper, not in hnswlib-node. Library works correctly. |
-| Add Qdrant/Milvus/Chroma | Violates filesystem-based constraint. Massive dependency for single-machine use. |
-| Upgrade hnswlib-node | 3.0.0 is the latest version (released 2024-03-11, no newer release). |
+### 3. DAG Execution Engine (Topological Sort + Frontier Tracking)
 
-**Confidence: HIGH** -- Verified API from installed type definitions. Bug is in wrapper code, not the library.
+**Existing:** The scheduler's `poll()` function in `scheduler.ts` already:
+- Scans all tasks
+- Checks dependencies (`dependsOn` with DFS cycle detection)
+- Dispatches eligible tasks
+- Tracks concurrency limits
 
----
+**New:** A `DAGAdvancer` module that evaluates a single task's workflow DAG on each poll cycle.
 
-## Area 2: curl|sh Installer and Updater
+| Function | Purpose | Integration Point |
+|----------|---------|-------------------|
+| `evaluateDAGFrontier(task, workflow)` | Find hops that are ready to dispatch (all predecessors complete) | Called from `poll()` for each task with an active DAG workflow |
+| `advanceHop(task, hopId, outcome)` | Process hop completion, update state, find next hops | Replaces `evaluateGateTransition()` for DAG tasks |
+| `validateDAG(workflow)` | Cycle detection, reachability check, orphan detection | Called at schema parse time via Zod `.superRefine()` |
+| `topologicalSort(hops)` | Kahn's algorithm for execution order | Used by `evaluateDAGFrontier()` |
 
-### Existing Stack
+**Topological sort implementation (Kahn's algorithm):**
 
-AOF already has a substantial packaging module (`src/packaging/`):
-
-| Module | File | Status |
-|--------|------|--------|
-| Dependency installer | `installer.ts` | Built -- npm ci/install wrapper with backup/rollback |
-| Self-update engine | `updater.ts` | Built -- download, extract, validate, atomic swap, rollback |
-| Setup wizard | `wizard.ts` | Built -- interactive setup |
-| Gateway integration | `integration.ts` | Built -- OpenClaw plugin registration |
-| Release channels | `channels.ts` | Built -- channel management |
-| Data migrations | `migrations.ts` | Built -- schema migration framework |
-| Plugin ejector | `ejector.ts` | Built -- plugin uninstall |
-| **Shell installer** | **missing** | **NOT BUILT** -- the curl\|sh entry point |
-
-The TypeScript machinery exists. What is missing is the POSIX shell script that serves as the entry point for `curl -fsSL https://get.aof.dev/install.sh | sh`.
-
-### What to build
-
-**One file: `scripts/install.sh`** -- A POSIX sh script (not bash) following established patterns from nvm and pnpm.
-
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Shell dialect | POSIX sh (`#!/bin/sh`) | Wider compatibility -- works on Alpine, minimal containers, older macOS |
-| Distribution | GitHub Releases tarball (.tar.gz) | Already configured in `.release-it.json` (`github.release: true`) |
-| Native modules | `npm ci` post-extract | better-sqlite3 and hnswlib-node require per-platform compilation |
-| Node.js detection | `node --version` with major version check | Fail clearly if Node < 22 |
-| Install location | `~/.openclaw/extensions/aof/` | Matches existing `deploy-plugin.sh` target |
-| Update mode | `--update` flag on same script | Reuses all detection logic, calls existing TypeScript updater |
-| Hosting URL | `https://raw.githubusercontent.com/demerzel-ops/aof/main/scripts/install.sh` | Free, no infrastructure needed |
-
-### Script structure (reference)
-
-```sh
-#!/bin/sh
-set -e
-
-AOF_INSTALL_DIR="${AOF_INSTALL_DIR:-$HOME/.openclaw/extensions/aof}"
-AOF_REPO="demerzel-ops/aof"
-
-# 1. Detect OS/arch
-detect_platform() { ... }
-
-# 2. Check Node.js >= 22
-check_node() {
-  command -v node >/dev/null 2>&1 || { echo "Error: Node.js >= 22 required" >&2; exit 1; }
-  NODE_MAJOR=$(node -e "process.stdout.write(String(process.versions.node.split('.')[0]))")
-  [ "$NODE_MAJOR" -ge 22 ] || { echo "Error: Node.js >= 22 required (found v$NODE_MAJOR)" >&2; exit 1; }
+```typescript
+// ~30 lines, no library needed
+function topologicalSort(hops: Hop[]): string[] {
+  const inDegree = new Map<string, number>();
+  const adj = new Map<string, string[]>();
+  for (const hop of hops) {
+    inDegree.set(hop.id, 0);
+    adj.set(hop.id, hop.next);
+  }
+  for (const hop of hops) {
+    for (const next of hop.next) {
+      inDegree.set(next, (inDegree.get(next) ?? 0) + 1);
+    }
+  }
+  const queue = [...inDegree.entries()].filter(([, d]) => d === 0).map(([id]) => id);
+  const order: string[] = [];
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    order.push(id);
+    for (const next of adj.get(id) ?? []) {
+      const newDeg = (inDegree.get(next) ?? 1) - 1;
+      inDegree.set(next, newDeg);
+      if (newDeg === 0) queue.push(next);
+    }
+  }
+  if (order.length !== hops.length) throw new Error("Cycle detected in workflow DAG");
+  return order;
 }
-
-# 3. Download latest release tarball
-download_release() { ... }
-
-# 4. Extract, npm ci, validate
-install_aof() { ... }
-
-# 5. Print next-steps
-print_success() { ... }
 ```
 
-### Reference implementations studied
+**Integration with scheduler:** The scheduler's `poll()` function calls `buildDispatchActions()` for ready tasks. For DAG-enabled tasks, dispatch decisions are per-hop, not per-task. The task stays `in-progress` while hops execute. Each poll cycle re-evaluates the DAG frontier.
 
-- **nvm**: `curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash` -- platform detection, version validation, idempotent
-- **pnpm**: `curl -fsSL https://get.pnpm.io/install.sh | sh` -- POSIX sh, graceful fallback
+### 4. Condition Evaluation (Extend Existing)
 
-### What NOT to build
+**Existing:** `evaluateGateCondition()` in `src/dispatch/gate-conditional.ts` provides:
+- Sandboxed JavaScript expression evaluation via `Function` constructor
+- Access to `tags`, `metadata`, `gateHistory` context variables
+- 100ms timeout protection
+- Syntax validation
 
-| Rejected | Why |
-|----------|-----|
-| Homebrew formula | Maintenance burden, out of v1.1 scope |
-| npm global install (`npm i -g aof`) | Native modules cause cross-platform issues with global installs |
-| Docker installer | Users run bare metal with OpenClaw |
-| Auto-update mechanism | Deferred to v2 per PROJECT.md |
-| Windows/PowerShell support | Not in current scope |
+**Extension for DAG hops:**
 
-**Confidence: HIGH** -- Pattern is well-established, no novel technology. Existing `src/packaging/` provides the TypeScript backend.
+| New Context Variable | Type | Purpose |
+|---------------------|------|---------|
+| `hopResults` | `Record<string, HopResult>` | Results from completed predecessor hops |
+| `artifacts` | `Record<string, string[]>` | File lists from predecessor hop output directories |
+| `workflow` | `{ currentPhase: string }` | Workflow-level metadata |
 
----
+```typescript
+// Extended context for DAG condition evaluation
+interface DAGEvaluationContext extends GateEvaluationContext {
+  hopResults: Record<string, { status: HopStatus; summary?: string }>;
+  artifacts: Record<string, string[]>;
+}
+```
 
-## Area 3: CI Pipeline with Changelog and Release Automation
+**Existing `buildGateContext()` extends naturally.** The function already builds context from task frontmatter. Adding `hopResults` from the task's workflow state is straightforward.
 
-### Existing Stack
-
-| Component | Status | Version |
-|-----------|--------|---------|
-| release-it | Installed & configured | 19.2.4 |
-| @release-it/conventional-changelog | Installed & configured | 10.0.5 |
-| @commitlint/cli | Installed & configured | 20.4.2 |
-| @commitlint/config-conventional | Installed & configured | 20.4.2 |
-| simple-git-hooks | Installed & configured | 2.13.1 |
-| `.release-it.json` | Configured | conventional-commits preset, GitHub releases, npm publish disabled |
-| `.github/workflows/e2e-tests.yml` | Exists (manual trigger only) | Disabled, needs activation |
-| `.github/workflows/docs.yml` | Exists (active) | Deploys Astro docs on push to main |
-| **CI test workflow** | **MISSING** | No workflow runs tests on PR/push |
-| **Release workflow** | **MISSING** | release-it is manual only (`npm run release`) |
-
-### What to build
-
-**Two new workflow files** using GitHub Actions (already in use for docs):
-
-#### `.github/workflows/ci.yml` -- Test on PR and push to main
+**Condition examples for branching:**
 
 ```yaml
-name: CI
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+# Only run security review if task has security tag
+when: "tags.includes('security')"
 
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
+# Only run hotfix deploy if previous hop flagged urgency
+when: "hopResults.triage?.summary?.includes('hotfix')"
+
+# Skip manual QA if automated tests passed
+when: "hopResults.autoTest?.status !== 'complete'"
 ```
 
-#### `.github/workflows/release.yml` -- Manual release with bump type
+### 5. Parallel Hop Dispatch and Join Semantics
 
-```yaml
-name: Release
-on:
-  workflow_dispatch:
-    inputs:
-      bump:
-        description: 'Version bump type'
-        type: choice
-        options: [patch, minor, major]
-        default: patch
+**Existing:** The scheduler tracks `currentInProgress` globally and `inProgressByTeam` per team. The `maxConcurrentDispatches` config limits parallel work.
 
-jobs:
-  release:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-      - run: npm ci
-      - run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-      - run: npm run release:${{ inputs.bump }} -- --ci
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+**New concern:** A single task can have multiple hops executing in parallel. The scheduler must:
+1. Dispatch all eligible hops in the frontier (not just one per task)
+2. Track which hops are dispatched (per-task hop state, not just task-level lease)
+3. Join parallel branches (wait for all/any predecessors before advancing)
+
+**Implementation approach -- hop-level leases:**
+
+Each hop dispatch creates a correlation ID (existing pattern from `dispatch/executor.ts`). The hop state in the task frontmatter tracks:
+
+```typescript
+const HopState = z.object({
+  hopId: z.string(),
+  status: HopStatus,
+  correlationId: z.string().uuid().optional(),  // links to gateway session
+  agent: z.string().optional(),
+  dispatchedAt: z.string().datetime().optional(),
+  completedAt: z.string().datetime().optional(),
+  summary: z.string().optional(),
+  retryCount: z.number().int().nonnegative().default(0),
+});
 ```
 
-### Technology decisions
+**Join semantics (`joinType` on each hop):**
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| CI platform | GitHub Actions | Repo is on GitHub, docs workflow already uses Actions |
-| Node.js version in CI | Pin 22.x | Matches `engines` field. Node 24/25 have [better-sqlite3 build failures](https://github.com/WiseLibs/better-sqlite3/issues/1411) due to V8 API changes. |
-| Changelog generation | release-it + @release-it/conventional-changelog | Already installed and configured in `.release-it.json` |
-| Commit convention | Conventional Commits | Already enforced via commitlint + simple-git-hooks |
-| Release trigger | Manual `workflow_dispatch` | Intentional releases, not auto-deploy on merge |
-| npm publish | Disabled | `npm.publish: false` in `.release-it.json` -- AOF is a plugin, not an npm package |
-| Test matrix | Single (Node 22, ubuntu-latest) | Only one supported Node version per `engines` |
+| Join Type | Behavior | When to Use |
+|-----------|----------|-------------|
+| `all` (default) | Wait for ALL predecessors to complete | Standard sequential dependency |
+| `any` | Advance when ANY predecessor completes | Race conditions, first-available patterns |
 
-### Native module CI considerations
+**Scheduler integration:** The `buildDispatchActions()` function in `task-dispatcher.ts` currently iterates ready tasks. For DAG tasks, it additionally iterates the hop frontier of each in-progress task with an active DAG. This is an additive change, not a rewrite.
 
-| Module | CI Behavior | Extra Setup Needed |
-|--------|------------|-------------------|
-| better-sqlite3 12.6.2 | Downloads prebuild binary via `prebuild-install` on Node 22 ubuntu-latest | None |
-| hnswlib-node 3.0.0 | Compiles from C++ via `node-gyp` + `node-addon-api` | None (`build-essential` and `python3` are pre-installed on `ubuntu-latest`) |
-| sqlite-vec 0.1.7-alpha.2 | Ships precompiled in npm package | None |
+### 6. Workflow Composition API (Agent-Facing)
 
-### Existing release-it configuration (retain as-is)
+**Existing:** Tasks are created via `ITaskStore.create()` and the `aof_create_task` MCP tool. The `routing.workflow` field references a workflow name from `project.yaml`.
 
-The `.release-it.json` is well-configured:
-- Conventional commits preset with categorized sections (Features, Bug Fixes, Performance, etc.)
-- `chore` and `ci` types hidden from changelog
-- Pre-release hooks run `typecheck` and `test`
-- GitHub Release enabled with proper token handling
-- npm publish disabled
-- Clean working directory required
-- Tag format: `v${version}`
+**New:** Two composition modes:
 
-### What NOT to add
+| Mode | When | Schema Location |
+|------|------|----------------|
+| **Template reference** | Task references a pre-defined workflow template | `routing.workflow: "standard-sdlc"` (existing pattern, now resolves to DAG) |
+| **Ad-hoc composition** | Agent defines workflow inline at task creation | New `workflow` field on task frontmatter containing the DAG definition |
 
-| Rejected | Why |
-|----------|-----|
-| release-please (Google) | Already using release-it with working config. Switching tools mid-project adds risk for zero benefit. |
-| semantic-release | Same rationale. release-it is simpler and already configured. |
-| Auto-release on merge | Intentional releases preferred per PROJECT.md. Manual workflow_dispatch. |
-| CHANGELOG.md file | `.release-it.json` has `"infile": false`. Changelog goes to GitHub Release notes only. |
-| Multi-version test matrix | Only Node 22 supported. No value in testing 20/24. |
-| Code coverage reporting | Nice-to-have, not v1.1 scope. Can add Codecov later. |
+**Agent API extension (MCP tools):**
 
-**Confidence: HIGH** -- All tools already installed. CI is just two YAML workflow files.
+| Tool | Change | Purpose |
+|------|--------|---------|
+| `aof_create_task` | Add optional `workflow` parameter accepting DAG definition | Agents compose workflows at task creation |
+| `aof_advance_hop` | New tool | Agent reports hop completion (replaces `aof_gate_transition` for DAG tasks) |
+| `aof_get_workflow_status` | New tool | Agent queries current DAG state (which hops complete, which pending) |
+
+**Template resolution:** When `routing.workflow` names a template and the task also has an inline `workflow`, the inline definition wins (override semantics, same as CSS specificity).
 
 ---
 
-## Area 4: Multi-Project Routing Verification
+## Stack Component Summary
 
-### Existing Stack
-
-The projects subsystem is fully built. This area requires **verification tests only**, not new code or dependencies.
-
-| Module | Path | What it does |
-|--------|------|-------------|
-| Registry | `src/projects/registry.ts` | Discovers projects from `vaultRoot/Projects/`, validates YAML manifests, builds parent/child hierarchy |
-| Resolver | `src/projects/resolver.ts` | Resolves project IDs to filesystem paths, handles `_inbox` default |
-| Bootstrap | `src/projects/bootstrap.ts` | Creates new project directory structures |
-| Linting | `src/projects/lint.ts` + `lint-helpers.ts` | Validates project structure and manifests |
-| Manifest | `src/projects/manifest.ts` | Builds and writes `project.yaml` |
-| Migration | `src/projects/migration.ts` | Migrates existing data to project structure |
-| Schema | `src/schemas/project.ts` | Zod schema for project manifests |
-| CLI | `src/cli/commands/project.ts` | Project CRUD commands |
-| Tools | `src/tools/project-tools.ts` | Task dispatch with project context |
-| Multi-project polling | `src/service/aof-service.ts` | AOFService discovers and polls multiple project task stores |
-| MCP adapter | `src/mcp/adapter.ts` | Tool exposure to agents |
-| Existing tests | `src/service/__tests__/multi-project-polling.test.ts` | Unit tests for TASK-069 |
-
-### What needs verification (tests, not new deps)
-
-| Test | Type | Framework |
-|------|------|-----------|
-| Multi-project dispatch end-to-end | Integration test | vitest (existing) |
-| Tool exposure includes project context | Integration test | vitest (existing) |
-| Memory pool isolation across projects | Integration test | vitest (existing) |
-| CLI project commands (`list`, `create`, `lint`) | CLI integration test | vitest (existing) |
-
-### Technology decision
-
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Test framework | vitest (existing) | Already has 2400+ tests, no reason to change |
-| Test location | `src/service/__tests__/` and `src/projects/__tests__/` | Follow existing patterns |
-| New dependencies | None | All code and test infrastructure exists |
-
-**Confidence: HIGH** -- Pure verification work. No stack changes.
-
----
-
-## Complete Stack Summary for v1.1
-
-### Dependencies: No Changes
+### Runtime Dependencies: No Changes
 
 ```
-Current package.json is correct as-is for all v1.1 work.
+Current package.json is correct as-is for all v1.2 DAG work.
 No npm install/add/remove needed.
 ```
 
-### New Files to Create
+### Existing Libraries Used (No Version Changes)
 
-| File | Type | Purpose |
-|------|------|---------|
-| `scripts/install.sh` | POSIX shell | curl\|sh installer entry point |
-| `.github/workflows/ci.yml` | GitHub Actions YAML | Test on PR/push |
-| `.github/workflows/release.yml` | GitHub Actions YAML | Manual release automation |
+| Library | Current Version | Role in v1.2 |
+|---------|----------------|--------------|
+| `zod` | ^3.24.0 | DAG schema definition, validation with `.superRefine()`, discriminated unions |
+| `yaml` | ^2.7.0 | Parse workflow templates from `project.yaml` |
+| `write-file-atomic` | ^7.0.0 | Atomic hop state updates (same pattern as gate transitions) |
+| `vitest` | ^3.0.0 (dev) | Unit tests for DAG engine, integration tests for scheduler |
 
-### Existing Files to Modify
+### New Modules to Create
 
-| File | Change | Area |
-|------|--------|------|
-| `src/memory/store/hnsw-index.ts` | Fix capacity handling, add compaction | Memory |
-| `src/memory/index.ts` | Fix rebuild headroom, periodic save | Memory |
-| `.github/workflows/e2e-tests.yml` | Activate PR trigger (when ready) | CI |
+| Module | Path | Purpose |
+|--------|------|---------|
+| `WorkflowDAG` schema | `src/schemas/workflow-dag.ts` | Zod schema for DAG-based workflows (hops, edges, conditions, join types) |
+| `HopStatus` types | `src/schemas/hop.ts` | Hop lifecycle types and valid transitions |
+| DAG validator | `src/dispatch/dag-validator.ts` | Cycle detection, reachability, orphan detection (pure functions) |
+| DAG advancer | `src/dispatch/dag-advancer.ts` | Evaluate frontier, advance hops, join semantics (pure functions) |
+| Hop dispatch | `src/dispatch/hop-dispatcher.ts` | Per-hop dispatch (extends task-dispatcher pattern) |
+| Workflow resolver | `src/dispatch/workflow-resolver.ts` | Resolve template name to DAG definition |
 
-### Existing Files to Add Tests For
+### Existing Modules to Extend
 
-| File | Test File | Area |
-|------|-----------|------|
-| `src/service/aof-service.ts` | New integration tests | Projects |
-| `src/mcp/adapter.ts` | New integration tests | Projects |
-| `src/memory/store/hnsw-index.ts` | Capacity edge-case tests | Memory |
+| Module | Path | Change |
+|--------|------|--------|
+| Task schema | `src/schemas/task.ts` | Add `workflow` and `hopStates` fields to `TaskFrontmatter` |
+| Project schema | `src/schemas/project.ts` | Add `workflowTemplates` (map of named DAG workflows) alongside existing `workflow` |
+| Scheduler | `src/dispatch/scheduler.ts` | Call DAG advancer for tasks with active DAG workflows |
+| Task dispatcher | `src/dispatch/task-dispatcher.ts` | Handle hop-level dispatch for DAG tasks |
+| Gate conditional | `src/dispatch/gate-conditional.ts` | Extend context with `hopResults` for DAG condition evaluation |
+| Gate transition handler | `src/dispatch/gate-transition-handler.ts` | Add DAG-aware path alongside existing gate path |
+| MCP tools | `src/mcp/tools.ts` | Add `aof_advance_hop` and `aof_get_workflow_status` tools |
+| Action executor | `src/dispatch/action-executor.ts` | Handle new `advance_hop` action type |
+| Event schema | `src/schemas/event.ts` | Add `hop_dispatched`, `hop_completed`, `hop_failed` event types |
 
 ---
 
-## Version Compatibility (v1.1 relevant)
+## Key Design Decisions
 
-| Component | Pinned Version | CI Version | Notes |
-|-----------|---------------|------------|-------|
-| Node.js | >=22.0.0 (engines) | 22.x | Do NOT use 24/25 -- better-sqlite3 build failures |
-| hnswlib-node | 3.0.0 | Same | Latest version, no upgrade available |
-| better-sqlite3 | 12.6.2 | Same | Has prebuilds for Node 22 ubuntu-latest |
-| sqlite-vec | 0.1.7-alpha.2 | Same | Ships precompiled, no compilation needed |
-| release-it | 19.2.4 | Same | Used in release workflow |
-| GitHub Actions runners | N/A | ubuntu-latest | Node 22 + build-essential pre-installed |
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| No external DAG library | Build ~100 lines of topological sort + frontier eval | AOF DAGs are small (5-20 hops). Graph libraries add dependency weight for trivial operations. The existing codebase already has O(n+e) DFS cycle detection in `scheduler.ts`. |
+| No state machine library | Lookup table pattern (matches existing `VALID_TRANSITIONS`) | Hop lifecycle is flat (8 states, 12 transitions). xstate's value is in complex nested statecharts, not simple FSMs. |
+| Zod `.superRefine()` for DAG validation | Parse-time validation, not runtime | Catches invalid DAGs (cycles, unreachable hops) when config is loaded, not when task is executing. Fail fast. |
+| Hop-level state in task frontmatter | `hopStates: HopState[]` on task | Filesystem-based persistence. Each hop state persists via atomic write. Crash recovery reads hop states on restart. |
+| Extend gate-conditional, don't replace | Add `hopResults` to evaluation context | Conditional branching reuses the same sandboxed eval engine. One security model, one test suite. |
+| Adjacency list in hop definition | `next: string[]` on each hop | Self-contained hops. No separate edge array to drift out of sync. |
+| Join semantics per-hop, not per-edge | `joinType` on destination hop | Simpler mental model: "this hop waits for all/any predecessors." Avoids per-edge join complexity. |
+| Backward compatibility via dual schema | `workflow` (legacy gates) + `workflowDAG` (new) | Existing tasks with linear gate workflows continue working. No migration required for v1.2 launch. |
+
+---
+
+## What NOT to Add
+
+| Technology | Why Not |
+|------------|---------|
+| `graphlib` / `dagre` | Unmaintained. AOF's graphs are tiny. Topological sort is trivial to implement. |
+| `xstate` v5 | Overkill for flat state machines. Would add ~40KB runtime + learning curve for 12 transitions. |
+| `bull` / `bullmq` | Requires Redis. Violates filesystem-only constraint. |
+| `p-limit` | AOF already has throttle.ts. Dual concurrency control is a bug factory. |
+| `temporal` / `inngest` / `trigger.dev` | Server-based workflow platforms. AOF is a single-machine plugin. |
+| Separate SQLite table for hop state | Hop state belongs in the task file (filesystem task store constraint). Adding a side-channel database violates the single-source-of-truth principle. |
+| React Flow / vis.js | DAG visualization is deferred to v2. CLI-only for v1.2. |
+| `json-logic-js` | Condition evaluation. The existing `Function` constructor approach in `gate-conditional.ts` is more powerful and already proven. json-logic adds a learning curve with no benefit. |
+
+---
+
+## Alternatives Considered
+
+| Category | Recommended | Alternative | Why Not |
+|----------|-------------|-------------|---------|
+| DAG representation | Adjacency list in hop definitions | Edge list (separate `edges` array) | Two arrays to keep in sync. Orphan edges possible. More complex validation. |
+| State machine | Lookup table (`Record<HopStatus, HopStatus[]>`) | xstate v5 | 8 states, 12 transitions. Lookup table is simpler, zero-dep, matches existing patterns. |
+| Condition engine | Extend existing `gate-conditional.ts` | `json-logic-js` or `expr-eval` | Existing engine is proven, sandboxed, tested. Swapping adds risk for no gain. |
+| Parallel tracking | Hop-level state in task frontmatter | Separate tracking file per task | Violates single-file-per-task pattern. Complicates atomic writes. |
+| Join semantics | Per-hop `joinType: "all" | "any"` | Per-edge join annotations | Per-hop is simpler mental model. Per-edge creates combinatorial complexity for N predecessors. |
+| Workflow storage | Template in `project.yaml`, instance in task frontmatter | Separate workflow files | Adds file management complexity. Task frontmatter is the natural home for per-task state. |
+
+---
+
+## Version Compatibility (v1.2 relevant)
+
+| Component | Version | Notes |
+|-----------|---------|-------|
+| Node.js | >=22.0.0 (pinned) | No change from v1.1. Node 24/25 still have better-sqlite3 issues. |
+| Zod | ^3.24.0 | `.superRefine()` available since Zod 3.x. `.discriminatedUnion()` available since Zod 3.0. No upgrade needed. |
+| TypeScript | ^5.7.0 | Satisfies constraint types and template literal types used in schema definitions. |
+| vitest | ^3.0.0 | No change. Test patterns remain the same. |
+| write-file-atomic | ^7.0.0 | No change. Atomic writes for hop state updates. |
+
+---
+
+## Installation
+
+```bash
+# No new packages needed for v1.2
+npm ci
+
+# Verify build works
+npm run typecheck
+npm test
+```
 
 ---
 
 ## Sources
 
-### hnswlib-node (Memory)
-- [HierarchicalNSW API documentation](https://yoshoku.github.io/hnswlib-node/doc/classes/HierarchicalNSW.html) -- HIGH confidence, confirmed `resizeIndex`, `getIdsList`, `getCurrentCount`, `getMaxElements`
-- [hnswlib upstream resizing discussion (issue #39)](https://github.com/nmslib/hnswlib/issues/39) -- HIGH confidence, design rationale for resize behavior
-- `node_modules/hnswlib-node/lib/index.d.ts` -- HIGH confidence, installed source of truth for API surface
-- [hnswlib-node GitHub repository](https://github.com/yoshoku/hnswlib-node) -- MEDIUM confidence, 3.0.0 is latest release (2024-03-11)
+### Codebase (PRIMARY - HIGH confidence)
 
-### sqlite-vec (Memory)
-- [sqlite-vec maintenance status (issue #226)](https://github.com/asg017/sqlite-vec/issues/226) -- HIGH confidence, maintainer confirmed limited bandwidth but "far from dead"
+All technology decisions are grounded in direct reading of the existing codebase:
 
-### CI/Release
-- [better-sqlite3 Node.js 25 build failure (issue #1411)](https://github.com/WiseLibs/better-sqlite3/issues/1411) -- HIGH confidence, confirms need to pin Node 22 in CI
-- [release-it GitHub repository](https://github.com/release-it/release-it) -- HIGH confidence, v19.2.4 is current
-- [GitHub Actions release automation guide (2026)](https://oneuptime.com/blog/post/2026-02-02-github-actions-release-automation/view) -- MEDIUM confidence
+- `src/schemas/workflow.ts` -- Existing `WorkflowConfig` with linear gate sequences. Extension point for DAG schema.
+- `src/schemas/gate.ts` -- Gate/hop type definitions. `GateOutcome`, `GateHistoryEntry`, `GateTransition` patterns to replicate for hops.
+- `src/schemas/task.ts` -- `TaskFrontmatter` with `gate`, `gateHistory`, `reviewContext` fields. Pattern for adding `hopStates`.
+- `src/schemas/project.ts` -- `ProjectManifest` with `workflow: WorkflowConfig.optional()`. Extension point for DAG templates.
+- `src/dispatch/scheduler.ts` -- Poll loop with dependency checking, concurrency tracking. Integration point for DAG advancement.
+- `src/dispatch/gate-evaluator.ts` -- Pure-function state machine pattern. Replicate for hop advancement.
+- `src/dispatch/gate-conditional.ts` -- Sandboxed condition evaluator with `Function` constructor. Extend for DAG conditions.
+- `src/dispatch/gate-transition-handler.ts` -- Orchestrator glue between pure logic and filesystem. Pattern for hop transition handler.
+- `src/dispatch/task-dispatcher.ts` -- Dispatch action builder. Extension point for per-hop dispatch.
+- `src/store/interfaces.ts` -- `ITaskStore` interface. May need `writeHopState()` convenience method.
+- `package.json` -- Current dependency tree confirms all needed libraries are present.
 
-### Installer Patterns
-- [nvm install script](https://github.com/nvm-sh/nvm) -- HIGH confidence, well-established POSIX sh pattern
-- [pnpm install script](https://pnpm.io/installation) -- HIGH confidence, another reference implementation
-- [Node.js CLI best practices](https://github.com/lirantal/nodejs-cli-apps-best-practices) -- MEDIUM confidence
+### Algorithm Knowledge (MEDIUM confidence -- training data, not verified against current docs)
+
+- **Kahn's algorithm** for topological sort -- well-established, O(V+E), standard for DAG processing. Used in build systems (Make, Gradle), CI pipelines, and data pipelines universally.
+- **Frontier evaluation** -- standard pattern in DAG task schedulers. At each tick, find nodes with all predecessors complete. Apache Airflow, Prefect, and Dagster all use this approach.
+- **Join semantics (all/any)** -- standard pattern from BPMN (Business Process Model and Notation) parallel gateways. "all" = AND-join, "any" = OR-join.
+
+### Design Pattern Sources (MEDIUM confidence -- training data)
+
+- **Adjacency list representation** -- standard graph representation. Preferred for sparse graphs (which workflow DAGs always are).
+- **State machine as lookup table** -- used in game engines, protocol implementations, and workflow engines where state count is small and transitions are data-driven rather than behavior-driven.
 
 ---
-*Stack research for: AOF v1.1 Stabilization & Ship*
-*Researched: 2026-02-26*
-*Previous research (v1.0): 2026-02-25 -- retained items not repeated here*
+*Stack research for: AOF v1.2 Per-Task Workflow DAG Execution*
+*Researched: 2026-03-02*
+*Previous research (v1.1): 2026-02-26 -- retained items not repeated here*
