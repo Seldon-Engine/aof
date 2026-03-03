@@ -292,6 +292,44 @@ export class AOFService {
       const inProgress = await store.list({ status: "in-progress" });
 
       for (const task of inProgress) {
+        if (task.frontmatter.workflow) {
+          // DAG task: stay in-progress, but reset any dispatched hops to ready
+          const state = task.frontmatter.workflow.state;
+          let modified = false;
+          for (const [hopId, hopState] of Object.entries(state.hops)) {
+            if (hopState.status === "dispatched") {
+              state.hops[hopId] = {
+                ...hopState,
+                status: "ready",
+                agent: undefined,
+                correlationId: undefined,
+                startedAt: undefined,
+              } as typeof hopState;
+              modified = true;
+            }
+          }
+          if (modified) {
+            // Persist the updated state atomically
+            task.frontmatter.workflow.state = state;
+            task.frontmatter.updatedAt = new Date().toISOString();
+            const { serializeTask } = await import("../store/task-store.js");
+            const writeFileAtomic = (await import("write-file-atomic")).default;
+            const serialized = serializeTask(task);
+            await writeFileAtomic(task.path!, serialized);
+
+            console.info(
+              `[AOF] DAG task ${task.frontmatter.id}: reset dispatched hops to ready (startup reconciliation)`
+            );
+            try {
+              await this.logger.log("task.reclaimed", "system", {
+                taskId: task.frontmatter.id,
+                payload: { reason: "startup_reconciliation", dagTask: true },
+              });
+            } catch { /* logging errors non-fatal */ }
+          }
+          continue; // Skip normal ready transition for DAG tasks
+        }
+
         const lease = task.frontmatter.lease;
 
         try {
