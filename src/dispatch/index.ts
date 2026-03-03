@@ -19,3 +19,17 @@ export type { GateEvaluationInput, GateEvaluationResult } from "./gate-evaluator
 // Note: aofDispatch from aof-dispatch.js is not re-exported to avoid naming conflict with tools/aof-tools.ts
 // Import directly from "./dispatch/aof-dispatch.js" if needed
 export type { AofDispatchOptions, DispatchResult } from "./aof-dispatch.js";
+export { evaluateDAG } from "./dag-evaluator.js";
+export type {
+  DAGEvaluationInput,
+  DAGEvaluationResult,
+  HopEvent,
+  HopTransition,
+  EvalContext,
+} from "./dag-evaluator.js";
+export {
+  evaluateCondition,
+  getField,
+  buildConditionContext,
+} from "./dag-condition-evaluator.js";
+export type { ConditionContext } from "./dag-condition-evaluator.js";
