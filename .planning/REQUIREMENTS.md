@@ -1,7 +1,7 @@
 # Requirements: AOF v1.2 Task Workflows
 
 **Defined:** 2026-03-02
-**Core Value:** Tasks never get dropped — they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
+**Core Value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
 
 ## v1.2 Requirements
 
@@ -78,7 +78,7 @@ Deferred to later milestones. Tracked but not in current roadmap.
 |---------|--------|
 | Multi-task DAGs (cross-task orchestration) | v1.2 is intra-task DAGs only; cross-task deferred to v2 |
 | Visual DAG editor / UI | CLI-first; no UI in v1 |
-| Nested agent sessions | OpenClaw constraint — hops are independent sessions |
+| Nested agent sessions | OpenClaw constraint -- hops are independent sessions |
 | Real-time DAG execution streaming | JSONL event logging sufficient for observability |
 | Hot-reloading workflow templates | Restart to pick up template changes is acceptable |
 | Distributed / multi-host DAG execution | Single-machine deployment for now |
@@ -87,39 +87,39 @@ Deferred to later milestones. Tracked but not in current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DAG-01 | — | Pending |
-| DAG-02 | — | Pending |
-| DAG-03 | — | Pending |
-| DAG-04 | — | Pending |
-| EXEC-01 | — | Pending |
-| EXEC-02 | — | Pending |
-| EXEC-03 | — | Pending |
-| EXEC-04 | — | Pending |
-| EXEC-05 | — | Pending |
-| EXEC-06 | — | Pending |
-| EXEC-07 | — | Pending |
-| EXEC-08 | — | Pending |
-| TMPL-01 | — | Pending |
-| TMPL-02 | — | Pending |
-| TMPL-03 | — | Pending |
-| ARTF-01 | — | Pending |
-| ARTF-02 | — | Pending |
-| SAFE-01 | — | Pending |
-| SAFE-02 | — | Pending |
-| SAFE-03 | — | Pending |
-| SAFE-04 | — | Pending |
-| SAFE-05 | — | Pending |
-| DOCS-01 | — | Pending |
-| DOCS-02 | — | Pending |
-| DOCS-03 | — | Pending |
-| DOCS-04 | — | Pending |
-| DOCS-05 | — | Pending |
+| DAG-01 | Phase 10 | Pending |
+| DAG-02 | Phase 10 | Pending |
+| DAG-03 | Phase 10 | Pending |
+| DAG-04 | Phase 10 | Pending |
+| EXEC-01 | Phase 12 | Pending |
+| EXEC-02 | Phase 12 | Pending |
+| EXEC-03 | Phase 12 | Pending |
+| EXEC-04 | Phase 11 | Pending |
+| EXEC-05 | Phase 11 | Pending |
+| EXEC-06 | Phase 12 | Pending |
+| EXEC-07 | Phase 11 | Pending |
+| EXEC-08 | Phase 10 | Pending |
+| TMPL-01 | Phase 14 | Pending |
+| TMPL-02 | Phase 14 | Pending |
+| TMPL-03 | Phase 14 | Pending |
+| ARTF-01 | Phase 14 | Pending |
+| ARTF-02 | Phase 14 | Pending |
+| SAFE-01 | Phase 13 | Pending |
+| SAFE-02 | Phase 12 | Pending |
+| SAFE-03 | Phase 13 | Pending |
+| SAFE-04 | Phase 13 | Pending |
+| SAFE-05 | Phase 15 | Pending |
+| DOCS-01 | Phase 15 | Pending |
+| DOCS-02 | Phase 15 | Pending |
+| DOCS-03 | Phase 15 | Pending |
+| DOCS-04 | Phase 15 | Pending |
+| DOCS-05 | Phase 15 | Pending |
 
 **Coverage:**
 - v1.2 requirements: 27 total
-- Mapped to phases: 0
-- Unmapped: 27 ⚠️
+- Mapped to phases: 27
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-02*
-*Last updated: 2026-03-02 after initial definition*
+*Last updated: 2026-03-02 after roadmap creation*
