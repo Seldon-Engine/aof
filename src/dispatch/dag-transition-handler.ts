@@ -1,0 +1,319 @@
+/**
+ * DAG transition handler — orchestrates DAG evaluation, state persistence,
+ * and hop dispatch within DAG-based task workflows.
+ *
+ * Mirrors the gate-transition-handler.ts pattern for the DAG path.
+ * Two exported functions:
+ * - handleDAGHopCompletion: processes a hop completion/failure, evaluates DAG,
+ *   persists state atomically, and returns ready hops for dispatch.
+ * - dispatchDAGHop: builds hop context, spawns agent session, and updates
+ *   hop state to dispatched only on success.
+ *
+ * Design decisions:
+ * - Hop state is set to dispatched ONLY after spawnSession succeeds
+ * - Run result notes/data become the hop's result field
+ * - State is persisted atomically via write-file-atomic
+ * - Zero changes to gate path (independent code paths)
+ *
+ * @module dag-transition-handler
+ */
+
+import { randomUUID } from "node:crypto";
+import type {
+  WorkflowDefinition,
+  WorkflowState,
+} from "../schemas/workflow-dag.js";
+import {
+  evaluateDAG,
+  type DAGEvaluationInput,
+  type HopEvent,
+  type EvalContext,
+} from "./dag-evaluator.js";
+import { buildHopContext } from "./dag-context-builder.js";
+import { serializeTask } from "../store/task-store.js";
+import writeFileAtomic from "write-file-atomic";
+import type { Task } from "../schemas/task.js";
+import type { TaskContext, GatewayAdapter } from "./executor.js";
+import type { EventLogger } from "../events/logger.js";
+import type { ITaskStore } from "../store/interfaces.js";
+import type { RunResult } from "../schemas/run-result.js";
+
+// ---------------------------------------------------------------------------
+// Result Types
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of handling a DAG hop completion.
+ */
+export interface DAGHopCompletionResult {
+  /** Hop IDs that became ready and can be dispatched. */
+  readyHops: string[];
+  /** Whether the entire DAG has reached a terminal state. */
+  dagComplete: boolean;
+  /** Whether the completed hop requires human review before advancing. */
+  reviewRequired: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Internal Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Find the currently dispatched hop in workflow state.
+ *
+ * @param task - Task with workflow frontmatter
+ * @returns Hop ID of the dispatched hop, or undefined if none found
+ */
+function findDispatchedHop(task: Task): string | undefined {
+  const hops = task.frontmatter.workflow?.state.hops;
+  if (!hops) return undefined;
+
+  for (const [hopId, hopState] of Object.entries(hops)) {
+    if (hopState.status === "dispatched") return hopId;
+  }
+  return undefined;
+}
+
+/**
+ * Map a RunResult to a HopEvent for DAG evaluation.
+ *
+ * - done outcome -> complete
+ * - Any other outcome -> failed
+ * - Notes become the hop result field
+ *
+ * @param runResult - Agent run result
+ * @param hopId - Hop ID the run result corresponds to
+ * @returns HopEvent for evaluateDAG
+ */
+function mapRunResultToHopEvent(runResult: RunResult, hopId: string): HopEvent {
+  const outcome = runResult.outcome === "done" ? "complete" : "failed";
+  const result = runResult.notes
+    ? { notes: runResult.notes }
+    : undefined;
+
+  return { hopId, outcome, result };
+}
+
+/**
+ * Build EvalContext from task frontmatter for DAG evaluation.
+ *
+ * Collects hop results from all completed hops and task metadata.
+ *
+ * @param task - Task with workflow frontmatter
+ * @returns EvalContext for evaluateDAG
+ */
+function buildEvalContext(task: Task): EvalContext {
+  const workflow = task.frontmatter.workflow!;
+  const hopResults: Record<string, Record<string, unknown>> = {};
+
+  for (const [hopId, hopState] of Object.entries(workflow.state.hops)) {
+    if (hopState.result) {
+      hopResults[hopId] = hopState.result;
+    }
+  }
+
+  return {
+    hopResults,
+    task: {
+      status: task.frontmatter.status,
+      tags: task.frontmatter.routing.tags ?? [],
+      priority: task.frontmatter.priority,
+      routing: task.frontmatter.routing as Record<string, unknown>,
+    },
+  };
+}
+
+/**
+ * Persist updated workflow state to task file atomically.
+ *
+ * @param task - Task object (mutated in-place with new state)
+ * @param newState - New WorkflowState to persist
+ */
+async function persistWorkflowState(
+  task: Task,
+  newState: WorkflowState,
+): Promise<void> {
+  task.frontmatter.workflow!.state = newState;
+  task.frontmatter.updatedAt = new Date().toISOString();
+  await writeFileAtomic(task.path!, serializeTask(task));
+}
+
+// ---------------------------------------------------------------------------
+// Exported Functions
+// ---------------------------------------------------------------------------
+
+/**
+ * Handle completion/failure of a DAG hop.
+ *
+ * Orchestrates the full DAG transition flow:
+ * 1. Find the dispatched hop
+ * 2. Map run result to HopEvent
+ * 3. Build evaluation context
+ * 4. Call evaluateDAG
+ * 5. Persist new state atomically
+ * 6. Log transition event
+ * 7. Determine if review is required (autoAdvance=false)
+ *
+ * @param store - Task store instance
+ * @param logger - Event logger
+ * @param task - Task with workflow frontmatter
+ * @param runResult - Agent run result
+ * @returns Ready hops, DAG completion status, and review requirement
+ */
+export async function handleDAGHopCompletion(
+  store: ITaskStore,
+  logger: EventLogger,
+  task: Task,
+  runResult: RunResult,
+): Promise<DAGHopCompletionResult> {
+  // 1. Find dispatched hop
+  const hopId = findDispatchedHop(task);
+  if (!hopId) {
+    await logger.log("dag.warning", "system", {
+      taskId: task.frontmatter.id,
+      payload: { message: "No dispatched hop found for completion event" },
+    });
+    return { readyHops: [], dagComplete: false, reviewRequired: false };
+  }
+
+  // 2. Map run result to HopEvent
+  const hopEvent = mapRunResultToHopEvent(runResult, hopId);
+
+  // 3. Build evaluation context
+  const evalContext = buildEvalContext(task);
+
+  // 4. Call evaluateDAG
+  const evalResult = evaluateDAG({
+    definition: task.frontmatter.workflow!.definition,
+    state: task.frontmatter.workflow!.state,
+    event: hopEvent,
+    context: evalContext,
+  });
+
+  // 5. Persist new state atomically
+  await persistWorkflowState(task, evalResult.state);
+
+  // 6. Log transition event
+  await logger.log("dag.hop_completed", runResult.agentId, {
+    taskId: task.frontmatter.id,
+    payload: {
+      hopId,
+      outcome: hopEvent.outcome,
+      readyHops: evalResult.readyHops,
+      dagStatus: evalResult.dagStatus,
+      taskStatus: evalResult.taskStatus,
+      changes: evalResult.changes,
+    },
+  });
+
+  // 7. Check autoAdvance for review requirement
+  const dagComplete = evalResult.taskStatus !== undefined;
+  let reviewRequired = false;
+
+  if (hopEvent.outcome === "complete") {
+    const hopDef = task.frontmatter.workflow!.definition.hops.find(
+      (h) => h.id === hopId,
+    );
+    if (hopDef && !hopDef.autoAdvance) {
+      reviewRequired = true;
+    }
+  }
+
+  return {
+    readyHops: evalResult.readyHops,
+    dagComplete,
+    reviewRequired,
+  };
+}
+
+/**
+ * Dispatch a ready hop to an agent.
+ *
+ * Builds hop-scoped context, spawns an agent session, and updates hop state
+ * to dispatched ONLY after successful spawn. On failure, the hop remains
+ * in "ready" state for retry.
+ *
+ * @param store - Task store instance
+ * @param logger - Event logger
+ * @param config - Dispatch configuration (spawnTimeoutMs)
+ * @param executor - Gateway adapter for spawning sessions
+ * @param task - Task with workflow frontmatter
+ * @param hopId - ID of the hop to dispatch
+ * @returns true if dispatch succeeded, false otherwise
+ */
+export async function dispatchDAGHop(
+  store: ITaskStore,
+  logger: EventLogger,
+  config: { spawnTimeoutMs?: number },
+  executor: GatewayAdapter,
+  task: Task,
+  hopId: string,
+): Promise<boolean> {
+  const workflow = task.frontmatter.workflow!;
+  const hop = workflow.definition.hops.find((h) => h.id === hopId);
+  if (!hop) {
+    await logger.log("dag.dispatch_error", "system", {
+      taskId: task.frontmatter.id,
+      payload: { hopId, error: `Hop "${hopId}" not found in definition` },
+    });
+    return false;
+  }
+
+  // Build hop-scoped context
+  const hopContext = buildHopContext(task, hopId);
+
+  // Build TaskContext with hop context
+  const correlationId = randomUUID();
+  const context: TaskContext = {
+    taskId: task.frontmatter.id,
+    taskPath: task.path!,
+    agent: hop.role,
+    priority: task.frontmatter.priority,
+    routing: { role: hop.role },
+    projectId: task.frontmatter.project,
+    hopContext,
+  };
+
+  // Spawn session
+  const spawnResult = await executor.spawnSession(context, {
+    timeoutMs: config.spawnTimeoutMs ?? 30_000,
+    correlationId,
+  });
+
+  if (!spawnResult.success) {
+    // On failure: hop stays "ready" for retry
+    await logger.log("dag.dispatch_failed", "system", {
+      taskId: task.frontmatter.id,
+      payload: {
+        hopId,
+        error: spawnResult.error,
+        correlationId,
+      },
+    });
+    return false;
+  }
+
+  // On success: set hop to dispatched and persist atomically
+  workflow.state.hops[hopId] = {
+    ...workflow.state.hops[hopId]!,
+    status: "dispatched",
+    startedAt: new Date().toISOString(),
+    agent: hop.role,
+    correlationId: spawnResult.sessionId,
+  };
+
+  await persistWorkflowState(task, workflow.state);
+
+  // Log dispatch event
+  await logger.log("dag.hop_dispatched", hop.role, {
+    taskId: task.frontmatter.id,
+    payload: {
+      hopId,
+      agent: hop.role,
+      sessionId: spawnResult.sessionId,
+      correlationId,
+    },
+  });
+
+  return true;
+}
