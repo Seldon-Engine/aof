@@ -19,6 +19,8 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { mkdir } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import type {
   WorkflowDefinition,
   WorkflowState,
@@ -293,6 +295,11 @@ export async function dispatchDAGHop(
     });
     return false;
   }
+
+  // Create per-hop artifact directory before spawn
+  const hopWorkDir = join(dirname(task.path!), "work", hopId);
+  await mkdir(hopWorkDir, { recursive: true });
+  console.log(`[dag] Created artifact dir: ${hopWorkDir}`);
 
   // Build hop-scoped context
   const hopContext = buildHopContext(task, hopId);
