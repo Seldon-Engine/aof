@@ -4,7 +4,7 @@ milestone: v1.2
 milestone_name: Task Workflows
 status: executing
 stopped_at: Completed 15-03 (Documentation Pivot and Gate Deprecation) -- Phase 15 complete -- v1.2 milestone done
-last_updated: "2026-03-03T19:55:29.545Z"
+last_updated: "2026-03-03T19:58:21.522Z"
 last_activity: 2026-03-03 -- Completed plan 15-01 (Gate-to-DAG lazy migration)
 progress:
   total_phases: 6
