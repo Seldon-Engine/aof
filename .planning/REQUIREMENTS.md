@@ -20,9 +20,9 @@ Requirements for per-task workflow DAG execution. Each maps to roadmap phases.
 - [ ] **EXEC-02**: On hop completion, scheduler evaluates DAG graph and advances eligible next hops
 - [ ] **EXEC-03**: Completion-triggered advancement dispatches next hop immediately (poll cycle as fallback)
 - [x] **EXEC-04**: Conditional hops evaluate a JSON DSL expression to determine execute vs skip
-- [ ] **EXEC-05**: Skipped hops propagate skip to downstream dependents with no other satisfied inputs
+- [x] **EXEC-05**: Skipped hops propagate skip to downstream dependents with no other satisfied inputs
 - [ ] **EXEC-06**: Parallel-eligible hops dispatch in sequence (serialized by OpenClaw constraint) without blocking each other
-- [ ] **EXEC-07**: Join hops support configurable join type (all predecessors vs any predecessor)
+- [x] **EXEC-07**: Join hops support configurable join type (all predecessors vs any predecessor)
 - [x] **EXEC-08**: Hop lifecycle follows state machine: pending → ready → dispatched → complete/failed/skipped
 
 ### Workflow Authoring
@@ -95,9 +95,9 @@ Deferred to later milestones. Tracked but not in current roadmap.
 | EXEC-02 | Phase 12 | Pending |
 | EXEC-03 | Phase 12 | Pending |
 | EXEC-04 | Phase 11 | Complete |
-| EXEC-05 | Phase 11 | Pending |
+| EXEC-05 | Phase 11 | Complete |
 | EXEC-06 | Phase 12 | Pending |
-| EXEC-07 | Phase 11 | Pending |
+| EXEC-07 | Phase 11 | Complete |
 | EXEC-08 | Phase 10 | Complete |
 | TMPL-01 | Phase 14 | Pending |
 | TMPL-02 | Phase 14 | Pending |
