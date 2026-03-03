@@ -46,6 +46,8 @@ describe("AOFService ProtocolRouter wiring", () => {
   it("passes executor to ProtocolRouter when provided in deps", () => {
     const mockExecutor: GatewayAdapter = {
       spawnSession: vi.fn(),
+      getSessionStatus: vi.fn(),
+      forceCompleteSession: vi.fn(),
     };
     const poller = vi.fn(async () => makePollResult());
     const service = new AOFService(
