@@ -143,7 +143,7 @@ Plans:
 | 9. Documentation & Guardrails | v1.1 | 5/5 | Complete | 2026-02-27 |
 | 10. DAG Schema Foundation | 2/2 | Complete    | 2026-03-03 | - |
 | 11. DAG Evaluator | 2/2 | Complete    | 2026-03-03 | - |
-| 12. Scheduler Integration | 2/2 | Complete   | 2026-03-03 | - |
+| 12. Scheduler Integration | 2/2 | Complete    | 2026-03-03 | - |
 | 13. Timeout, Rejection, and Safety | v1.2 | 0/? | Not started | - |
 | 14. Templates, Ad-Hoc API, and Artifacts | v1.2 | 0/? | Not started | - |
 | 15. Migration and Documentation | v1.2 | 0/? | Not started | - |
