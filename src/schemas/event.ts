@@ -134,6 +134,11 @@ export const EventType = z.enum([
   "dag.hop_dispatched",
   "dag.dispatch_error",
   "dag.dispatch_failed",
+  // DAG safety (Phase 13: timeout + rejection)
+  "dag.hop_timeout",
+  "dag.hop_timeout_escalation",
+  "dag.hop_rejected",
+  "dag.hop_rejection_cascade",
 ]);
 export type EventType = z.infer<typeof EventType>;
 

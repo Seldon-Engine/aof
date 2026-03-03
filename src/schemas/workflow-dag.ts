@@ -186,6 +186,10 @@ export const HopState = z.object({
   correlationId: z.string().optional(),
   /** Arbitrary output data from hop execution (for downstream hops). */
   result: z.record(z.string(), z.unknown()).optional(),
+  /** Cumulative rejection count for circuit-breaker logic. Persists across rejection cascades. */
+  rejectionCount: z.number().int().nonnegative().optional(),
+  /** Whether this hop has been escalated (one-shot flag to prevent re-escalation). */
+  escalated: z.boolean().optional(),
 });
 export type HopState = z.infer<typeof HopState>;
 

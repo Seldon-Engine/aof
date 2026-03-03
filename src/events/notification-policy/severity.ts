@@ -21,6 +21,7 @@ export const ALWAYS_CRITICAL_EVENTS: ReadonlySet<string> = new Set([
   "task.abandoned",
   "task.deadletter",
   "gate_timeout_escalation",
+  "dag.hop_timeout_escalation",
 ]);
 
 export class SeverityResolver {
