@@ -46,9 +46,20 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 - ✓ Auto-generated CLI reference from Commander.js command tree — v1.1
 - ✓ Pre-commit hook preventing doc drift (4 checks) — v1.1
 
+### Current Milestone: v1.3 Seamless Upgrade
+
+**Goal:** Make the v1.2 DAG workflow system deployable with confidence — upgrade path works end-to-end, DAGs become the default, release is cut and installable.
+
+**Target features:**
+- Seamless upgrade from pre-v1.2 to v1.3 (config migration, data preservation)
+- DAG workflows as default for new tasks (not opt-in)
+- Tagged release with installer-downloadable tarball
+- Upgrade documentation and rollback safety
+- End-to-end smoke tests for the upgrade path
+
 ### Active
 
-(None yet — define with `/gsd:new-milestone`)
+(Defining requirements for v1.3)
 
 ### Validated (v1.2)
 
@@ -69,10 +80,10 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 - Multi-host distribution — single-machine deployment for now
 - Non-OpenClaw runtimes — AOF is an OpenClaw plugin specifically
 - OpenTelemetry integration — deferred to v2
-- Self-healing (circuit breaker, dead-letter resurrection, stuck session recovery) — deferred to v1.3
-- Agent-guided org chart setup — deferred to v1.3
-- Standalone daemon executor wiring — deferred to v1.3
-- Memory search reranker — deferred to v1.3
+- Self-healing (circuit breaker, dead-letter resurrection, stuck session recovery) — deferred to v1.4
+- Agent-guided org chart setup — deferred to v1.4
+- Standalone daemon executor wiring — deferred to v1.4
+- Memory search reranker — deferred to v1.4
 - Memory tier auto compaction — deferred to v2
 - Autoupdate mechanism — deferred to v2
 - OpenClaw version compat checks — deferred to v2
@@ -127,4 +138,4 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 | Product messaging: "multi-team agent orchestration platform" | Domain-agnostic positioning, not implementation-centric | ✓ Good |
 
 ---
-*Last updated: 2026-03-03 after v1.2 milestone complete*
+*Last updated: 2026-03-03 after v1.3 milestone started*
