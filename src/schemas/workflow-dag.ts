@@ -26,8 +26,8 @@ import { z } from "zod";
  * Required for `z.lazy()` type annotation.
  */
 export type ConditionExprType =
-  | { op: "eq"; field: string; value: unknown }
-  | { op: "neq"; field: string; value: unknown }
+  | { op: "eq"; field: string; value?: unknown }
+  | { op: "neq"; field: string; value?: unknown }
   | { op: "gt"; field: string; value: number }
   | { op: "gte"; field: string; value: number }
   | { op: "lt"; field: string; value: number }
