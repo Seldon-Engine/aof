@@ -1,0 +1,97 @@
+# Conditional Branching Workflow (DAG Format)
+#
+# Demonstrates conditional path selection using the JSON DSL condition system.
+# After implementation, a condition on tags determines whether the task takes
+# a fast-track path (auto-deploy) or a full-review path.
+#
+# DAG structure:
+#   [implement] --> [fast-deploy]     (condition: has_tag "fast-track")
+#              |
+#              +--> [full-review]     (condition: NOT has_tag "fast-track")
+#              |         |
+#              |         v
+#              |    [qa-test]
+#              |         |
+#              |         v
+#              |    [full-deploy]
+#
+# Key DAG features demonstrated:
+# - Conditional branching: mutually exclusive paths via condition DSL
+# - has_tag operator: routes based on task tags
+# - not operator: negates a condition for the alternate path
+# - Skip cascading: when a condition is false, the hop AND its downstream
+#   dependents are automatically skipped
+#
+# Usage: Tag a task with "fast-track" for trivial changes that skip review,
+# or omit the tag for the full review+QA path.
+
+name: conditional-branching
+
+hops:
+  # ========================================================================
+  # Hop 1: Implementation (root)
+  # ========================================================================
+  - id: implement
+    role: developer
+    description: "Implement the change"
+
+  # ========================================================================
+  # Path A: Fast Track (conditional)
+  # ========================================================================
+  # Activated only when task has "fast-track" tag.
+  # Skips review and QA -- goes straight to deploy.
+  # Use for documentation fixes, config changes, or trivial patches.
+  - id: fast-deploy
+    role: sre
+    dependsOn: [implement]
+    description: "Fast-track deploy (skip review for trivial changes)"
+    timeout: 30m
+    escalateTo: ops-lead
+    condition:
+      op: has_tag
+      value: fast-track
+
+  # ========================================================================
+  # Path B: Full Review (conditional)
+  # ========================================================================
+  # Activated only when task does NOT have "fast-track" tag.
+  # This is the standard path for non-trivial changes.
+  - id: full-review
+    role: architect
+    dependsOn: [implement]
+    canReject: true
+    rejectionStrategy: origin
+    description: "Full architecture and code review"
+    timeout: 2h
+    escalateTo: tech-lead
+    condition:
+      op: not
+      condition:
+        op: has_tag
+        value: fast-track
+
+  # ========================================================================
+  # Path B continued: QA Testing
+  # ========================================================================
+  # Only reachable if full-review executed (not skipped).
+  # If full-review is skipped (fast-track), this hop is cascade-skipped
+  # automatically -- no explicit condition needed.
+  - id: qa-test
+    role: qa
+    dependsOn: [full-review]
+    canReject: true
+    rejectionStrategy: origin
+    description: "Functional and regression testing"
+    timeout: 3h
+    escalateTo: qa-lead
+
+  # ========================================================================
+  # Path B continued: Full Deploy
+  # ========================================================================
+  # Deploys after QA passes. Also cascade-skipped if fast-track is active.
+  - id: full-deploy
+    role: sre
+    dependsOn: [qa-test]
+    description: "Production deploy after full review and QA"
+    timeout: 1h
+    escalateTo: ops-lead

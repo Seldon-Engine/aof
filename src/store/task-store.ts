@@ -23,6 +23,7 @@ import { lintTasks } from "./task-validation.js";
 import { getTaskInputs as getInputs, getTaskOutputs as getOutputs, writeTaskOutput as writeOutput } from "./task-file-ops.js";
 import { blockTask, unblockTask, cancelTask } from "./task-lifecycle.js";
 import { updateTask, type UpdatePatch, transitionTask, type TransitionOpts } from "./task-mutations.js";
+import { migrateGateToDAG } from "../migration/gate-to-dag.js";
 
 const FRONTMATTER_FENCE = "---";
 
@@ -218,7 +219,15 @@ export class FilesystemTaskStore implements ITaskStore {
       const filePath = this.taskPath(id, status);
       try {
         const raw = await readFile(filePath, "utf-8");
-        return parseTaskFile(raw, filePath);
+        const task = parseTaskFile(raw, filePath);
+
+        // Lazy gate-to-DAG migration: convert on load, write back atomically
+        if ((task.frontmatter as any).gate && !task.frontmatter.workflow) {
+          migrateGateToDAG(task);
+          await writeFileAtomic(filePath, serializeTask(task));
+        }
+
+        return task;
       } catch (err) {
         // Check if it's a parse error (file exists but is malformed)
         try {
@@ -284,6 +293,12 @@ export class FilesystemTaskStore implements ITaskStore {
 
           const raw = await readFile(filePath, "utf-8");
           const task = parseTaskFile(raw, filePath);
+
+          // Lazy gate-to-DAG migration: convert on load, write back atomically
+          if ((task.frontmatter as any).gate && !task.frontmatter.workflow) {
+            migrateGateToDAG(task);
+            await writeFileAtomic(filePath, serializeTask(task));
+          }
 
           // Apply filters
           if (filters?.agent && task.frontmatter.lease?.agent !== filters.agent) continue;
