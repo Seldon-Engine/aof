@@ -12,6 +12,7 @@
  * @module dag-context-builder
  */
 
+import { dirname, join } from "node:path";
 import type { Task } from "../schemas/task.js";
 
 // ---------------------------------------------------------------------------
@@ -34,6 +35,8 @@ export interface HopContext {
   role: string;
   /** Results from completed predecessor hops, keyed by predecessor hop ID. */
   upstreamResults: Record<string, Record<string, unknown>>;
+  /** Absolute paths to completed predecessor hop artifact directories, keyed by hop ID. */
+  artifactPaths: Record<string, string>;
   /** Whether scheduler advances immediately on completion (true) or waits for review (false). */
   autoAdvance: boolean;
 }
@@ -54,6 +57,10 @@ export interface HopContext {
  * @throws Error if hopId is not found in the workflow definition
  */
 export function buildHopContext(task: Task, hopId: string): HopContext {
+  if (!task.path) {
+    throw new Error("task.path required for artifact path resolution");
+  }
+
   const workflow = task.frontmatter.workflow!;
   const { definition, state } = workflow;
 
@@ -66,12 +73,16 @@ export function buildHopContext(task: Task, hopId: string): HopContext {
     );
   }
 
-  // Collect upstream results from completed predecessors
+  // Collect upstream results and artifact paths from completed predecessors
   const upstreamResults: Record<string, Record<string, unknown>> = {};
+  const artifactPaths: Record<string, string> = {};
   for (const predId of hop.dependsOn) {
     const predState = state.hops[predId];
-    if (predState?.status === "complete" && predState.result) {
-      upstreamResults[predId] = predState.result;
+    if (predState?.status === "complete") {
+      if (predState.result) {
+        upstreamResults[predId] = predState.result;
+      }
+      artifactPaths[predId] = join(dirname(task.path), "work", predId);
     }
   }
 
@@ -80,6 +91,7 @@ export function buildHopContext(task: Task, hopId: string): HopContext {
     description: hop.description,
     role: hop.role,
     upstreamResults,
+    artifactPaths,
     autoAdvance: hop.autoAdvance,
   };
 }
