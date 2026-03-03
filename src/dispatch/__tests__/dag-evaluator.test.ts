@@ -10,15 +10,12 @@ import { describe, it, expect } from "vitest";
 import {
   evaluateDAG,
   type DAGEvaluationInput,
-  type DAGEvaluationResult,
   type HopEvent,
-  type HopTransition,
   type EvalContext,
 } from "../dag-evaluator.js";
 import type {
   WorkflowDefinition,
   WorkflowState,
-  HopState,
   ConditionExprType,
 } from "../../schemas/workflow-dag.js";
 
