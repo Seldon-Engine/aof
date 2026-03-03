@@ -7,6 +7,7 @@
 
 import type { TaskThinking } from "../schemas/task.js";
 import type { GateContext } from "./gate-context-builder.js";
+import type { HopContext } from "./dag-context-builder.js";
 
 export interface TaskContext {
   taskId: string;
@@ -29,6 +30,8 @@ export interface TaskContext {
   taskRelpath?: string;
   /** Gate context (transient, computed on dispatch) — Progressive Disclosure Level 2 */
   gateContext?: GateContext;
+  /** Hop context for DAG workflows (transient, computed on dispatch) — hop-scoped progressive disclosure */
+  hopContext?: HopContext;
 }
 
 /**
