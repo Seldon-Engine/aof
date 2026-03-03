@@ -12,6 +12,7 @@ import {
   validateDAG,
   initializeWorkflowState,
 } from "../workflow-dag.js";
+import { EventType } from "../event.js";
 import { TaskFrontmatter } from "../task.js";
 import {
   ConditionExpr as BarrelConditionExpr,
@@ -251,6 +252,35 @@ describe("HopState", () => {
     expect(result.agent).toBe("swe-backend");
     expect(result.correlationId).toBe("corr-123");
     expect(result.result).toEqual({ output: "success", lines: 42 });
+  });
+
+  it("accepts optional rejectionCount (non-negative integer)", () => {
+    const result = HopState.parse({ status: "pending", rejectionCount: 3 });
+    expect(result.rejectionCount).toBe(3);
+  });
+
+  it("accepts rejectionCount of 0", () => {
+    const result = HopState.parse({ status: "pending", rejectionCount: 0 });
+    expect(result.rejectionCount).toBe(0);
+  });
+
+  it("rejects negative rejectionCount", () => {
+    expect(() => HopState.parse({ status: "pending", rejectionCount: -1 })).toThrow();
+  });
+
+  it("rejects non-integer rejectionCount", () => {
+    expect(() => HopState.parse({ status: "pending", rejectionCount: 1.5 })).toThrow();
+  });
+
+  it("accepts optional escalated boolean", () => {
+    const result = HopState.parse({ status: "pending", escalated: true });
+    expect(result.escalated).toBe(true);
+  });
+
+  it("defaults rejectionCount and escalated to undefined when omitted", () => {
+    const result = HopState.parse({ status: "pending" });
+    expect(result.rejectionCount).toBeUndefined();
+    expect(result.escalated).toBeUndefined();
   });
 });
 
@@ -763,6 +793,27 @@ describe("TaskFrontmatter integration", () => {
 
     // Verify startedAt preserved
     expect(reparsed.workflow?.state.startedAt).toBe("2026-03-02T10:00:00Z");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// EventType — DAG safety event types (Phase 13)
+// ---------------------------------------------------------------------------
+describe("EventType — DAG safety events", () => {
+  it("includes dag.hop_timeout", () => {
+    expect(EventType.options).toContain("dag.hop_timeout");
+  });
+
+  it("includes dag.hop_timeout_escalation", () => {
+    expect(EventType.options).toContain("dag.hop_timeout_escalation");
+  });
+
+  it("includes dag.hop_rejected", () => {
+    expect(EventType.options).toContain("dag.hop_rejected");
+  });
+
+  it("includes dag.hop_rejection_cascade", () => {
+    expect(EventType.options).toContain("dag.hop_rejection_cascade");
   });
 });
 
