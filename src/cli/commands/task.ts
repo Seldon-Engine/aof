@@ -23,11 +23,19 @@ export function registerTaskCommands(program: Command): void {
     .option("-a, --agent <agent>", "Target agent")
     .option("--tags <tags>", "Comma-separated tags")
     .option("--project <id>", "Project ID", "_inbox")
-    .action(async (title: string, opts: { priority: string; team?: string; agent?: string; tags?: string; project: string }) => {
+    .option("-w, --workflow <template>", "Workflow template name from project manifest")
+    .action(async (title: string, opts: { priority: string; team?: string; agent?: string; tags?: string; project: string; workflow?: string }) => {
       const { createProjectStore } = await import("../project-utils.js");
       const root = program.opts()["root"] as string;
-      const { store } = await createProjectStore({ projectId: opts.project, vaultRoot: root });
+      const { store, projectRoot } = await createProjectStore({ projectId: opts.project, vaultRoot: root });
       await store.init();
+
+      // Resolve workflow template if --workflow flag provided
+      let workflowOpt: { definition: import("../../schemas/workflow-dag.js").WorkflowDefinition; templateName: string } | undefined;
+      if (opts.workflow) {
+        const { resolveWorkflowTemplate } = await import("./task-create-workflow.js");
+        workflowOpt = await resolveWorkflowTemplate(opts.workflow, projectRoot);
+      }
 
       const t = await store.create({
         title,
@@ -38,6 +46,7 @@ export function registerTaskCommands(program: Command): void {
           tags: opts.tags?.split(",").map(s => s.trim()) ?? [],
         },
         createdBy: "cli",
+        workflow: workflowOpt,
       });
 
       console.log(`✅ Created task: ${t.frontmatter.id}`);
@@ -46,6 +55,7 @@ export function registerTaskCommands(program: Command): void {
       console.log(`   Status: ${t.frontmatter.status}`);
       if (opts.agent) console.log(`   Agent: ${opts.agent}`);
       if (opts.team) console.log(`   Team: ${opts.team}`);
+      if (t.frontmatter.workflow) console.log(`   Workflow: ${t.frontmatter.workflow.templateName ?? t.frontmatter.workflow.definition.name}`);
       console.log(`   Path: ${t.path}`);
     });
 
