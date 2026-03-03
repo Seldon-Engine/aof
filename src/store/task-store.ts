@@ -84,6 +84,29 @@ export class FilesystemTaskStore implements ITaskStore {
     this.logger = opts.logger;
   }
 
+  /**
+   * Load workflow config from project manifest for gate-to-DAG migration.
+   * Returns undefined if manifest doesn't exist or has no workflow gates.
+   */
+  private async loadWorkflowConfig(): Promise<import("../migration/gate-to-dag.js").WorkflowConfig | undefined> {
+    try {
+      const { readFile: readManifest } = await import("node:fs/promises");
+      const { parse } = await import("yaml");
+      const manifestPath = join(this.projectRoot, "project.yaml");
+      const raw = await readManifest(manifestPath, "utf-8");
+      const manifest = parse(raw);
+      if (manifest?.workflow?.gates?.length) {
+        return {
+          name: manifest.workflow?.name ?? "default",
+          gates: manifest.workflow.gates,
+        };
+      }
+    } catch {
+      // No manifest or parse error — migration not possible
+    }
+    return undefined;
+  }
+
   /** Compute the next TASK-YYYY-MM-DD-NNN identifier. */
   private async nextTaskId(now: Date): Promise<string> {
     const date = formatTaskDate(now);
@@ -223,8 +246,11 @@ export class FilesystemTaskStore implements ITaskStore {
 
         // Lazy gate-to-DAG migration: convert on load, write back atomically
         if ((task.frontmatter as any).gate && !task.frontmatter.workflow) {
-          migrateGateToDAG(task);
-          await writeFileAtomic(filePath, serializeTask(task));
+          const workflowConfig = await this.loadWorkflowConfig();
+          migrateGateToDAG(task, workflowConfig);
+          if (task.frontmatter.workflow) {
+            await writeFileAtomic(filePath, serializeTask(task));
+          }
         }
 
         return task;
@@ -274,6 +300,10 @@ export class FilesystemTaskStore implements ITaskStore {
     const tasks: Task[] = [];
     const statusesToScan = filters?.status ? [filters.status] : STATUS_DIRS;
 
+    // Lazy-load workflow config once for gate-to-DAG migration (if needed)
+    let workflowConfig: import("../migration/gate-to-dag.js").WorkflowConfig | undefined;
+    let workflowConfigLoaded = false;
+
     for (const status of statusesToScan) {
       const dir = this.statusDir(status);
       let entries: string[];
@@ -296,8 +326,14 @@ export class FilesystemTaskStore implements ITaskStore {
 
           // Lazy gate-to-DAG migration: convert on load, write back atomically
           if ((task.frontmatter as any).gate && !task.frontmatter.workflow) {
-            migrateGateToDAG(task);
-            await writeFileAtomic(filePath, serializeTask(task));
+            if (!workflowConfigLoaded) {
+              workflowConfig = await this.loadWorkflowConfig();
+              workflowConfigLoaded = true;
+            }
+            migrateGateToDAG(task, workflowConfig);
+            if (task.frontmatter.workflow) {
+              await writeFileAtomic(filePath, serializeTask(task));
+            }
           }
 
           // Apply filters
