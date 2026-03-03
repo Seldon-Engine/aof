@@ -25,6 +25,7 @@ import {
   checkExists,
   formatLintReport,
 } from "./lint-helpers.js";
+import { validateDAG } from "../schemas/workflow-dag.js";
 
 /** Lint issue severity. */
 export type LintSeverity = "error" | "warning";
@@ -75,6 +76,9 @@ export async function lintProject(
   // Validate project hierarchy
   await validateHierarchy(record, issues, allProjects);
 
+  // Validate workflow template DAGs
+  validateWorkflowTemplates(record, issues);
+
   // Validate tasks if tasks directory exists
   await validateTasks(record, issues);
 
@@ -86,6 +90,31 @@ export async function lintProject(
     issues,
     passed: issues.filter((i) => i.severity === "error").length === 0,
   };
+}
+
+/**
+ * Validate workflow template DAGs via validateDAG().
+ *
+ * Iterates each entry in manifest.workflowTemplates (if present) and runs
+ * structural DAG validation. Reports errors with template name for actionability.
+ */
+function validateWorkflowTemplates(
+  record: ProjectRecord,
+  issues: LintIssue[]
+): void {
+  const templates = record.manifest?.workflowTemplates;
+  if (!templates) return;
+
+  for (const [name, definition] of Object.entries(templates)) {
+    const dagErrors = validateDAG(definition);
+    for (const error of dagErrors) {
+      issues.push({
+        severity: "error",
+        category: "workflow-templates",
+        message: `Workflow template "${name}": ${error}`,
+      });
+    }
+  }
 }
 
 /**
