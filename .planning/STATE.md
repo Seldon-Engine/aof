@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Task Workflows
 status: in-progress
-last_updated: "2026-03-03T14:13:19.000Z"
+last_updated: "2026-03-03T14:33:29.000Z"
 progress:
   total_phases: 5
   completed_phases: 5
   total_plans: 13
-  completed_plans: 12
+  completed_plans: 13
 ---
 
 # Project State
@@ -22,12 +22,12 @@ See: .planning/PROJECT.md (updated 2026-03-02)
 
 ## Current Position
 
-Phase: 12 of 15 (Scheduler Integration)
-Plan: 1 of 2 (12-01 complete)
+Phase: 12 of 15 (Scheduler Integration) -- COMPLETE
+Plan: 2 of 2 (12-02 complete)
 Status: In Progress
-Last activity: 2026-03-03 -- Completed plan 12-01 (DAG Transition Handler)
+Last activity: 2026-03-03 -- Completed plan 12-02 (Scheduler Router Integration)
 
-Progress: [█████████████░░░] 46%
+Progress: [██████████████░░] 50%
 
 ## Performance Metrics
 
@@ -43,6 +43,7 @@ Progress: [█████████████░░░] 46%
 | 11    | 01   | 3min     | 1     | 2     |
 | 11    | 02   | 3min     | 2     | 3     |
 | 12    | 01   | 4min     | 2     | 6     |
+| 12    | 02   | 17min    | 2     | 6     |
 
 **Prior milestones:** v1.0 (7 plans), v1.1 (16 plans) -- 23 plans total across 9 phases
 
@@ -68,6 +69,9 @@ v1.2 execution decisions:
 - Phase 12-01: Hop status set to dispatched ONLY after spawnSession succeeds (prevents orphan dispatches)
 - Phase 12-01: Run result notes become hop result field for downstream consumption
 - Phase 12-01: Added DAG event types to EventType enum for transition logging
+- Phase 12-02: runResult.outcome determines DAG success/failure when dagComplete (done->review, other->blocked)
+- Phase 12-02: Poll cycle re-reads task fresh before DAG dispatch to prevent stale state races
+- Phase 12-02: DAG errors in handleSessionEnd caught and logged without crashing scheduler
 
 v1.2 research decisions:
 - Zero new dependencies -- pure TypeScript/Zod DAG engine
@@ -94,5 +98,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-03
-Stopped at: Completed 12-01-PLAN.md (DAG Transition Handler). Plan 12-02 next (Scheduler Router).
+Stopped at: Completed 12-02-PLAN.md (Scheduler Router Integration). Phase 12 complete. Phase 13 next (Safety Net).
 Resume file: None

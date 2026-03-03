@@ -18,10 +18,10 @@ Requirements for per-task workflow DAG execution. Each maps to roadmap phases.
 
 - [x] **EXEC-01**: Scheduler dispatches each hop as an independent OpenClaw session (no nesting)
 - [x] **EXEC-02**: On hop completion, scheduler evaluates DAG graph and advances eligible next hops
-- [ ] **EXEC-03**: Completion-triggered advancement dispatches next hop immediately (poll cycle as fallback)
+- [x] **EXEC-03**: Completion-triggered advancement dispatches next hop immediately (poll cycle as fallback)
 - [x] **EXEC-04**: Conditional hops evaluate a JSON DSL expression to determine execute vs skip
 - [x] **EXEC-05**: Skipped hops propagate skip to downstream dependents with no other satisfied inputs
-- [ ] **EXEC-06**: Parallel-eligible hops dispatch in sequence (serialized by OpenClaw constraint) without blocking each other
+- [x] **EXEC-06**: Parallel-eligible hops dispatch in sequence (serialized by OpenClaw constraint) without blocking each other
 - [x] **EXEC-07**: Join hops support configurable join type (all predecessors vs any predecessor)
 - [x] **EXEC-08**: Hop lifecycle follows state machine: pending → ready → dispatched → complete/failed/skipped
 
@@ -39,7 +39,7 @@ Requirements for per-task workflow DAG execution. Each maps to roadmap phases.
 ### Safety & Compatibility
 
 - [ ] **SAFE-01**: Hop conditions use a restricted JSON DSL (no eval/new Function) for agent-composed workflows
-- [ ] **SAFE-02**: Existing gate-based tasks coexist with DAG tasks via dual-mode evaluator
+- [x] **SAFE-02**: Existing gate-based tasks coexist with DAG tasks via dual-mode evaluator
 - [ ] **SAFE-03**: Each hop supports timeout with escalation to a specified role
 - [ ] **SAFE-04**: Hop rejection resets downstream hops and re-dispatches (configurable rejection strategy)
 - [ ] **SAFE-05**: Existing linear gate workflows can be lazily migrated to equivalent DAG format
@@ -93,10 +93,10 @@ Deferred to later milestones. Tracked but not in current roadmap.
 | DAG-04 | Phase 10 | Complete |
 | EXEC-01 | Phase 12 | Complete |
 | EXEC-02 | Phase 12 | Complete |
-| EXEC-03 | Phase 12 | Pending |
+| EXEC-03 | Phase 12 | Complete |
 | EXEC-04 | Phase 11 | Complete |
 | EXEC-05 | Phase 11 | Complete |
-| EXEC-06 | Phase 12 | Pending |
+| EXEC-06 | Phase 12 | Complete |
 | EXEC-07 | Phase 11 | Complete |
 | EXEC-08 | Phase 10 | Complete |
 | TMPL-01 | Phase 14 | Pending |
@@ -105,7 +105,7 @@ Deferred to later milestones. Tracked but not in current roadmap.
 | ARTF-01 | Phase 14 | Pending |
 | ARTF-02 | Phase 14 | Pending |
 | SAFE-01 | Phase 13 | Pending |
-| SAFE-02 | Phase 12 | Pending |
+| SAFE-02 | Phase 12 | Complete |
 | SAFE-03 | Phase 13 | Pending |
 | SAFE-04 | Phase 13 | Pending |
 | SAFE-05 | Phase 15 | Pending |

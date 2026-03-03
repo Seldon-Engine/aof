@@ -39,7 +39,7 @@ See: `.planning/milestones/v1.1-ROADMAP.md` for full details
 
 - [x] **Phase 10: DAG Schema Foundation** — Zod schemas for hops, workflow DAGs, execution state, and creation-time validation (completed 2026-03-03)
 - [x] **Phase 11: DAG Evaluator** — Pure-function DAG evaluation: readiness propagation, conditional logic, skip cascading, and hop lifecycle (completed 2026-03-03)
-- [ ] **Phase 12: Scheduler Integration** — Scheduler dispatches hops as independent sessions, advances DAGs on completion, dual-mode gate/DAG coexistence
+- [x] **Phase 12: Scheduler Integration** — Scheduler dispatches hops as independent sessions, advances DAGs on completion, dual-mode gate/DAG coexistence (completed 2026-03-03)
 - [ ] **Phase 13: Timeout, Rejection, and Safety** — Per-hop timeout with escalation, rejection with downstream reset, restricted JSON DSL for agent-authored conditions
 - [ ] **Phase 14: Templates, Ad-Hoc API, and Artifacts** — Workflow templates in project config, agent-composed ad-hoc DAGs, hop-scoped artifact directories
 - [ ] **Phase 15: Migration and Documentation** — Gate-to-DAG lazy migration, user/developer/skill docs, gate reference cleanup, CLI reference update
@@ -87,7 +87,7 @@ Plans:
   3. Completion-triggered advancement dispatches the next hop immediately on completion report, with the poll cycle as fallback
   4. Parallel-eligible hops (no mutual dependency) dispatch in sequence without blocking each other, respecting the one-session-at-a-time OpenClaw constraint
   5. Gate-based tasks and DAG-based tasks coexist via a dual-mode evaluator that routes to the correct code path based on task frontmatter
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 
 Plans:
 - [ ] 12-01-PLAN.md -- DAG transition handler + context builder (TDD: handleDAGHopCompletion, dispatchDAGHop, buildHopContext, TaskContext.hopContext)
@@ -143,7 +143,7 @@ Plans:
 | 9. Documentation & Guardrails | v1.1 | 5/5 | Complete | 2026-02-27 |
 | 10. DAG Schema Foundation | 2/2 | Complete    | 2026-03-03 | - |
 | 11. DAG Evaluator | 2/2 | Complete    | 2026-03-03 | - |
-| 12. Scheduler Integration | 1/2 | In Progress|  | - |
+| 12. Scheduler Integration | 2/2 | Complete   | 2026-03-03 | - |
 | 13. Timeout, Rejection, and Safety | v1.2 | 0/? | Not started | - |
 | 14. Templates, Ad-Hoc API, and Artifacts | v1.2 | 0/? | Not started | - |
 | 15. Migration and Documentation | v1.2 | 0/? | Not started | - |
