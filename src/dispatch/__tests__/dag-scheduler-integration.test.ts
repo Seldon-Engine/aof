@@ -135,6 +135,7 @@ describe("poll cycle — DAG hop dispatch", () => {
       }),
       delete: vi.fn(),
       tasksDir: "/tmp/tasks",
+      projectRoot: "/tmp/aof",
     } as any;
   }
 

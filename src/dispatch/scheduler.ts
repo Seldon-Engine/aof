@@ -33,6 +33,7 @@ import { buildDispatchActions } from "./task-dispatcher.js";
 import { checkPromotionEligibility } from "./promotion.js";
 import { executeActions } from "./action-executor.js";
 import { buildTaskStats, buildChildrenMap, checkExpiredLeases, buildResourceOccupancyMap, checkBacklogPromotion, checkBlockedTaskRecovery } from "./scheduler-helpers.js";
+import { dispatchDAGHop } from "./dag-transition-handler.js";
 
 export interface SchedulerConfig {
   /** Root data directory. */
@@ -288,6 +289,61 @@ export async function poll(
   const tasksRequeued = executionStats.tasksRequeued;
   const tasksPromoted = executionStats.tasksPromoted;
   effectiveConcurrencyLimit = executionStats.updatedConcurrencyLimit;
+
+  // 6.5. DAG hop dispatch: check in-progress DAG tasks for ready hops
+  if (!config.dryRun && config.executor) {
+    const inProgressDAGTasks = allTasks.filter(
+      t => t.frontmatter.status === "in-progress" && t.frontmatter.workflow
+    );
+
+    for (const dagTask of inProgressDAGTasks) {
+      const state = dagTask.frontmatter.workflow!.state;
+      // One hop at a time invariant: skip if any hop is already dispatched
+      const hasDispatched = Object.values(state.hops).some(
+        h => h.status === "dispatched"
+      );
+      if (hasDispatched) continue;
+
+      // Find first ready hop
+      const readyHopId = Object.entries(state.hops)
+        .find(([, h]) => h.status === "ready")
+        ?.[0];
+
+      if (readyHopId) {
+        try {
+          // Re-read task for fresh state (handleSessionEnd may have updated it)
+          const freshTask = await store.get(dagTask.frontmatter.id);
+          if (!freshTask || !freshTask.frontmatter.workflow) continue;
+
+          // Check again after fresh read
+          const freshHasDispatched = Object.values(
+            freshTask.frontmatter.workflow.state.hops
+          ).some(h => h.status === "dispatched");
+          if (freshHasDispatched) continue;
+
+          const dispatched = await dispatchDAGHop(
+            store, logger, config, config.executor, freshTask, readyHopId
+          );
+
+          if (dispatched) {
+            actions.push({
+              type: "assign" as const,
+              taskId: dagTask.frontmatter.id,
+              taskTitle: dagTask.frontmatter.title,
+              agent: dagTask.frontmatter.workflow!.definition.hops.find(
+                h => h.id === readyHopId
+              )?.role ?? "unknown",
+              reason: `DAG hop dispatch: ${readyHopId}`,
+            });
+          }
+        } catch (err) {
+          console.error(
+            `[AOF] DAG hop dispatch failed for ${dagTask.frontmatter.id}/${readyHopId}: ${(err as Error).message}`
+          );
+        }
+      }
+    }
+  }
 
   // 7. Recalculate stats after actions (reflect post-execution state)
   if (!config.dryRun && actionsExecuted > 0) {

@@ -33,3 +33,6 @@ export {
   buildConditionContext,
 } from "./dag-condition-evaluator.js";
 export type { ConditionContext } from "./dag-condition-evaluator.js";
+export { handleDAGHopCompletion, dispatchDAGHop } from "./dag-transition-handler.js";
+export { buildHopContext } from "./dag-context-builder.js";
+export type { HopContext } from "./dag-context-builder.js";
