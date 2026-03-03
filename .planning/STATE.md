@@ -2,13 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Task Workflows
-status: in_progress
-last_updated: "2026-03-03T18:36:49Z"
+status: executing
+stopped_at: Completed 14-02-PLAN.md
+last_updated: "2026-03-03T18:39:11.015Z"
+last_activity: 2026-03-03 -- Completed plan 14-02 (Per-Hop Artifact Directories)
 progress:
-  total_phases: 7
-  completed_phases: 7
-  total_plans: 16
-  completed_plans: 18
+  total_phases: 6
+  completed_phases: 4
+  total_plans: 12
+  completed_plans: 11
+  percent: 94
 ---
 
 # Project State
@@ -27,14 +30,14 @@ Plan: 2 of 3 (14-02 complete)
 Status: In Progress
 Last activity: 2026-03-03 -- Completed plan 14-02 (Per-Hop Artifact Directories)
 
-Progress: [████████████████░░] 89%
+Progress: [█████████████████░] 94%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 10 (v1.2)
+- Total plans completed: 11 (v1.2)
 - Average duration: 6min
-- Total execution time: 62min
+- Total execution time: 65min
 
 | Phase | Plan | Duration | Tasks | Files |
 |-------|------|----------|-------|-------|
@@ -48,8 +51,10 @@ Progress: [████████████████░░] 89%
 | 13    | 02   | 6min     | 2     | 3     |
 | 13    | 03   | 10min    | 2     | 5     |
 | 14    | 01   | 3min     | 2     | 6     |
+| 14    | 02   | 3min     | 2     | 4     |
 
 **Prior milestones:** v1.0 (7 plans), v1.1 (16 plans) -- 23 plans total across 9 phases
+| Phase 14 P02 | 3min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -89,6 +94,9 @@ v1.2 execution decisions:
 - Phase 14-01: workflowTemplates optional on ProjectManifest (backward compatible, no migration needed)
 - Phase 14-01: templateName on TaskWorkflow is informational-only (full definition is source of truth)
 - Phase 14-01: Lint category 'workflow-templates' for template DAG errors (separate from other categories)
+- Phase 14-02: artifactPaths maps only completed predecessor hop IDs (not all predecessors)
+- Phase 14-02: mkdir called before buildHopContext and spawnSession for fail-fast directory creation
+- Phase 14-02: task.path guard throws early rather than producing invalid paths
 
 v1.2 research decisions:
 - Zero new dependencies -- pure TypeScript/Zod DAG engine
@@ -97,6 +105,9 @@ v1.2 research decisions:
 - Dual-mode evaluator for gate/DAG backward compatibility
 - Completion-triggered advancement (poll as fallback)
 - JSON DSL for agent-authored conditions (no eval/new Function)
+- [Phase 14]: artifactPaths maps only completed predecessor hop IDs (not all predecessors)
+- [Phase 14]: mkdir called before buildHopContext and spawnSession for fail-fast directory creation
+- [Phase 14]: task.path guard throws early rather than producing invalid paths
 
 ### Roadmap Evolution
 
@@ -114,6 +125,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-03
-Stopped at: Completed 14-01-PLAN.md (Workflow Template Schema)
-Resume file: .planning/phases/14-templates-ad-hoc-api-and-artifacts/14-01-SUMMARY.md
+Last session: 2026-03-03T18:39:02.802Z
+Stopped at: Completed 14-02-PLAN.md
+Resume file: None

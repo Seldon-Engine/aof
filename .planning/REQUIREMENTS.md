@@ -33,8 +33,8 @@ Requirements for per-task workflow DAG execution. Each maps to roadmap phases.
 
 ### Artifact Handoff
 
-- [ ] **ARTF-01**: Each hop writes output to a per-hop subdirectory in the task work directory
-- [ ] **ARTF-02**: Downstream hops can read upstream hop outputs via documented directory conventions
+- [x] **ARTF-01**: Each hop writes output to a per-hop subdirectory in the task work directory
+- [x] **ARTF-02**: Downstream hops can read upstream hop outputs via documented directory conventions
 
 ### Safety & Compatibility
 
@@ -102,8 +102,8 @@ Deferred to later milestones. Tracked but not in current roadmap.
 | TMPL-01 | Phase 14 | Complete |
 | TMPL-02 | Phase 14 | Pending |
 | TMPL-03 | Phase 14 | Complete |
-| ARTF-01 | Phase 14 | Pending |
-| ARTF-02 | Phase 14 | Pending |
+| ARTF-01 | Phase 14 | Complete |
+| ARTF-02 | Phase 14 | Complete |
 | SAFE-01 | Phase 13 | Complete |
 | SAFE-02 | Phase 12 | Complete |
 | SAFE-03 | Phase 13 | Complete |
