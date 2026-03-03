@@ -31,6 +31,8 @@ export interface AOFServiceConfig {
   pollTimeoutMs?: number;
   /** Maximum time for a single task action in ms (default: 10_000). */
   taskActionTimeoutMs?: number;
+  /** Spawn timeout in ms for hop dispatch via ProtocolRouter (default 30s). */
+  spawnTimeoutMs?: number;
 }
 
 export interface AOFServiceDependencies {
@@ -111,6 +113,8 @@ export class AOFService {
       notifier: this.notifier,
       projectStoreResolver,
       cascadeBlocks: config.cascadeBlocks,
+      executor: deps.executor,
+      spawnTimeoutMs: config.spawnTimeoutMs,
     });
     
     this.schedulerConfig = {
