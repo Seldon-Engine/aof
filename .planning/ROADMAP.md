@@ -102,7 +102,12 @@ Plans:
   2. A rejected hop resets itself and all downstream hops to pending, then re-dispatches according to configurable rejection strategy
   3. Agent-composed workflow conditions use a restricted JSON DSL (no eval/new Function) that is validated by Zod at creation time
   4. A rejection loop (same hop rejected N times) triggers circuit-breaker behavior rather than infinite retry
-**Plans**: TBD
+**Plans:** 3/3 plans complete
+
+Plans:
+- [x] 13-01-PLAN.md -- Condition safety (complexity limits, hop reference validation, restricted DSL)
+- [x] 13-02-PLAN.md -- Hop timeout checking with escalation
+- [x] 13-03-PLAN.md -- Rejection cascade with origin/predecessors strategies and circuit-breaker
 
 ### Phase 14: Templates, Ad-Hoc API, and Artifacts
 **Goal**: Users define reusable workflow templates, agents compose workflows at task creation, and hops exchange artifacts through documented conventions
@@ -113,7 +118,12 @@ Plans:
   2. An agent can compose an ad-hoc workflow DAG inline when creating a task, without requiring a pre-defined template
   3. Both template-referenced and ad-hoc inline workflows resolve to the same runtime WorkflowDAG schema at dispatch time
   4. Each hop writes output to a per-hop subdirectory in the task work directory, and downstream hops can read upstream outputs via documented directory conventions
-**Plans**: TBD
+**Plans:** 3 plans
+
+Plans:
+- [ ] 14-01-PLAN.md -- Template schema in ProjectManifest + templateName on TaskWorkflow + lint validation
+- [ ] 14-02-PLAN.md -- Artifact directory creation in dispatchDAGHop + artifactPaths in buildHopContext
+- [ ] 14-03-PLAN.md -- Ad-hoc auto-validate in store.create() + --workflow CLI flag with template resolution
 
 ### Phase 15: Migration and Documentation
 **Goal**: Existing gate workflows migrate cleanly to DAG format, and all documentation reflects the new workflow system
@@ -145,5 +155,5 @@ Plans:
 | 11. DAG Evaluator | 2/2 | Complete    | 2026-03-03 | - |
 | 12. Scheduler Integration | 2/2 | Complete    | 2026-03-03 | - |
 | 13. Timeout, Rejection, and Safety | 3/3 | Complete   | 2026-03-03 | - |
-| 14. Templates, Ad-Hoc API, and Artifacts | v1.2 | 0/? | Not started | - |
+| 14. Templates, Ad-Hoc API, and Artifacts | v1.2 | 0/3 | Planned | - |
 | 15. Migration and Documentation | v1.2 | 0/? | Not started | - |
