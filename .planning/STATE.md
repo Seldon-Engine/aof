@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Task Workflows
 status: unknown
-last_updated: "2026-03-03T14:37:13.092Z"
+last_updated: "2026-03-03T15:49:15.112Z"
 progress:
-  total_phases: 6
+  total_phases: 7
   completed_phases: 6
-  total_plans: 13
-  completed_plans: 13
+  total_plans: 16
+  completed_plans: 14
 ---
 
 # Project State
@@ -18,23 +18,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-02)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** v1.2 Task Workflows -- Phase 12 in progress (Scheduler Integration)
+**Current focus:** v1.2 Task Workflows -- Phase 13 in progress (Timeout, Rejection & Safety)
 
 ## Current Position
 
-Phase: 12 of 15 (Scheduler Integration) -- COMPLETE
-Plan: 2 of 2 (12-02 complete)
+Phase: 13 of 15 (Timeout, Rejection & Safety) -- IN PROGRESS
+Plan: 1 of 3 (13-01 complete)
 Status: In Progress
-Last activity: 2026-03-03 -- Completed plan 12-02 (Scheduler Router Integration)
+Last activity: 2026-03-03 -- Completed plan 13-01 (Schema Safety Extensions)
 
 Progress: [██████████████░░] 50%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 5 (v1.2)
-- Average duration: 4min
-- Total execution time: 19min
+- Total plans completed: 7 (v1.2)
+- Average duration: 6min
+- Total execution time: 43min
 
 | Phase | Plan | Duration | Tasks | Files |
 |-------|------|----------|-------|-------|
@@ -44,6 +44,7 @@ Progress: [██████████████░░] 50%
 | 11    | 02   | 3min     | 2     | 3     |
 | 12    | 01   | 4min     | 2     | 6     |
 | 12    | 02   | 17min    | 2     | 6     |
+| 13    | 01   | 7min     | 2     | 8     |
 
 **Prior milestones:** v1.0 (7 plans), v1.1 (16 plans) -- 23 plans total across 9 phases
 
@@ -72,6 +73,9 @@ v1.2 execution decisions:
 - Phase 12-02: runResult.outcome determines DAG success/failure when dagComplete (done->review, other->blocked)
 - Phase 12-02: Poll cycle re-reads task fresh before DAG dispatch to prevent stale state races
 - Phase 12-02: DAG errors in handleSessionEnd caught and logged without crashing scheduler
+- Phase 13-01: z.number().int().nonnegative() for rejectionCount (nonneg() not valid Zod API)
+- Phase 13-01: measureConditionComplexity counts all nodes including logical operators (and/or/not counted as nodes)
+- Phase 13-01: collectHopReferences uses regex ^hops\.([^.]+) for field path extraction
 
 v1.2 research decisions:
 - Zero new dependencies -- pure TypeScript/Zod DAG engine
@@ -98,5 +102,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-03
-Stopped at: Completed 12-02-PLAN.md (Scheduler Router Integration). Phase 12 complete. Phase 13 next (Safety Net).
+Stopped at: Completed 13-01-PLAN.md (Schema Safety Extensions). Plans 13-02 and 13-03 next (Timeout Runtime, Rejection Runtime).
 Resume file: None
