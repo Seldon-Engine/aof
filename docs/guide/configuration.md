@@ -29,7 +29,7 @@ All org chart changes should go through `aof config set` or `aof config apply` f
 | `defaults` | OrgDefaults | No | -- | Default policies and capabilities |
 | `memoryPools` | MemoryPools | No | -- | Memory V2 pool definitions |
 | `memoryCuration` | MemoryCuration | No | -- | Memory curation configuration |
-| `roles` | Record<string, RoleMapping> | No | -- | Role-based agent mapping for workflow gates |
+| `roles` | Record<string, RoleMapping> | No | -- | Role-based agent mapping for DAG workflows |
 | `metadata` | Record<string, unknown> | No | `{}` | Arbitrary metadata |
 
 ### Agent Definition (`agents[]`)
@@ -140,7 +140,7 @@ Inter-agent relationships for escalation, delegation, and consultation.
 
 ### Role Mapping (`roles`)
 
-Maps abstract roles to concrete agents for workflow gates.
+Maps abstract roles to concrete agents for DAG workflows.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|

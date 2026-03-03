@@ -23,7 +23,7 @@ How tasks move through AOF's state machine — from creation to completion.
         complete ║                 ║ needs review
                  ▼                 ▼
           ┌──────────┐     ┌───────────┐
-          │   done   │     │  review   │  ◄── gate evaluation
+          │   done   │     │  review   │  ◄── DAG evaluation
           └──────────┘     └─────┬─────┘
                           approve│
                                  ▼
@@ -91,12 +91,12 @@ lease:
 
 ### `review`
 
-When an agent completes its work but the task has workflow gates, it transitions to `review` instead of `done`. The gate evaluator routes it to the appropriate reviewer role.
+When an agent completes its work but the task has DAG workflows, it transitions to `review` instead of `done`. The gate evaluator routes it to the appropriate reviewer role.
 
-In gate workflows:
-- `outcome: "complete"` from the reviewer advances to the next gate or `done`
-- `outcome: "needs_review"` rejects back to the origin gate (re-dispatch to implementing agent)
-- `outcome: "blocked"` holds in the current gate
+In DAG workflows:
+- `outcome: "complete"` from the reviewer advances to the next hop or `done`
+- `outcome: "needs_review"` rejects back to the origin hop (re-dispatch to implementing agent)
+- `outcome: "blocked"` holds in the current hop
 
 ### `blocked`
 
@@ -113,7 +113,7 @@ metadata:
 
 ### `done`
 
-Terminal state. Task completed successfully. All gate requirements satisfied.
+Terminal state. Task completed successfully. All workflow requirements satisfied.
 
 ### `cancelled`
 

@@ -33,11 +33,11 @@ graph TD
 The dispatch pipeline is the heart of AOF. On each poll cycle, the scheduler:
 
 1. **Scans** all tasks across all projects via `FilesystemTaskStore`
-2. **Evaluates** gate transitions for tasks in workflow-gated states (via `gate-evaluator.ts`)
+2. **Evaluates** hop transitions for tasks in workflow-gated states (via `gate-evaluator.ts`)
 3. **Builds dispatch actions** by matching ready tasks to agents using org chart routing rules, capability tags, and priority (via `task-dispatcher.ts`)
 4. **Executes actions** by acquiring leases and spawning agent sessions through the `GatewayAdapter` (via `assign-executor.ts` and `action-executor.ts`)
 
-Supporting modules include throttling (`throttle.ts`), SLA checking (`sla-checker.ts`), lease management (`lease-manager.ts`), gate timeout escalation (`escalation.ts`), and failure tracking with deadletter transitions (`failure-tracker.ts`).
+Supporting modules include throttling (`throttle.ts`), SLA checking (`sla-checker.ts`), lease management (`lease-manager.ts`), hop timeout escalation (`escalation.ts`), and failure tracking with deadletter transitions (`failure-tracker.ts`).
 
 The scheduler is deterministic -- it makes no LLM calls. Routing decisions are based on static rules from the org chart and task metadata.
 
@@ -146,7 +146,7 @@ src/
   context/        Runtime context and environment detection
   daemon/         Daemon process management (PID lock, health server, service files)
   delegation/     Task delegation logic
-  dispatch/       Scheduler, gate evaluator, SLA checker, throttle, lease manager
+  dispatch/       Scheduler, DAG evaluator, SLA checker, throttle, lease manager
   drift/          Org chart drift detection (config vs. active agents)
   events/         Event logger (JSONL) and notification policy engine
   gateway/        HTTP handlers for metrics and status endpoints
@@ -163,7 +163,7 @@ src/
   projects/       Multi-project discovery and isolation
   protocol/       Inter-agent protocol router and message types
   recovery/       Task resurrection, lease expiration, deadletter handling
-  schemas/        Zod schemas (task, gate, workflow, org-chart, config, event, project)
+  schemas/        Zod schemas (task, workflow-dag, workflow, org-chart, config, event, project)
   service/        AOFService (poll loop, lifecycle, protocol routing)
   skills/         Skill definitions and management
   store/          Filesystem task store (atomic rename, status directories)
@@ -186,7 +186,7 @@ src/
 | `OrgChart` | `src/schemas/org-chart.ts` | Org chart document schema |
 | `AofConfig` | `src/schemas/config.ts` | AOF runtime configuration schema |
 | `Task` / `TaskFrontmatter` | `src/schemas/task.ts` | Task document structure |
-| `WorkflowConfig` | `src/schemas/workflow.ts` | Workflow gate definitions |
+| `WorkflowDefinition` | `src/schemas/workflow-dag.ts` | Workflow DAG definitions |
 | `ProjectManifest` | `src/schemas/project.ts` | Per-project configuration |
 | `AOFServiceConfig` | `src/service/aof-service.ts` | Service runtime configuration |
 
@@ -206,7 +206,7 @@ src/
 
 6. **Agent works** -- the agent reads the task file, performs the work, and reports back via protocol messages (`status.update`, `completion.report`).
 
-7. **Gate evaluation** -- if the task has a workflow, the gate evaluator checks whether conditions are met for the next gate transition (e.g., review approval).
+7. **Gate evaluation** -- if the task has a workflow, the DAG evaluator checks whether conditions are met for the next hop transition (e.g., review approval).
 
 8. **Completion** -- the task transitions through `review` to `done`. The lease is released, events are logged, and notifications are sent.
 

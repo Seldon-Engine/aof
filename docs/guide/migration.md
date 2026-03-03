@@ -203,6 +203,41 @@ The current tooling only supports migration to `_inbox`. For multi-project split
 - `aof project lint`: Validate project structure and manifests.
 - `aof lint`: Validate tasks within a project.
 
+## Gate to DAG Migration (v1.1 to v1.2)
+
+AOF v1.2 replaces linear gate-based workflows with DAG-based hops. This section explains what changed and what you need to do.
+
+### What changed
+
+In v1.1, workflows used sequential **gates** -- linear checkpoints where specific roles reviewed or approved work before advancing. In v1.2, workflows use **DAG hops** -- a directed acyclic graph where each hop can have multiple predecessors, conditions, rejection strategies, and parallel fan-out/join patterns.
+
+Key differences:
+- **Gates** were strictly linear (implement -> review -> qa -> done)
+- **DAG hops** support branching, parallelism, and conditional activation
+- `WorkflowConfig` (gates) is replaced by `WorkflowDefinition` (hops)
+- `project.yaml` uses `workflowTemplates` instead of `workflow`
+
+### Automatic migration
+
+Existing tasks with gate-based workflows are **automatically migrated** on load. AOF performs lazy migration when a gate task is read from disk:
+- Gate sequences are converted to linear DAG hops with `dependsOn` chains
+- `canReject: true` gates become hops with `rejectionStrategy: origin`
+- `when` expressions are converted to condition DSL where possible (unparseable expressions are skipped with a warning)
+
+No manual intervention is required for existing tasks.
+
+### What you need to do
+
+- **Existing tasks**: Nothing. Auto-migration handles them transparently.
+- **New tasks**: Use DAG format. Define workflows with `hops` and `dependsOn`, not `gates`.
+- **Project configuration**: Replace `workflow` with `workflowTemplates` in `project.yaml`. Use the `--workflow` CLI flag to apply templates when creating tasks.
+- **Custom gate definitions**: Rewrite as DAG workflow templates. See [Workflow DAGs](workflow-dags.md) for patterns and examples.
+
+### Gate source code
+
+Gate evaluation code (`src/dispatch/gate-*.ts`, `src/schemas/gate.ts`, `src/schemas/workflow.ts`) is kept but deprecated. It serves as a safety net during the migration period and will be removed in v1.3.
+
 ## See Also
 
 - [Task Format](./task-format.md) -- Task file structure and frontmatter schema
+- [Workflow DAGs](workflow-dags.md) -- Full DAG workflow documentation

@@ -299,7 +299,7 @@ Now that you have AOF running with a dispatched task, explore these topics:
 - **[Configuration Reference](configuration.md)** -- Full org-chart schema, AOF config options, and OpenClaw plugin wiring
 - **[CLI Reference](cli-reference.md)** -- Complete command reference (auto-generated from source)
 - **[Task Format](task-format.md)** -- Full task frontmatter schema and body conventions
-- **[Workflow Gates](workflow-gates.md)** -- Define multi-stage review workflows
+- **[Workflow DAGs](workflow-dags.md)** -- Define multi-stage review workflows
 - **[Memory Module](memory.md)** -- Set up semantic memory with HNSW vector search
 - **[Protocols](protocols.md)** -- Inter-agent communication protocols
 

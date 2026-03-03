@@ -19,7 +19,7 @@ Before **any** production deployment, QA must validate AOF in a **containerized 
 ~/Projects/AOF/tests/integration/openclaw/
 ```
 
-This environment mounts the built AOF plugin artifacts, loads OpenClaw with the real plugin API, and is the required QA gate prior to gateway restarts or production deployment.
+This environment mounts the built AOF plugin artifacts, loads OpenClaw with the real plugin API, and is the required QA step prior to gateway restarts or production deployment.
 
 ### Test Hierarchy (Unit → Integration → E2E)
 

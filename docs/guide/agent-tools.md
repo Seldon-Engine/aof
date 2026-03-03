@@ -5,7 +5,7 @@ description: "Complete reference for all AOF tools available to agents — param
 
 AOF exposes a set of tools to agents via MCP (Model Context Protocol) or the OpenClaw gateway. These tools are the primary API for agents to interact with the task system.
 
-> **Tip:** All tools accept an optional `actor` parameter identifying the calling agent. Always supply this — it's used for audit logging, event attribution, and gate role enforcement.
+> **Tip:** All tools accept an optional `actor` parameter identifying the calling agent. Always supply this — it's used for audit logging, event attribution, and workflow role enforcement.
 
 ## aof_dispatch
 
@@ -67,7 +67,7 @@ Create and dispatch a new task to the ready queue.
 
 ## aof_task_complete
 
-Mark a task as complete. For gated tasks, advance or reject the current gate.
+Mark a task as complete. For gated tasks, advance or reject the current hop.
 
 **Parameters:**
 
@@ -77,16 +77,16 @@ Mark a task as complete. For gated tasks, advance or reject the current gate.
 | `summary` | string | — | Completion summary / work log entry |
 | `outcome` | enum | yes (gated) | `"complete"` \| `"needs_review"` \| `"blocked"` |
 | `blockers` | string[] | yes (when outcome=needs_review or blocked) | Issues preventing progress |
-| `callerRole` | string | recommended | Declared role for gate enforcement |
+| `callerRole` | string | recommended | Declared role for hop enforcement |
 | `actor` | string | — | Calling agent ID |
 
 **Outcomes for gated tasks:**
 
 | Outcome | Effect |
 |---------|--------|
-| `"complete"` | Advance to next gate, or move to `done` if final gate |
-| `"needs_review"` | Reject back to origin gate; requires `blockers` |
-| `"blocked"` | Hold in current gate; requires `blockers` |
+| `"complete"` | Advance to next hop, or move to `done` if final hop |
+| `"needs_review"` | Reject back to origin hop; requires `blockers` |
+| `"blocked"` | Hold in current hop; requires `blockers` |
 
 **Returns:**
 
@@ -99,7 +99,7 @@ Mark a task as complete. For gated tasks, advance or reject the current gate.
 
 **Examples:**
 
-Standard task completion (no gate):
+Standard task completion (no workflow):
 ```json
 {
   "tool": "aof_task_complete",
@@ -414,7 +414,7 @@ Get a status report of all tasks, optionally filtered by agent or status.
 All tools return structured errors when something goes wrong. Gate validation errors include teaching messages with the correct syntax:
 
 ```
-Error: Task TASK-2026-02-21-001 is in a gate workflow (current gate: "code-review").
+Error: Task TASK-2026-02-21-001 is in a DAG workflow (current hop: "code-review").
 
 Gate tasks REQUIRE an 'outcome' parameter. Use:
   aofTaskComplete({
@@ -423,7 +423,7 @@ Gate tasks REQUIRE an 'outcome' parameter. Use:
     summary: "..."
   })
 
-Current gate: code-review
+Current hop: code-review
 ```
 
 This "progressive disclosure" pattern ensures agents learn the correct usage pattern from the error message itself.
