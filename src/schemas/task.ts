@@ -8,6 +8,7 @@
 
 import { z } from "zod";
 import { GateHistoryEntry, ReviewContext, TestSpec } from "./gate.js";
+import { TaskWorkflow } from "./workflow-dag.js";
 
 /** Task ID format: TASK-YYYY-MM-DD-NNN. */
 export const TaskId = z.string().regex(/^TASK-\d{4}-\d{2}-\d{2}-\d{3}(-\d{2})?$/, "Invalid task id");
@@ -117,6 +118,17 @@ export const TaskFrontmatter = z.preprocess((input) => {
   reviewContext: ReviewContext.optional().describe("Feedback from previous gate rejection"),
   tests: z.array(TestSpec).default([]).describe("BDD-style test specifications"),
   testsFile: z.string().optional().describe("Reference to external test file (e.g., tests/acceptance.yaml)"),
+
+  // DAG workflow fields (optional, mutually exclusive with gate fields)
+  workflow: TaskWorkflow.optional().describe("Workflow DAG definition and execution state"),
+}).superRefine((data, ctx) => {
+  if (data.gate && data.workflow) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Task cannot have both 'gate' (linear workflow) and 'workflow' (DAG workflow) fields. Use one or the other.",
+      path: ["workflow"],
+    });
+  }
 }));
 export type TaskFrontmatter = z.infer<typeof TaskFrontmatter>;
 
