@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Task Workflows
 status: unknown
-last_updated: "2026-03-03T03:29:25.002Z"
+last_updated: "2026-03-03T12:51:21.041Z"
 progress:
-  total_phases: 4
+  total_phases: 5
   completed_phases: 4
-  total_plans: 9
-  completed_plans: 9
+  total_plans: 11
+  completed_plans: 10
 ---
 
 # Project State
@@ -18,28 +18,29 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-02)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** v1.2 Task Workflows -- Phase 10: DAG Schema Foundation
+**Current focus:** v1.2 Task Workflows -- Phase 11: DAG Evaluator
 
 ## Current Position
 
-Phase: 10 of 15 (DAG Schema Foundation) -- COMPLETE
-Plan: 2 of 2 (all plans complete)
-Status: Phase Complete
-Last activity: 2026-03-02 -- Completed plan 10-02 (TaskFrontmatter DAG integration, barrel exports)
+Phase: 11 of 15 (DAG Evaluator)
+Plan: 1 of 2 (11-01 complete)
+Status: In Progress
+Last activity: 2026-03-03 -- Completed plan 11-01 (DAG Condition Evaluator)
 
-Progress: [████████░░░░░░░░] 17%
+Progress: [██████████░░░░░░] 20%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 2 (v1.2)
-- Average duration: 4.5min
-- Total execution time: 9min
+- Total plans completed: 3 (v1.2)
+- Average duration: 4min
+- Total execution time: 12min
 
 | Phase | Plan | Duration | Tasks | Files |
 |-------|------|----------|-------|-------|
 | 10    | 01   | 4min     | 1     | 2     |
 | 10    | 02   | 5min     | 2     | 3     |
+| 11    | 01   | 3min     | 1     | 2     |
 
 **Prior milestones:** v1.0 (7 plans), v1.1 (16 plans) -- 23 plans total across 9 phases
 
@@ -55,6 +56,9 @@ v1.2 execution decisions:
 - Phase 10-01: Timeout format regex supports m/h/d (extends existing m/h pattern)
 - Phase 10-02: superRefine on inner z.object() (not z.preprocess()) for correct mutual exclusivity validation
 - Phase 10-02: schemaVersion stays at 1 -- workflow field is additive/optional, no migration needed
+- Phase 11-01: Per-operator dispatch table (Record<string, handler>) for condition evaluation extensibility
+- Phase 11-01: hop_status and has_tag as special operators with direct context access (not field lookup)
+- Phase 11-01: Missing fields resolve to undefined: eq=false, neq=true, numeric operators=false
 
 v1.2 research decisions:
 - Zero new dependencies -- pure TypeScript/Zod DAG engine
@@ -80,6 +84,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-02
-Stopped at: Completed 10-02-PLAN.md (TaskFrontmatter DAG integration). Phase 10 complete. Phase 11 ready.
+Last session: 2026-03-03
+Stopped at: Completed 11-01-PLAN.md (DAG Condition Evaluator). Plan 11-02 ready.
 Resume file: None

@@ -71,7 +71,7 @@ Plans:
   2. Conditional hops evaluate a JSON DSL expression against hop results and task context, resolving to execute or skip
   3. Skipped hops propagate skip to downstream dependents that have no other satisfied input path
   4. Join hops correctly wait for all predecessors (AND-join) or advance on any predecessor (OR-join) based on configuration
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 
 Plans:
 - [ ] 11-01-PLAN.md -- Condition evaluator (JSON DSL interpreter with per-operator dispatch table, dot-path resolution)
@@ -138,7 +138,7 @@ Plans:
 | 8. Production Dependency Fix | v1.1 | 1/1 | Complete | 2026-02-26 |
 | 9. Documentation & Guardrails | v1.1 | 5/5 | Complete | 2026-02-27 |
 | 10. DAG Schema Foundation | 2/2 | Complete    | 2026-03-03 | - |
-| 11. DAG Evaluator | v1.2 | 0/2 | Planned | - |
+| 11. DAG Evaluator | 1/2 | In Progress|  | - |
 | 12. Scheduler Integration | v1.2 | 0/? | Not started | - |
 | 13. Timeout, Rejection, and Safety | v1.2 | 0/? | Not started | - |
 | 14. Templates, Ad-Hoc API, and Artifacts | v1.2 | 0/? | Not started | - |
