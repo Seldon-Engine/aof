@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Task Workflows
 status: executing
-stopped_at: Completed 15-03 (Documentation Pivot and Gate Deprecation) -- Phase 15 complete -- v1.2 milestone done
-last_updated: "2026-03-03T19:58:21.522Z"
-last_activity: 2026-03-03 -- Completed plan 15-01 (Gate-to-DAG lazy migration)
+stopped_at: Completed 16-01 (Integration Wiring Fixes) -- Phase 16 complete -- v1.2 milestone gaps closed
+last_updated: "2026-03-03T20:42:03.000Z"
+last_activity: 2026-03-03 -- Completed plan 16-01 (Integration wiring fixes for EXEC-03/SAFE-05)
 progress:
-  total_phases: 6
-  completed_phases: 6
-  total_plans: 15
-  completed_plans: 15
+  total_phases: 7
+  completed_phases: 7
+  total_plans: 16
+  completed_plans: 16
   percent: 100
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-02)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** v1.2 Task Workflows -- Phase 15 in progress (Migration and Documentation). Plan 01 delivered.
+**Current focus:** v1.2 Task Workflows -- Phase 16 complete (Integration Wiring Fixes). All milestone gaps closed.
 
 ## Current Position
 
-Phase: 15 of 15 (Migration and Documentation)
-Plan: 1 of 3 (15-01 complete)
-Status: In Progress
-Last activity: 2026-03-03 -- Completed plan 15-01 (Gate-to-DAG lazy migration)
+Phase: 16 of 16 (Integration Wiring Fixes)
+Plan: 1 of 1 (16-01 complete)
+Status: Complete
+Last activity: 2026-03-03 -- Completed plan 16-01 (Integration wiring fixes for EXEC-03/SAFE-05)
 
 Progress: [████████████████████] 100%
 
@@ -59,6 +59,7 @@ Progress: [████████████████████] 100%
 | Phase 15 P01 | 4min | 1 tasks | 4 files |
 | Phase 15 P02 | 7min | 2 tasks | 7 files |
 | Phase 15 P03 | 5min | 2 tasks | 21 files |
+| Phase 16 P01 | 5min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -119,6 +120,10 @@ v1.2 research decisions:
 - [Phase 15]: User guide replaces both workflow-gates.md and custom-gates.md in single document
 - [Phase 15]: Gate source files kept with @deprecated markers (remove in v1.3 per user decision)
 - [Phase 15]: OpenClaw gateway references preserved unchanged (gateway != workflow gate)
+- [Phase 16]: spawnTimeoutMs on AOFServiceConfig (not reusing SchedulerConfig) since ProtocolRouter built separately
+- [Phase 16]: loadWorkflowConfig dynamic-imports yaml to avoid new top-level import
+- [Phase 16]: Conditional write-back: only persist migration when workflow field is set
+- [Phase 16]: Lazy-load config in list(): loaded once per call, only when gate task found
 
 ### Roadmap Evolution
 
@@ -136,6 +141,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-03T19:55:29.543Z
-Stopped at: Completed 15-03 (Documentation Pivot and Gate Deprecation) -- Phase 15 complete -- v1.2 milestone done
+Last session: 2026-03-03T20:42:03.000Z
+Stopped at: Completed 16-01 (Integration Wiring Fixes) -- Phase 16 complete -- v1.2 milestone gaps closed
 Resume file: None

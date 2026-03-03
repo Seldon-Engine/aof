@@ -43,7 +43,7 @@ See: `.planning/milestones/v1.1-ROADMAP.md` for full details
 - [x] **Phase 13: Timeout, Rejection, and Safety** — Per-hop timeout with escalation, rejection with downstream reset, restricted JSON DSL for agent-authored conditions (completed 2026-03-03)
 - [x] **Phase 14: Templates, Ad-Hoc API, and Artifacts** — Workflow templates in project config, agent-composed ad-hoc DAGs, hop-scoped artifact directories (completed 2026-03-03)
 - [x] **Phase 15: Migration and Documentation** — Gate-to-DAG lazy migration, user/developer/skill docs, gate reference cleanup, CLI reference update (completed 2026-03-03)
-- [ ] **Phase 16: Integration Wiring Fixes** — Forward executor to ProtocolRouter for immediate hop dispatch, pass workflowConfig to gate-to-DAG migration
+- [x] **Phase 16: Integration Wiring Fixes** — Forward executor to ProtocolRouter for immediate hop dispatch, pass workflowConfig to gate-to-DAG migration (completed 2026-03-03)
 
 ## Phase Details
 
@@ -151,7 +151,7 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. AOFService forwards executor and spawnTimeoutMs to ProtocolRouter, enabling immediate hop dispatch on session end (not just poll-cycle fallback)
   2. task-store get() and list() hooks pass workflowConfig to migrateGateToDAG, enabling gate-format tasks to be lazily migrated to DAG format on load
-**Plans:** 1/1 plan
+**Plans:** 1/1 plans complete
 
 Plans:
 - [ ] 16-01-PLAN.md -- Wire executor to ProtocolRouter + workflowConfig to migrateGateToDAG
@@ -177,4 +177,4 @@ Plans:
 | 13. Timeout, Rejection, and Safety | 3/3 | Complete   | 2026-03-03 | - |
 | 14. Templates, Ad-Hoc API, and Artifacts | 3/3 | Complete    | 2026-03-03 | - |
 | 15. Migration and Documentation | 3/3 | Complete    | 2026-03-03 | - |
-| 16. Integration Wiring Fixes | v1.2 | 0/1 | Not started | - |
+| 16. Integration Wiring Fixes | 1/1 | Complete   | 2026-03-03 | - |
