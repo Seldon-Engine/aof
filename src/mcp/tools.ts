@@ -23,7 +23,7 @@ const dispatchInputSchema = z.object({
   /** Workflow: template name (string), inline WorkflowDefinition (object), or false (skip). */
   workflow: z.union([z.string(), WorkflowDefinition, z.literal(false)]).optional(),
   /** Context tier for skill injection: 'seed' (minimal) or 'full' (complete). Defaults to 'seed'. */
-  contextTier: z.enum(["seed", "full"]).optional().default("seed"),
+  contextTier: z.enum(["seed", "full"]).optional(),
 });
 
 const dispatchOutputSchema = z.object({
