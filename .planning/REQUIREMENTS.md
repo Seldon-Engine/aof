@@ -36,8 +36,8 @@ Requirements for the seamless upgrade milestone. Each maps to roadmap phases.
 ### Verification
 
 - [x] **VERF-01**: `bd smoke` command runs post-install health checks (version, schema, task store, org chart, migration status, workflow templates)
-- [ ] **VERF-02**: Upgrade smoke test suite validates fresh install, pre-v1.2 upgrade, v1.2 upgrade, and DAG default scenarios
-- [ ] **VERF-03**: Tarball verification script validates extraction, `npm ci --production`, CLI boot, version match, and size check before release upload
+- [x] **VERF-02**: Upgrade smoke test suite validates fresh install, pre-v1.2 upgrade, v1.2 upgrade, and DAG default scenarios
+- [x] **VERF-03**: Tarball verification script validates extraction, `npm ci --production`, CLI boot, version match, and size check before release upload
 
 ### Release
 
@@ -92,8 +92,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DAGD-02 | Phase 18 | Complete |
 | DAGD-03 | Phase 18 | Complete |
 | VERF-01 | Phase 19 | Complete |
-| VERF-02 | Phase 19 | Pending |
-| VERF-03 | Phase 19 | Pending |
+| VERF-02 | Phase 19 | Complete |
+| VERF-03 | Phase 19 | Complete |
 | RELS-01 | Phase 20 | Pending |
 | RELS-02 | Phase 20 | Pending |
 | RELS-03 | Phase 20 | Pending |

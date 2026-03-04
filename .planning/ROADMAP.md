@@ -55,7 +55,7 @@ See: `.planning/milestones/v1.2-ROADMAP.md` for full details
 
 - [x] **Phase 17: Migration Foundation & Framework Hardening** - Harden the migration framework and implement all config/data migrations for the v1.2-to-v1.3 upgrade path (completed 2026-03-04)
 - [x] **Phase 18: DAG-as-Default** - Make DAG workflows the default for new tasks via project-level configuration (completed 2026-03-04)
-- [ ] **Phase 19: Verification & Smoke Tests** - Validate the entire upgrade path with automated smoke tests and a CLI health-check command
+- [x] **Phase 19: Verification & Smoke Tests** - Validate the entire upgrade path with automated smoke tests and a CLI health-check command (completed 2026-03-04)
 - [ ] **Phase 20: Release Pipeline, Documentation & Release Cut** - Gate the release on tarball verification, document the upgrade, cut v1.3.0
 
 ## Phase Details
@@ -98,7 +98,7 @@ Plans:
   1. `bd smoke` runs post-install health checks and reports pass/fail for version, schema, task store, org chart, migration status, and workflow templates
   2. An automated test suite exercises four upgrade scenarios (fresh install, pre-v1.2 upgrade, v1.2 upgrade, DAG-default behavior) and passes in CI
   3. A tarball verification script validates extraction, `npm ci --production`, CLI boot, version string match, and package size before any release upload
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 
 Plans:
 - [ ] 19-01-PLAN.md — aof smoke CLI command with 6 health checks (version, schema, task store, org chart, migrations, workflows)
@@ -143,5 +143,5 @@ Phases execute in numeric order: 17 → 18 → 19 → 20
 | 16. Integration Wiring Fixes | v1.2 | 1/1 | Complete | 2026-03-03 |
 | 17. Migration Foundation & Framework Hardening | v1.3 | 3/3 | Complete | 2026-03-04 |
 | 18. DAG-as-Default | v1.3 | 1/1 | Complete | 2026-03-04 |
-| 19. Verification & Smoke Tests | 1/2 | In Progress|  | - |
+| 19. Verification & Smoke Tests | 2/2 | Complete   | 2026-03-04 | - |
 | 20. Release Pipeline, Documentation & Release Cut | v1.3 | 0/2 | Not started | - |

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Seamless Upgrade
 status: executing
-stopped_at: Completed 19-01-PLAN.md
-last_updated: "2026-03-04T01:49:52.239Z"
-last_activity: 2026-03-04 -- Completed plan 19-01 (smoke check CLI command)
+stopped_at: Completed 19-02-PLAN.md
+last_updated: "2026-03-04T01:51:42.000Z"
+last_activity: 2026-03-04 -- Completed plan 19-02 (upgrade scenarios & tarball verification)
 progress:
   total_phases: 4
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 6
-  completed_plans: 5
-  percent: 83
+  completed_plans: 6
+  percent: 100
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-03)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** v1.3 Seamless Upgrade -- Phase 19 in progress
+**Current focus:** v1.3 Seamless Upgrade -- Phase 19 COMPLETE
 
 ## Current Position
 
-Phase: 19 of 20 (Verification & Smoke Tests)
-Plan: 1 of 2 (19-01 complete)
+Phase: 19 of 20 (Verification & Smoke Tests) -- COMPLETE
+Plan: 2 of 2 (all plans completed)
 Status: Executing
-Last activity: 2026-03-04 -- Completed plan 19-01 (smoke check CLI command)
+Last activity: 2026-03-04 -- Completed plan 19-02 (upgrade scenarios & tarball verification)
 
-Progress: [████████░░] 83%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -45,6 +45,7 @@ Progress: [████████░░] 83%
 | 17-03 | 1 | 4min | 4min |
 | 18-01 | 1 | 5min | 5min |
 | 19-01 | 1 | 4min | 4min |
+| 19-02 | 1 | 6min | 6min |
 
 ## Accumulated Context
 
@@ -62,6 +63,9 @@ All prior decisions logged in PROJECT.md Key Decisions table.
 - [Phase 19]: Inlined version read instead of importing private readPackageVersion from setup.ts
 - [Phase 19]: Each smoke check runs independently -- one failure does not prevent others
 - [Phase 19]: Org chart and Projects directory treated as optional (pass when absent)
+- [Phase 19]: Pre-v1.2 fixture includes workflow.gates for migration002 gate-to-DAG conversion
+- [Phase 19]: Fixtures force-added to git despite Projects/ gitignore rule
+- [Phase 19]: Used npm ci --omit=dev in tarball verification (modern npm convention)
 
 ### Roadmap Evolution
 
@@ -80,6 +84,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-04T01:49:52.235Z
-Stopped at: Completed 19-01-PLAN.md
+Last session: 2026-03-04T01:51:42.000Z
+Stopped at: Completed 19-02-PLAN.md
 Resume file: None
