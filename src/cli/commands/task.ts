@@ -24,17 +24,25 @@ export function registerTaskCommands(program: Command): void {
     .option("--tags <tags>", "Comma-separated tags")
     .option("--project <id>", "Project ID", "_inbox")
     .option("-w, --workflow <template>", "Workflow template name from project manifest")
-    .action(async (title: string, opts: { priority: string; team?: string; agent?: string; tags?: string; project: string; workflow?: string }) => {
+    .option("--no-workflow", "Create bare task (skip default workflow)")
+    .action(async (title: string, opts: { priority: string; team?: string; agent?: string; tags?: string; project: string; workflow?: string | false }) => {
       const { createProjectStore } = await import("../project-utils.js");
       const root = program.opts()["root"] as string;
       const { store, projectRoot } = await createProjectStore({ projectId: opts.project, vaultRoot: root });
       await store.init();
 
-      // Resolve workflow template if --workflow flag provided
+      // Three-way workflow precedence: --no-workflow > --workflow <name> > defaultWorkflow > bare
       let workflowOpt: { definition: import("../../schemas/workflow-dag.js").WorkflowDefinition; templateName: string } | undefined;
-      if (opts.workflow) {
+      if (opts.workflow === false) {
+        // --no-workflow: explicitly skip, workflowOpt stays undefined
+      } else if (typeof opts.workflow === "string") {
+        // --workflow <name>: explicit template (existing behavior)
         const { resolveWorkflowTemplate } = await import("./task-create-workflow.js");
         workflowOpt = await resolveWorkflowTemplate(opts.workflow, projectRoot);
+      } else {
+        // No flag: check for defaultWorkflow in project manifest
+        const { resolveDefaultWorkflow } = await import("./task-create-workflow.js");
+        workflowOpt = await resolveDefaultWorkflow(projectRoot);
       }
 
       const t = await store.create({
@@ -55,7 +63,11 @@ export function registerTaskCommands(program: Command): void {
       console.log(`   Status: ${t.frontmatter.status}`);
       if (opts.agent) console.log(`   Agent: ${opts.agent}`);
       if (opts.team) console.log(`   Team: ${opts.team}`);
-      if (t.frontmatter.workflow) console.log(`   Workflow: ${t.frontmatter.workflow.templateName ?? t.frontmatter.workflow.definition.name}`);
+      if (t.frontmatter.workflow) {
+        const wfName = t.frontmatter.workflow.templateName ?? t.frontmatter.workflow.definition.name;
+        const isDefault = opts.workflow === undefined;
+        console.log(`   Workflow: ${wfName}${isDefault ? " (default)" : ""}`);
+      }
       console.log(`   Path: ${t.path}`);
     });
 
