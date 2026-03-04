@@ -81,6 +81,9 @@ jobs:
       - name: Build release tarball
         run: node scripts/build-tarball.mjs ${{ steps.version.outputs.version }}
 
+      - name: Verify release tarball
+        run: node scripts/verify-tarball.mjs aof-${{ steps.version.outputs.version }}.tar.gz
+
       - name: Upload tarball to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
