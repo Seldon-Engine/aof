@@ -70,7 +70,7 @@ See: `.planning/milestones/v1.2-ROADMAP.md` for full details
   3. A pre-migration snapshot of the full data directory is created before any migration runs, and is restored automatically if any migration fails
   4. `bd list` and `bd get --prefix` both return DAG-migrated tasks consistently (no format divergence between access methods)
   5. `schemaVersion` field accepts version 2, and migrated installations carry version metadata in `.aof/channel.json`
-**Plans:** 3 plans
+**Plans:** 2/3 plans executed
 
 Plans:
 - [ ] 17-01-PLAN.md — Snapshot module, schema version relaxation, migration framework hardening
@@ -141,7 +141,7 @@ Phases execute in numeric order: 17 → 18 → 19 → 20
 | 14. Templates, Ad-Hoc API, Artifacts | v1.2 | 3/3 | Complete | 2026-03-03 |
 | 15. Migration and Documentation | v1.2 | 3/3 | Complete | 2026-03-03 |
 | 16. Integration Wiring Fixes | v1.2 | 1/1 | Complete | 2026-03-03 |
-| 17. Migration Foundation & Framework Hardening | v1.3 | 0/3 | Not started | - |
+| 17. Migration Foundation & Framework Hardening | 2/3 | In Progress|  | - |
 | 18. DAG-as-Default | v1.3 | 0/1 | Not started | - |
 | 19. Verification & Smoke Tests | v1.3 | 0/2 | Not started | - |
 | 20. Release Pipeline, Documentation & Release Cut | v1.3 | 0/2 | Not started | - |

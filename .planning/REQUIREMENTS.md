@@ -9,18 +9,18 @@ Requirements for the seamless upgrade milestone. Each maps to roadmap phases.
 
 ### Migration Framework
 
-- [ ] **MIGR-01**: Migration framework uses atomic writes (write-file-atomic) for all file mutations
-- [ ] **MIGR-02**: Migration framework tracks in-progress state so interrupted migrations can be detected and resumed
-- [ ] **MIGR-03**: Pre-migration snapshot captures full data directory before any migration runs, restores on failure
+- [x] **MIGR-01**: Migration framework uses atomic writes (write-file-atomic) for all file mutations
+- [x] **MIGR-02**: Migration framework tracks in-progress state so interrupted migrations can be detected and resumed
+- [x] **MIGR-03**: Pre-migration snapshot captures full data directory before any migration runs, restores on failure
 - [ ] **MIGR-04**: YAML config modifications preserve user comments and formatting (parseDocument API)
-- [ ] **MIGR-05**: `schemaVersion` relaxed from `z.literal(1)` to support version 2 for migration versioning
+- [x] **MIGR-05**: `schemaVersion` relaxed from `z.literal(1)` to support version 2 for migration versioning
 
 ### Config Migration
 
 - [ ] **CONF-01**: Migration 001 adds `defaultWorkflow` field to project.yaml pointing to a sensible workflow template
 - [ ] **CONF-02**: Migration 002 batch-converts all gate-based tasks to DAG workflows eagerly across all status directories
 - [ ] **CONF-03**: Migration 003 writes version metadata to `.aof/channel.json` for upgrade tracking
-- [ ] **CONF-04**: Migrations are wired into `setup.ts` `getAllMigrations()` and run automatically during installer upgrade
+- [x] **CONF-04**: Migrations are wired into `setup.ts` `getAllMigrations()` and run automatically during installer upgrade
 
 ### Bug Fixes
 
@@ -77,15 +77,15 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| MIGR-01 | Phase 17 | Pending |
-| MIGR-02 | Phase 17 | Pending |
-| MIGR-03 | Phase 17 | Pending |
+| MIGR-01 | Phase 17 | Complete |
+| MIGR-02 | Phase 17 | Complete |
+| MIGR-03 | Phase 17 | Complete |
 | MIGR-04 | Phase 17 | Pending |
-| MIGR-05 | Phase 17 | Pending |
+| MIGR-05 | Phase 17 | Complete |
 | CONF-01 | Phase 17 | Pending |
 | CONF-02 | Phase 17 | Pending |
 | CONF-03 | Phase 17 | Pending |
-| CONF-04 | Phase 17 | Pending |
+| CONF-04 | Phase 17 | Complete |
 | BUGF-01 | Phase 17 | Pending |
 | BUGF-02 | Phase 17 | Pending |
 | DAGD-01 | Phase 18 | Pending |
