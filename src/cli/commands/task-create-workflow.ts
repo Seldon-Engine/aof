@@ -58,3 +58,50 @@ export async function resolveWorkflowTemplate(
 
   return { definition, templateName };
 }
+
+/**
+ * Resolve the project's default workflow template, if configured.
+ *
+ * Unlike resolveWorkflowTemplate (which throws on errors for explicit --workflow),
+ * this function returns undefined on any failure -- graceful degradation for
+ * auto-attachment of default workflows during task creation.
+ *
+ * @param projectRoot - Absolute path to the project root directory
+ * @returns Workflow object for store.create(), or undefined if no default configured
+ */
+export async function resolveDefaultWorkflow(
+  projectRoot: string,
+): Promise<{ definition: WorkflowDefinition; templateName: string } | undefined> {
+  // Load and parse project manifest -- return undefined if missing or invalid
+  let manifest: ReturnType<typeof ProjectManifest.parse>;
+  try {
+    const projectPath = join(projectRoot, "project.yaml");
+    const yaml = await readFile(projectPath, "utf-8");
+    const parsed = parseYaml(yaml) as unknown;
+    manifest = ProjectManifest.parse(parsed);
+  } catch {
+    return undefined; // No project.yaml or invalid manifest -> bare task
+  }
+
+  // Check defaultWorkflow field
+  const defaultName = manifest.defaultWorkflow;
+  if (!defaultName) return undefined;
+
+  // Look up template in workflowTemplates
+  const templates = manifest.workflowTemplates ?? {};
+  const definition = templates[defaultName];
+  if (!definition) {
+    console.error(
+      `Warning: defaultWorkflow "${defaultName}" not found in workflowTemplates. Creating bare task.`,
+    );
+    return undefined;
+  }
+
+  // Belt-and-suspenders DAG validation
+  const dagErrors = validateDAG(definition);
+  if (dagErrors.length > 0) {
+    return undefined;
+  }
+
+  return { definition, templateName: defaultName };
+}
