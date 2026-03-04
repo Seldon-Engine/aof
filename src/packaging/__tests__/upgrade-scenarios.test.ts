@@ -10,7 +10,6 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   mkdtemp,
   rm,
-  mkdir,
   readFile,
   cp,
   access,
