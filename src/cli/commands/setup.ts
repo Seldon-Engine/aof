@@ -15,6 +15,9 @@ import { runWizard } from "../../packaging/wizard.js";
 import { runMigrations } from "../../packaging/migrations.js";
 import type { Migration } from "../../packaging/migrations.js";
 import { createSnapshot, restoreSnapshot, pruneSnapshots } from "../../packaging/snapshot.js";
+import { migration001 } from "../../packaging/migrations/001-default-workflow-template.js";
+import { migration002 } from "../../packaging/migrations/002-gate-to-dag-batch.js";
+import { migration003 } from "../../packaging/migrations/003-version-metadata.js";
 import {
   detectOpenClaw,
   isAofPluginRegistered,
@@ -54,11 +57,10 @@ export interface SetupOptions {
 // --- Migration registry ---
 
 /**
- * Returns all registered migrations.
- * Empty for now — actual migrations will be added when schema changes happen.
+ * Returns all registered migrations in order.
  */
 function getAllMigrations(): Migration[] {
-  return [];
+  return [migration001, migration002, migration003];
 }
 
 // --- Helpers ---
@@ -323,6 +325,11 @@ export async function runSetup(opts: SetupOptions): Promise<void> {
         warn(w);
       }
     }
+
+    // Write version metadata for fresh installs too
+    const freshVersion = await readPackageVersion(dataDir);
+    await migration003.up({ aofRoot: dataDir, version: freshVersion });
+    say("Version metadata written");
   }
 
   // 4. OpenClaw plugin wiring
