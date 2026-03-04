@@ -56,7 +56,7 @@ See: `.planning/milestones/v1.2-ROADMAP.md` for full details
 - [x] **Phase 17: Migration Foundation & Framework Hardening** - Harden the migration framework and implement all config/data migrations for the v1.2-to-v1.3 upgrade path (completed 2026-03-04)
 - [x] **Phase 18: DAG-as-Default** - Make DAG workflows the default for new tasks via project-level configuration (completed 2026-03-04)
 - [x] **Phase 19: Verification & Smoke Tests** - Validate the entire upgrade path with automated smoke tests and a CLI health-check command (completed 2026-03-04)
-- [ ] **Phase 20: Release Pipeline, Documentation & Release Cut** - Gate the release on tarball verification, document the upgrade, cut v1.3.0
+- [x] **Phase 20: Release Pipeline, Documentation & Release Cut** - Gate the release on tarball verification, document the upgrade, cut v1.3.0 (completed 2026-03-04)
 
 ## Phase Details
 
@@ -112,7 +112,7 @@ Plans:
   1. The release pipeline runs smoke tests between tarball build and GitHub Releases upload -- a failing smoke test blocks the release
   2. UPGRADING.md exists and documents what changed, prerequisites, step-by-step upgrade instructions, verification commands, and rollback via backup restore
   3. v1.3.0 is tagged in git and published as a GitHub Release with an installer-downloadable tarball
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 
 Plans:
 - [ ] 20-01-PLAN.md — Wire verify-tarball into release pipeline, write UPGRADING.md, prepare for v1.3.0 release cut
@@ -143,4 +143,4 @@ Phases execute in numeric order: 17 → 18 → 19 → 20
 | 17. Migration Foundation & Framework Hardening | v1.3 | 3/3 | Complete | 2026-03-04 |
 | 18. DAG-as-Default | v1.3 | 1/1 | Complete | 2026-03-04 |
 | 19. Verification & Smoke Tests | v1.3 | 2/2 | Complete | 2026-03-04 |
-| 20. Release Pipeline, Documentation & Release Cut | v1.3 | 0/1 | Not started | - |
+| 20. Release Pipeline, Documentation & Release Cut | 1/1 | Complete   | 2026-03-04 | - |

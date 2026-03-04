@@ -41,9 +41,9 @@ Requirements for the seamless upgrade milestone. Each maps to roadmap phases.
 
 ### Release
 
-- [ ] **RELS-01**: Release pipeline runs smoke tests between tarball build and GitHub Releases upload
-- [ ] **RELS-02**: UPGRADING.md documents what changed, prerequisites, step-by-step upgrade, verification commands, and rollback via backup restore
-- [ ] **RELS-03**: v1.3.0 release tagged and published with installer-downloadable tarball
+- [x] **RELS-01**: Release pipeline runs smoke tests between tarball build and GitHub Releases upload
+- [x] **RELS-02**: UPGRADING.md documents what changed, prerequisites, step-by-step upgrade, verification commands, and rollback via backup restore
+- [x] **RELS-03**: v1.3.0 release tagged and published with installer-downloadable tarball
 
 ## Future Requirements
 
@@ -94,9 +94,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | VERF-01 | Phase 19 | Complete |
 | VERF-02 | Phase 19 | Complete |
 | VERF-03 | Phase 19 | Complete |
-| RELS-01 | Phase 20 | Pending |
-| RELS-02 | Phase 20 | Pending |
-| RELS-03 | Phase 20 | Pending |
+| RELS-01 | Phase 20 | Complete |
+| RELS-02 | Phase 20 | Complete |
+| RELS-03 | Phase 20 | Complete |
 
 **Coverage:**
 - v1.3 requirements: 20 total

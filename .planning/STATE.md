@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Seamless Upgrade
 status: executing
-stopped_at: Phase 20 context gathered
-last_updated: "2026-03-04T02:04:36.555Z"
-last_activity: 2026-03-04 -- Completed plan 19-02 (upgrade scenarios & tarball verification)
+stopped_at: "Phase 20 plan 01 checkpoint: human-verify release artifacts"
+last_updated: "2026-03-04T02:20:00.000Z"
+last_activity: 2026-03-04 -- Completed plan 20-01 tasks 1-2 (release pipeline gate + UPGRADING.md)
 progress:
   total_phases: 4
-  completed_phases: 3
-  total_plans: 6
-  completed_plans: 6
+  completed_phases: 4
+  total_plans: 7
+  completed_plans: 7
   percent: 100
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-03)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** v1.3 Seamless Upgrade -- Phase 19 COMPLETE
+**Current focus:** v1.3 Seamless Upgrade -- Phase 20 in progress (checkpoint)
 
 ## Current Position
 
-Phase: 19 of 20 (Verification & Smoke Tests) -- COMPLETE
-Plan: 2 of 2 (all plans completed)
-Status: Executing
-Last activity: 2026-03-04 -- Completed plan 19-02 (upgrade scenarios & tarball verification)
+Phase: 20 of 20 (Release Pipeline, Documentation & Release Cut) -- IN PROGRESS
+Plan: 1 of 1 (tasks 1-2 complete, task 3 awaiting human-verify)
+Status: Executing (checkpoint)
+Last activity: 2026-03-04 -- Completed plan 20-01 tasks 1-2 (release pipeline gate + UPGRADING.md)
 
 Progress: [██████████] 100%
 
@@ -46,6 +46,7 @@ Progress: [██████████] 100%
 | 18-01 | 1 | 5min | 5min |
 | 19-01 | 1 | 4min | 4min |
 | 19-02 | 1 | 6min | 6min |
+| 20-01 | 1 | 4min | 4min |
 
 ## Accumulated Context
 
@@ -66,6 +67,8 @@ All prior decisions logged in PROJECT.md Key Decisions table.
 - [Phase 19]: Pre-v1.2 fixture includes workflow.gates for migration002 gate-to-DAG conversion
 - [Phase 19]: Fixtures force-added to git despite Projects/ gitignore rule
 - [Phase 19]: Used npm ci --omit=dev in tarball verification (modern npm convention)
+- [Phase 20]: Single verify-tarball.mjs step in CI -- no separate aof smoke in pipeline
+- [Phase 20]: UPGRADING.md at repo root covers all three upgrade paths with manual rollback docs
 
 ### Roadmap Evolution
 
@@ -84,6 +87,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-04T02:04:36.552Z
-Stopped at: Phase 20 context gathered
-Resume file: .planning/phases/20-release-pipeline-documentation-release-cut/20-CONTEXT.md
+Last session: 2026-03-04T02:20:00.000Z
+Stopped at: Phase 20 plan 01 checkpoint: human-verify release artifacts
+Resume file: .planning/phases/20-release-pipeline-documentation-release-cut/20-01-PLAN.md
