@@ -69,7 +69,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md` for full details
 - [x] **Phase 21: Tool & Workflow API** - Add workflow param to aof_dispatch, trim tool descriptions, merge projects skill (completed 2026-03-04)
 - [x] **Phase 22: Compressed Skill** - Replace verbose agent documentation with a compact SKILL.md reflecting actual tool capabilities (completed 2026-03-04)
 - [x] **Phase 23: Tiered Context Delivery** - Support seed and full context tiers so simple tasks get minimal injection (completed 2026-03-04)
-- [ ] **Phase 24: Verification & Budget Gate** - Document 50%+ token reduction and enforce a token budget ceiling in CI
+- [x] **Phase 24: Verification & Budget Gate** - Document 50%+ token reduction and enforce a token budget ceiling in CI (completed 2026-03-04)
 
 ## Phase Details
 
@@ -125,7 +125,7 @@ Plans:
   1. A document exists showing before and after token counts for total context injection, proving at least 50% reduction
   2. An automated test (vitest) fails if total context injection for the full tier exceeds a defined token budget ceiling
   3. The token budget test runs in CI alongside existing tests
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 Plans:
 - [ ] 24-01-PLAN.md -- Create budget gate test and measurement document proving 50%+ context reduction
 
@@ -160,4 +160,4 @@ Phases execute in numeric order: 21 -> 22 -> 23 -> 24
 | 21. Tool & Workflow API | v1.4 | 2/2 | Complete | 2026-03-04 |
 | 22. Compressed Skill | 1/1 | Complete    | 2026-03-04 | - |
 | 23. Tiered Context Delivery | 2/2 | Complete    | 2026-03-04 | - |
-| 24. Verification & Budget Gate | v1.4 | 0/1 | Not started | - |
+| 24. Verification & Budget Gate | 1/1 | Complete   | 2026-03-04 | - |

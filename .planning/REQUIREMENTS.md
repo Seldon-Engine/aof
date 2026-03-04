@@ -26,8 +26,8 @@ Requirements for Context Optimization milestone. Each maps to roadmap phases.
 
 ### Measurement
 
-- [ ] **MEAS-01**: Before/after token count documented proving 50%+ total context reduction
-- [ ] **MEAS-02**: Automated test fails if total context injection exceeds defined token budget
+- [x] **MEAS-01**: Before/after token count documented proving 50%+ total context reduction
+- [x] **MEAS-02**: Automated test fails if total context injection exceeds defined token budget
 
 ## Future Requirements
 
@@ -68,8 +68,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TOOL-02 | Phase 21 | Complete |
 | TOOL-03 | Phase 21 | Complete |
 | TOOL-04 | Phase 21 | Complete |
-| MEAS-01 | Phase 24 | Pending |
-| MEAS-02 | Phase 24 | Pending |
+| MEAS-01 | Phase 24 | Complete |
+| MEAS-02 | Phase 24 | Complete |
 
 **Coverage:**
 - v1.4 requirements: 13 total
