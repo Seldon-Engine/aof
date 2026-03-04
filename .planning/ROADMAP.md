@@ -66,39 +66,42 @@ See: `.planning/milestones/v1.3-ROADMAP.md` for full details
 
 **Milestone Goal:** Cut agent context injection by 50%+ while preserving full AOF capability -- agents use less context but can still leverage DAG workflows, org chart setup, and all tools effectively.
 
-- [ ] **Phase 21: Compressed Skill** - Replace verbose agent documentation with a compact SKILL.md cheatsheet covering all tools, workflows, and org chart guidance
-- [ ] **Phase 22: Tool Description Trimming** - Reduce tool descriptions in tools.ts to schema + one-liner and merge projects skill into main skill
+- [ ] **Phase 21: Tool & Workflow API** - Add workflow param to aof_dispatch, trim tool descriptions, merge projects skill
+- [ ] **Phase 22: Compressed Skill** - Replace verbose agent documentation with a compact SKILL.md reflecting actual tool capabilities
 - [ ] **Phase 23: Tiered Context Delivery** - Support seed and full context tiers so simple tasks get minimal injection
 - [ ] **Phase 24: Verification & Budget Gate** - Document 50%+ token reduction and enforce a token budget ceiling in CI
 
 ## Phase Details
 
-### Phase 21: Compressed Skill
-**Goal**: Agents receive a single compact SKILL.md (~150 lines) that replaces verbose documentation while preserving complete coverage of tools, workflows, protocols, and org chart setup guidance
+### Phase 21: Tool & Workflow API
+**Goal**: Add workflow composition to aof_dispatch so agents can define DAG workflows through MCP tools, trim tool descriptions to schema + one-liner, and merge projects skill into main skill
 **Depends on**: Phase 20 (v1.3 complete)
+**Requirements**: TOOL-01, TOOL-02, TOOL-03, TOOL-04
+**Success Criteria** (what must be TRUE):
+  1. aof_dispatch accepts a `workflow` parameter that lets agents compose DAG workflows (linear, review cycle, parallel fan-out) at task creation time
+  2. Every tool definition in tools.ts has a description of one sentence or less, with no inline examples or redundant parameter documentation
+  3. Projects skill content is merged into the main SKILL.md (single file injection, not two separate files)
+  4. All tool parameters and schemas remain correct -- existing tests pass, no tool functionality is broken
+  5. Workflow parameter is wired through handleAofDispatch to task creation with proper validation
+**Plans**: TBD
+
+### Phase 22: Compressed Skill
+**Goal**: Agents receive a compact SKILL.md that accurately documents all tool capabilities (including the new workflow param), with proper DAG workflow guidance and org chart setup instructions
+**Depends on**: Phase 21
 **Requirements**: SKILL-01, SKILL-02, SKILL-03, SKILL-04, SKILL-05, SKILL-06
 **Success Criteria** (what must be TRUE):
-  1. Agent context includes a SKILL.md file under ~150 lines that covers all AOF tools, workflow patterns, and agent protocols
+  1. Agent context includes a compressed SKILL.md covering all AOF tools, DAG workflow composition, and agent protocols
   2. SKILL.md contains no CLI reference section (agents don't run CLI commands)
   3. SKILL.md contains no notification events table (agents emit events via tools, not by consulting a reference table)
   4. SKILL.md uses minimal inline YAML examples for org chart concepts instead of verbose multi-line examples
   5. SKILL.md contains no parameter tables (tool JSON schemas already provide parameter documentation)
   6. SKILL.md includes org chart setup guidance sufficient for an agent to provision teams, agents, and routing
-**Plans**: TBD
-
-### Phase 22: Tool Description Trimming
-**Goal**: Tool descriptions in tools.ts carry only schema and a one-line summary, with the projects skill merged into the main compressed skill -- no functionality lost
-**Depends on**: Phase 21
-**Requirements**: TOOL-01, TOOL-02, TOOL-03
-**Success Criteria** (what must be TRUE):
-  1. Every tool definition in tools.ts has a description of one sentence or less, with no inline examples or redundant parameter documentation
-  2. Projects skill content is merged into the main SKILL.md (single file injection, not two separate files)
-  3. All tool parameters and schemas remain correct -- existing tests pass, no tool functionality is broken by description trimming
+  7. DAG workflow section includes examples of linear, review cycle, and parallel fan-out patterns via aof_dispatch
 **Plans**: TBD
 
 ### Phase 23: Tiered Context Delivery
 **Goal**: Context injection supports two tiers so agents working on simple tasks receive a minimal seed, while complex tasks get the full skill
-**Depends on**: Phase 21
+**Depends on**: Phase 22
 **Requirements**: SKILL-07
 **Success Criteria** (what must be TRUE):
   1. A seed tier exists that injects significantly less context than the full tier while still enabling agents to complete simple tasks
@@ -108,7 +111,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md` for full details
 
 ### Phase 24: Verification & Budget Gate
 **Goal**: The 50%+ context reduction is proven with before/after measurements and protected by an automated test that fails if context exceeds the budget
-**Depends on**: Phase 21, Phase 22, Phase 23
+**Depends on**: Phase 22, Phase 23
 **Requirements**: MEAS-01, MEAS-02
 **Success Criteria** (what must be TRUE):
   1. A document exists showing before and after token counts for total context injection, proving at least 50% reduction
@@ -120,7 +123,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md` for full details
 
 **Execution Order:**
 Phases execute in numeric order: 21 -> 22 -> 23 -> 24
-(Phase 23 depends on Phase 21 only, so it could run in parallel with Phase 22, but sequential execution is simpler.)
+(Phase 23 depends on Phase 22 only, so sequential execution is simplest.)
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -144,7 +147,7 @@ Phases execute in numeric order: 21 -> 22 -> 23 -> 24
 | 18. DAG-as-Default | v1.3 | 1/1 | Complete | 2026-03-04 |
 | 19. Verification & Smoke Tests | v1.3 | 2/2 | Complete | 2026-03-04 |
 | 20. Release Pipeline, Documentation & Release Cut | v1.3 | 1/1 | Complete | 2026-03-04 |
-| 21. Compressed Skill | v1.4 | 0/? | Not started | - |
-| 22. Tool Description Trimming | v1.4 | 0/? | Not started | - |
+| 21. Tool & Workflow API | v1.4 | 0/? | Not started | - |
+| 22. Compressed Skill | v1.4 | 0/? | Not started | - |
 | 23. Tiered Context Delivery | v1.4 | 0/? | Not started | - |
 | 24. Verification & Budget Gate | v1.4 | 0/? | Not started | - |

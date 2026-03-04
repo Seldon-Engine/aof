@@ -22,6 +22,7 @@ Requirements for Context Optimization milestone. Each maps to roadmap phases.
 - [ ] **TOOL-01**: Tool descriptions in tools.ts reduced to schema + one-liner (no inline examples or redundant parameter docs)
 - [ ] **TOOL-02**: Projects skill merged into main compressed skill (single file)
 - [ ] **TOOL-03**: No functionality lost -- all tool parameters and schemas remain correct after trimming
+- [ ] **TOOL-04**: aof_dispatch accepts a `workflow` parameter so agents can compose DAG workflows through MCP tools (closes v1.2 TMPL-02 gap)
 
 ### Measurement
 
@@ -56,22 +57,23 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SKILL-01 | Phase 21 | Pending |
-| SKILL-02 | Phase 21 | Pending |
-| SKILL-03 | Phase 21 | Pending |
-| SKILL-04 | Phase 21 | Pending |
-| SKILL-05 | Phase 21 | Pending |
-| SKILL-06 | Phase 21 | Pending |
+| SKILL-01 | Phase 22 | Pending |
+| SKILL-02 | Phase 22 | Pending |
+| SKILL-03 | Phase 22 | Pending |
+| SKILL-04 | Phase 22 | Pending |
+| SKILL-05 | Phase 22 | Pending |
+| SKILL-06 | Phase 22 | Pending |
 | SKILL-07 | Phase 23 | Pending |
-| TOOL-01 | Phase 22 | Pending |
-| TOOL-02 | Phase 22 | Pending |
-| TOOL-03 | Phase 22 | Pending |
+| TOOL-01 | Phase 21 | Pending |
+| TOOL-02 | Phase 21 | Pending |
+| TOOL-03 | Phase 21 | Pending |
+| TOOL-04 | Phase 21 | Pending |
 | MEAS-01 | Phase 24 | Pending |
 | MEAS-02 | Phase 24 | Pending |
 
 **Coverage:**
-- v1.4 requirements: 12 total
-- Mapped to phases: 12
+- v1.4 requirements: 13 total
+- Mapped to phases: 13
 - Unmapped: 0
 
 ---
