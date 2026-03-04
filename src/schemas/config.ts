@@ -63,7 +63,7 @@ export type CommsConfig = z.infer<typeof CommsConfig>;
 
 /** Top-level AOF configuration. */
 export const AofConfig = z.object({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.union([z.literal(1), z.literal(2)]),
   /** Root data directory for AOF runtime data. */
   dataDir: z.string().default("~/.openclaw/aof"),
   /** Path to org chart YAML file. */

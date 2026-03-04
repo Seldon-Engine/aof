@@ -310,7 +310,7 @@ export type RoleMapping = z.infer<typeof RoleMapping>;
 
 /** Top-level org chart document. */
 export const OrgChart = z.object({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.union([z.literal(1), z.literal(2)]),
   /** Template name (e.g., "swe-team", "ops-team"). */
   template: z.string().optional(),
   /** P1.1: Organizational units (tree structure). */

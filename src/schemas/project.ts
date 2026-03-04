@@ -136,5 +136,7 @@ export const ProjectManifest = z.object({
   workflow: WorkflowConfig.optional(),
   /** Named workflow templates -- static WorkflowDefinition snapshots reusable across tasks. */
   workflowTemplates: z.record(TemplateNameKey, WorkflowDefinition).optional(),
+  /** Default workflow template name (references a key in workflowTemplates). */
+  defaultWorkflow: z.string().optional(),
 });
 export type ProjectManifest = z.infer<typeof ProjectManifest>;

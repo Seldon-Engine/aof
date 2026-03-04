@@ -90,7 +90,7 @@ export const TaskFrontmatter = z.preprocess((input) => {
   }
   return input;
 }, z.object({
-  schemaVersion: z.literal(1).describe("Schema version for migration support"),
+  schemaVersion: z.union([z.literal(1), z.literal(2)]).describe("Schema version for migration support"),
   id: TaskId.describe("Stable task identifier"),
   project: z.string().min(1).describe("Project identifier (required, project-scoped store)"),
   title: z.string().min(1).describe("Human-readable task title"),
