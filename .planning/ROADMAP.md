@@ -53,7 +53,7 @@ See: `.planning/milestones/v1.2-ROADMAP.md` for full details
 
 **Milestone Goal:** Make the v1.2 DAG workflow system deployable with confidence -- upgrade path works end-to-end, DAGs become the default, release is cut and installable.
 
-- [ ] **Phase 17: Migration Foundation & Framework Hardening** - Harden the migration framework and implement all config/data migrations for the v1.2-to-v1.3 upgrade path
+- [x] **Phase 17: Migration Foundation & Framework Hardening** - Harden the migration framework and implement all config/data migrations for the v1.2-to-v1.3 upgrade path (completed 2026-03-04)
 - [ ] **Phase 18: DAG-as-Default** - Make DAG workflows the default for new tasks via project-level configuration
 - [ ] **Phase 19: Verification & Smoke Tests** - Validate the entire upgrade path with automated smoke tests and a CLI health-check command
 - [ ] **Phase 20: Release Pipeline, Documentation & Release Cut** - Gate the release on tarball verification, document the upgrade, cut v1.3.0
@@ -70,7 +70,7 @@ See: `.planning/milestones/v1.2-ROADMAP.md` for full details
   3. A pre-migration snapshot of the full data directory is created before any migration runs, and is restored automatically if any migration fails
   4. `bd list` and `bd get --prefix` both return DAG-migrated tasks consistently (no format divergence between access methods)
   5. `schemaVersion` field accepts version 2, and migrated installations carry version metadata in `.aof/channel.json`
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans complete
 
 Plans:
 - [ ] 17-01-PLAN.md — Snapshot module, schema version relaxation, migration framework hardening
@@ -141,7 +141,7 @@ Phases execute in numeric order: 17 → 18 → 19 → 20
 | 14. Templates, Ad-Hoc API, Artifacts | v1.2 | 3/3 | Complete | 2026-03-03 |
 | 15. Migration and Documentation | v1.2 | 3/3 | Complete | 2026-03-03 |
 | 16. Integration Wiring Fixes | v1.2 | 1/1 | Complete | 2026-03-03 |
-| 17. Migration Foundation & Framework Hardening | 2/3 | In Progress|  | - |
+| 17. Migration Foundation & Framework Hardening | 3/3 | Complete   | 2026-03-04 | - |
 | 18. DAG-as-Default | v1.3 | 0/1 | Not started | - |
 | 19. Verification & Smoke Tests | v1.3 | 0/2 | Not started | - |
 | 20. Release Pipeline, Documentation & Release Cut | v1.3 | 0/2 | Not started | - |
