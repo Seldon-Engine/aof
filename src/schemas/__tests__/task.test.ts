@@ -90,7 +90,11 @@ describe("TaskFrontmatter", () => {
   });
 
   it("rejects invalid schema version", () => {
-    expect(TaskFrontmatter.safeParse({ ...validTask, schemaVersion: 2 }).success).toBe(false);
+    expect(TaskFrontmatter.safeParse({ ...validTask, schemaVersion: 99 }).success).toBe(false);
+  });
+
+  it("accepts schema version 2", () => {
+    expect(TaskFrontmatter.safeParse({ ...validTask, schemaVersion: 2 }).success).toBe(true);
   });
 
   it("rejects invalid task id", () => {
