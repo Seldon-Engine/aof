@@ -282,7 +282,18 @@ export class FilesystemTaskStore implements ITaskStore {
         if (match) {
           const filePath = join(dir, match);
           const raw = await readFile(filePath, "utf-8");
-          return parseTaskFile(raw, filePath);
+          const task = parseTaskFile(raw, filePath);
+
+          // Lazy gate-to-DAG migration: convert on load, write back atomically
+          if ((task.frontmatter as any).gate && !task.frontmatter.workflow) {
+            const workflowConfig = await this.loadWorkflowConfig();
+            migrateGateToDAG(task, workflowConfig);
+            if (task.frontmatter.workflow) {
+              await writeFileAtomic(filePath, serializeTask(task));
+            }
+          }
+
+          return task;
         }
       } catch {
         // Directory might not exist
