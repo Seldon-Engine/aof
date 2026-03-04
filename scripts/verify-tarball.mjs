@@ -146,6 +146,29 @@ try {
   }
   console.log(`PASS: Version match (${pkgVersion})`);
 
+  // --- Step 7: openclaw.plugin.json version match ---
+
+  const pluginRaw = readFileSync(join(extractDir, "openclaw.plugin.json"), "utf-8");
+  const pluginJson = JSON.parse(pluginRaw);
+
+  if (pluginJson.version !== pkgVersion) {
+    console.log(
+      `FAIL: openclaw.plugin.json version mismatch: plugin=${pluginJson.version}, package.json=${pkgVersion}`,
+    );
+    cleanup();
+    process.exit(1);
+  }
+  console.log(`PASS: openclaw.plugin.json version match (${pluginJson.version})`);
+
+  // --- Step 8: SKILL.md present ---
+
+  if (!existsSync(join(extractDir, "skills", "aof", "SKILL.md"))) {
+    console.log("FAIL: Missing skills/aof/SKILL.md");
+    cleanup();
+    process.exit(1);
+  }
+  console.log("PASS: skills/aof/SKILL.md present");
+
   // --- Cleanup & Summary ---
 
   cleanup();

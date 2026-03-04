@@ -7,12 +7,11 @@
  * doc generator can import the program object without triggering parseAsync.
  */
 
-import { resolve, join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve, join } from "node:path";
 import { homedir } from "node:os";
-import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { Command } from "commander";
+import { VERSION } from "../version.js";
 import { FilesystemTaskStore } from "../store/task-store.js";
 import { EventLogger } from "../events/logger.js";
 import { poll } from "../dispatch/scheduler.js";
@@ -40,13 +39,9 @@ import { registerSetupCommand } from "./commands/setup.js";
 
 const AOF_ROOT = process.env["AOF_ROOT"] ?? resolve(homedir(), "Projects", "AOF");
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const pkgPath = resolve(__dirname, "..", "..", "package.json");
-const pkgVersion = JSON.parse(readFileSync(pkgPath, "utf-8")).version as string;
-
 const program = new Command()
   .name("aof")
-  .version(pkgVersion)
+  .version(VERSION)
   .description("Agentic Ops Fabric — deterministic orchestration for multi-agent systems")
   .option("--root <path>", "AOF root directory", AOF_ROOT);
 

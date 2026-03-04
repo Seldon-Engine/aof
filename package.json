@@ -35,7 +35,7 @@
     "aof-daemon": "dist/daemon/index.js"
   },
   "scripts": {
-    "build": "tsc && node scripts/copy-extension-entry.js",
+    "build": "tsc && node scripts/copy-extension-entry.js && node scripts/stamp-version.mjs",
     "prepublishOnly": "npm run build && npm run typecheck",
     "dev": "tsc --watch",
     "start": "node dist/cli/index.js",

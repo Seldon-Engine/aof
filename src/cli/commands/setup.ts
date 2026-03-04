@@ -8,7 +8,7 @@
 
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { readFile, access, mkdir, cp, writeFile, unlink } from "node:fs/promises";
+import { readFile, access, mkdir, cp, writeFile, unlink, rm } from "node:fs/promises";
 import type { Command } from "commander";
 import writeFileAtomic from "write-file-atomic";
 import { runWizard } from "../../packaging/wizard.js";
@@ -238,6 +238,34 @@ async function wireOpenClawPlugin(dataDir: string, openclawPath?: string): Promi
     } catch (rollbackErr) {
       warn(`Rollback also failed: ${rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)}`);
     }
+  }
+
+  // Deploy skill files to ~/.openclaw/skills/aof/
+  try {
+    const skillTargetDir = join(homedir(), ".openclaw", "skills", "aof");
+    await rm(skillTargetDir, { recursive: true, force: true });
+    await mkdir(skillTargetDir, { recursive: true });
+
+    const skillFiles = [
+      { name: "SKILL.md", required: true },
+      { name: "SKILL-SEED.md", required: false },
+      { name: "skill.json", required: false },
+    ];
+
+    for (const { name, required } of skillFiles) {
+      const src = join(dataDir, "skills", "aof", name);
+      try {
+        await access(src);
+        await cp(src, join(skillTargetDir, name));
+        say(`Deployed ${name} to skills directory`);
+      } catch {
+        if (required) {
+          warn(`Required skill file not found: ${name}`);
+        }
+      }
+    }
+  } catch (e) {
+    warn(`Failed to deploy skill files: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 

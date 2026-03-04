@@ -1,7 +1,7 @@
 {
   "id": "aof",
   "name": "AOF — Agentic Ops Fabric",
-  "version": "0.1.0",
+  "version": "1.4.0",
   "kind": "memory",
   "description": "Deterministic task orchestration layer for multi-agent systems. Provides filesystem-first kanban, context-aware dispatch, org chart governance, and real-time views.",
   "main": "dist/plugin.js",
@@ -92,7 +92,10 @@
             "properties": {
               "provider": {
                 "type": "string",
-                "enum": ["openai", "ollama"]
+                "enum": [
+                  "openai",
+                  "ollama"
+                ]
               },
               "model": {
                 "type": "string"
@@ -137,7 +140,7 @@
                 "properties": {
                   "hot": {
                     "type": "number",
-                    "default": 1.0
+                    "default": 1
                   },
                   "warm": {
                     "type": "number",

@@ -9,6 +9,7 @@ import type { AOFMetrics } from "../metrics/exporter.js";
 import type { poll } from "../dispatch/scheduler.js";
 import { createHealthServer, selfCheck, type DaemonStateProvider, type StatusContextProvider } from "./server.js";
 import { setShuttingDown } from "./health.js";
+import { VERSION } from "../version.js";
 
 export interface AOFDaemonOptions extends AOFServiceConfig {
   store?: ITaskStore;
@@ -92,7 +93,7 @@ export async function startAofDaemon(opts: AOFDaemonOptions): Promise<AOFDaemonC
     };
 
     const getContext: StatusContextProvider = () => ({
-      version: "0.1.0", // TODO: read from package.json
+      version: VERSION,
       dataDir: opts.dataDir,
       pollIntervalMs: opts.pollIntervalMs ?? 30_000,
       providersConfigured: 0, // TODO: wire to actual provider count

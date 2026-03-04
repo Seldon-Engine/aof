@@ -41,6 +41,10 @@
     "before:init": [
       "npm run typecheck",
       "npm test"
+    ],
+    "after:bump": [
+      "node scripts/stamp-version.mjs",
+      "git add openclaw.plugin.json"
     ]
   }
 }

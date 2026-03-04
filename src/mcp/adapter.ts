@@ -3,6 +3,7 @@ import { SubscribeRequestSchema, UnsubscribeRequestSchema } from "@modelcontextp
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { createAofMcpContext, type AofMcpOptions } from "./shared.js";
 import { registerAofTools } from "./tools.js";
+import { VERSION } from "../version.js";
 import { buildBoard, registerAofResources } from "./resources.js";
 import { SubscriptionManager } from "./subscriptions.js";
 
@@ -16,7 +17,7 @@ export class AofMcpServer {
     this.options = options;
     this.server = new McpServer({
       name: "aof",
-      version: "0.1.0",
+      version: VERSION,
     }, {
       capabilities: {
         resources: {
