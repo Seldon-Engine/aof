@@ -15,7 +15,7 @@ Requirements for Context Optimization milestone. Each maps to roadmap phases.
 - [x] **SKILL-04**: Verbose YAML org chart examples replaced with minimal inline examples
 - [x] **SKILL-05**: Parameter tables removed from SKILL.md (tool JSON schemas provide this)
 - [x] **SKILL-06**: Org chart setup guidance preserved in compressed skill for agent-led provisioning
-- [ ] **SKILL-07**: Context injection supports tiered delivery (seed tier for simple tasks, full tier for complex tasks)
+- [x] **SKILL-07**: Context injection supports tiered delivery (seed tier for simple tasks, full tier for complex tasks)
 
 ### Tool Descriptions
 
@@ -63,7 +63,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SKILL-04 | Phase 22 | Complete |
 | SKILL-05 | Phase 22 | Complete |
 | SKILL-06 | Phase 22 | Complete |
-| SKILL-07 | Phase 23 | Pending |
+| SKILL-07 | Phase 23 | Complete |
 | TOOL-01 | Phase 21 | Complete |
 | TOOL-02 | Phase 21 | Complete |
 | TOOL-03 | Phase 21 | Complete |

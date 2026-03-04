@@ -112,7 +112,7 @@ Plans:
   1. A seed tier exists that injects significantly less context than the full tier while still enabling agents to complete simple tasks
   2. A full tier exists that injects the complete compressed skill for complex tasks requiring workflow composition or org chart setup
   3. The tier selection mechanism is explicit and deterministic (not LLM-decided)
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
 - [ ] 23-01-PLAN.md -- Create SKILL-SEED.md, extend skill.json with tiers, add tier support to SkillManifest and SkillResolver
 - [ ] 23-02-PLAN.md -- Wire contextTier through dispatch pipeline (MCP tool, store, task frontmatter) and update installer
@@ -157,5 +157,5 @@ Phases execute in numeric order: 21 -> 22 -> 23 -> 24
 | 20. Release Pipeline, Documentation & Release Cut | v1.3 | 1/1 | Complete | 2026-03-04 |
 | 21. Tool & Workflow API | v1.4 | 2/2 | Complete | 2026-03-04 |
 | 22. Compressed Skill | 1/1 | Complete    | 2026-03-04 | - |
-| 23. Tiered Context Delivery | v1.4 | 0/2 | Not started | - |
+| 23. Tiered Context Delivery | 1/2 | In Progress|  | - |
 | 24. Verification & Budget Gate | v1.4 | 0/? | Not started | - |
