@@ -24,8 +24,8 @@ Requirements for the seamless upgrade milestone. Each maps to roadmap phases.
 
 ### Bug Fixes
 
-- [ ] **BUGF-01**: `getByPrefix()` in task-store runs gate-to-DAG migration (same as `get()` and `list()`)
-- [ ] **BUGF-02**: Installer backup scope includes `Projects/` directory tree (not just flat v1.0 data dirs)
+- [x] **BUGF-01**: `getByPrefix()` in task-store runs gate-to-DAG migration (same as `get()` and `list()`)
+- [x] **BUGF-02**: Installer backup scope includes `Projects/` directory tree (not just flat v1.0 data dirs)
 
 ### DAG Default
 
@@ -86,8 +86,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CONF-02 | Phase 17 | Pending |
 | CONF-03 | Phase 17 | Pending |
 | CONF-04 | Phase 17 | Complete |
-| BUGF-01 | Phase 17 | Pending |
-| BUGF-02 | Phase 17 | Pending |
+| BUGF-01 | Phase 17 | Complete |
+| BUGF-02 | Phase 17 | Complete |
 | DAGD-01 | Phase 18 | Pending |
 | DAGD-02 | Phase 18 | Pending |
 | DAGD-03 | Phase 18 | Pending |
