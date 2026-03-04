@@ -13,7 +13,7 @@ import { stringify as stringifyYaml } from "yaml";
 import { FilesystemTaskStore } from "../../../store/task-store.js";
 import type { ProjectManifest } from "../../../schemas/project.js";
 import type { WorkflowDefinition } from "../../../schemas/workflow-dag.js";
-import { resolveWorkflowTemplate } from "../task-create-workflow.js";
+import { resolveWorkflowTemplate, resolveDefaultWorkflow } from "../task-create-workflow.js";
 
 /** Minimal valid workflow definition for testing. */
 const CODE_REVIEW_WORKFLOW: WorkflowDefinition = {
@@ -158,5 +158,160 @@ describe("resolveWorkflowTemplate", () => {
     expect(task.frontmatter.workflow!.templateName).toBe("code-review");
     expect(task.frontmatter.workflow!.state.status).toBe("pending");
     expect(task.frontmatter.workflow!.state.hops["implement"]?.status).toBe("ready");
+  });
+});
+
+describe("resolveDefaultWorkflow", () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = await mkdtemp(join(tmpdir(), "aof-default-workflow-test-"));
+  });
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true });
+  });
+
+  it("returns workflow when project has defaultWorkflow configured", async () => {
+    const projectDir = join(testDir, "project-with-default");
+    await mkdir(projectDir, { recursive: true });
+
+    const manifest = {
+      ...buildManifestWithTemplates({
+        "code-review": CODE_REVIEW_WORKFLOW,
+        "deploy-pipeline": DEPLOY_WORKFLOW,
+      }),
+      defaultWorkflow: "code-review",
+    };
+    await writeFile(
+      join(projectDir, "project.yaml"),
+      stringifyYaml(manifest, { lineWidth: 120 }),
+      "utf-8",
+    );
+
+    const result = await resolveDefaultWorkflow(projectDir);
+
+    expect(result).toBeDefined();
+    expect(result!.definition.name).toBe("code-review");
+    expect(result!.templateName).toBe("code-review");
+    expect(result!.definition.hops).toHaveLength(2);
+  });
+
+  it("returns undefined and warns when defaultWorkflow references missing template", async () => {
+    const projectDir = join(testDir, "project-stale-ref");
+    await mkdir(projectDir, { recursive: true });
+
+    const manifest = {
+      ...buildManifestWithTemplates({
+        "code-review": CODE_REVIEW_WORKFLOW,
+      }),
+      defaultWorkflow: "nonexistent-template",
+    };
+    await writeFile(
+      join(projectDir, "project.yaml"),
+      stringifyYaml(manifest, { lineWidth: 120 }),
+      "utf-8",
+    );
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = await resolveDefaultWorkflow(projectDir);
+
+    expect(result).toBeUndefined();
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('defaultWorkflow "nonexistent-template" not found'),
+    );
+    errorSpy.mockRestore();
+  });
+
+  it("returns undefined when project has no defaultWorkflow field", async () => {
+    const projectDir = join(testDir, "project-no-default");
+    await mkdir(projectDir, { recursive: true });
+
+    const manifest = buildManifestWithTemplates({
+      "code-review": CODE_REVIEW_WORKFLOW,
+    });
+    // No defaultWorkflow field set
+    await writeFile(
+      join(projectDir, "project.yaml"),
+      stringifyYaml(manifest, { lineWidth: 120 }),
+      "utf-8",
+    );
+
+    const result = await resolveDefaultWorkflow(projectDir);
+
+    expect(result).toBeUndefined();
+  });
+
+  it("returns undefined when no project.yaml exists (e.g., _inbox)", async () => {
+    const projectDir = join(testDir, "inbox-no-manifest");
+    await mkdir(projectDir, { recursive: true });
+    // No project.yaml written
+
+    const result = await resolveDefaultWorkflow(projectDir);
+
+    expect(result).toBeUndefined();
+  });
+
+  it("returns undefined when defaultWorkflow points to invalid DAG", async () => {
+    const projectDir = join(testDir, "project-invalid-dag");
+    await mkdir(projectDir, { recursive: true });
+
+    const invalidWorkflow: WorkflowDefinition = {
+      name: "broken",
+      hops: [
+        // Depends on non-existent hop -- invalid DAG
+        { id: "step1", role: "swe-backend", dependsOn: ["missing-hop"], joinType: "all", autoAdvance: true, canReject: false },
+      ],
+    };
+
+    const manifest = {
+      ...buildManifestWithTemplates({
+        broken: invalidWorkflow,
+      }),
+      defaultWorkflow: "broken",
+    };
+    await writeFile(
+      join(projectDir, "project.yaml"),
+      stringifyYaml(manifest, { lineWidth: 120 }),
+      "utf-8",
+    );
+
+    const result = await resolveDefaultWorkflow(projectDir);
+
+    expect(result).toBeUndefined();
+  });
+
+  it("integrates end-to-end: store.create receives resolved default workflow", async () => {
+    const projectDir = join(testDir, "project-e2e-default");
+    await mkdir(join(projectDir, "tasks", "backlog"), { recursive: true });
+
+    const manifest = {
+      ...buildManifestWithTemplates({
+        "code-review": CODE_REVIEW_WORKFLOW,
+      }),
+      defaultWorkflow: "code-review",
+    };
+    await writeFile(
+      join(projectDir, "project.yaml"),
+      stringifyYaml(manifest, { lineWidth: 120 }),
+      "utf-8",
+    );
+
+    const store = new FilesystemTaskStore(projectDir, { projectId: "test-e2e" });
+    await store.init();
+
+    const resolved = await resolveDefaultWorkflow(projectDir);
+    expect(resolved).toBeDefined();
+
+    const task = await store.create({
+      title: "Test with default workflow",
+      createdBy: "cli",
+      workflow: resolved,
+    });
+
+    expect(task.frontmatter.workflow).toBeDefined();
+    expect(task.frontmatter.workflow!.definition.name).toBe("code-review");
+    expect(task.frontmatter.workflow!.templateName).toBe("code-review");
+    expect(task.frontmatter.workflow!.state.status).toBe("pending");
   });
 });
