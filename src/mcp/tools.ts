@@ -8,6 +8,8 @@ import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { loadOrgChart } from "../org/loader.js";
 import { appendSection, formatTimestamp, normalizePriority, resolveTask, type AofMcpContext } from "./shared.js";
+import { WorkflowDefinition, validateDAG } from "../schemas/workflow-dag.js";
+import type { WorkflowDefinition as WorkflowDefinitionType } from "../schemas/workflow-dag.js";
 
 const dispatchInputSchema = z.object({
   title: z.string().min(1),
@@ -19,6 +21,8 @@ const dispatchInputSchema = z.object({
   inputs: z.array(z.string()).optional(),
   checklist: z.array(z.string()).optional(),
   actor: z.string().optional(),
+  /** Workflow: template name (string), inline WorkflowDefinition (object), or false (skip). */
+  workflow: z.union([z.string(), WorkflowDefinition, z.literal(false)]).optional(),
 });
 
 const dispatchOutputSchema = z.object({
@@ -124,6 +128,42 @@ export async function handleAofDispatch(ctx: AofMcpContext, input: z.infer<typeo
 
   const ownerTeam = await resolveOwnerTeam(ctx, input);
 
+  // --- Workflow resolution ---
+  let workflow: { definition: WorkflowDefinitionType; templateName?: string } | undefined;
+
+  if (typeof input.workflow === "string") {
+    // Template name: resolve from project config
+    const templates = ctx.projectConfig?.workflowTemplates;
+    const definition = templates?.[input.workflow];
+    if (!definition) {
+      const available = templates ? Object.keys(templates).join(", ") : "(none)";
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `Unknown workflow template: "${input.workflow}". Available: ${available}`,
+      );
+    }
+    // Belt-and-suspenders validation (templates should already be valid)
+    const dagErrors = validateDAG(definition);
+    if (dagErrors.length > 0) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `Workflow template "${input.workflow}" has invalid DAG: ${dagErrors.join(", ")}`,
+      );
+    }
+    workflow = { definition, templateName: input.workflow };
+  } else if (typeof input.workflow === "object" && input.workflow !== null && input.workflow !== false) {
+    // Inline DAG definition: validate and pass through
+    const dagErrors = validateDAG(input.workflow as WorkflowDefinitionType);
+    if (dagErrors.length > 0) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `Invalid workflow DAG: ${dagErrors.join(", ")}`,
+      );
+    }
+    workflow = { definition: input.workflow as WorkflowDefinitionType };
+  }
+  // input.workflow === false or undefined: no workflow (explicit skip or backward compatible)
+
   const task = await ctx.store.create({
     title: input.title,
     body,
@@ -134,6 +174,7 @@ export async function handleAofDispatch(ctx: AofMcpContext, input: z.infer<typeo
     },
     metadata,
     createdBy: input.actor ?? "mcp",
+    workflow,
   });
 
   let currentTask = await ctx.store.transition(task.frontmatter.id, "ready");

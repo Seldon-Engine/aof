@@ -5,6 +5,7 @@ import type { ITaskStore } from "../store/interfaces.js";
 import { EventLogger } from "../events/logger.js";
 import type { GatewayAdapter } from "../dispatch/executor.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
+import type { ProjectManifest } from "../schemas/project.js";
 
 export interface AofMcpOptions {
   dataDir: string;
@@ -24,6 +25,8 @@ export interface AofMcpContext {
   logger: EventLogger;
   executor?: GatewayAdapter;
   orgChartPath: string;
+  /** Project manifest for template resolution (loaded when projectId is provided). */
+  projectConfig?: ProjectManifest;
 }
 
 export async function createAofMcpContext(options: AofMcpOptions): Promise<AofMcpContext> {
@@ -31,6 +34,7 @@ export async function createAofMcpContext(options: AofMcpOptions): Promise<AofMc
   let dataDir: string;
   let logger: EventLogger;
   let orgChartPath: string;
+  let projectConfig: ProjectManifest | undefined;
 
   // If projectId is provided, use project-scoped store
   if (options.projectId || options.vaultRoot) {
@@ -38,11 +42,24 @@ export async function createAofMcpContext(options: AofMcpOptions): Promise<AofMc
     const projectId = options.projectId ?? "_inbox";
     const vaultRoot = options.vaultRoot ?? options.dataDir;
     const resolution = await createProjectStore({ projectId, vaultRoot, logger: options.logger });
-    
+
     store = options.store ?? resolution.store;
     dataDir = resolution.projectRoot;
     logger = options.logger ?? new EventLogger(join(dataDir, "events"));
     orgChartPath = options.orgChartPath ?? join(resolution.vaultRoot, "org", "org-chart.yaml");
+
+    // Load project manifest for workflow template resolution
+    try {
+      const { readFile } = await import("node:fs/promises");
+      const { parse: parseYaml } = await import("yaml");
+      const { ProjectManifest: ProjectManifestSchema } = await import("../schemas/project.js");
+      const manifestPath = join(dataDir, "project.yaml");
+      const raw = await readFile(manifestPath, "utf-8");
+      const parsed = parseYaml(raw) as unknown;
+      projectConfig = ProjectManifestSchema.parse(parsed);
+    } catch {
+      // No manifest or parse error -- projectConfig stays undefined
+    }
   } else {
     // Legacy behavior: use dataDir directly
     store = options.store ?? new FilesystemTaskStore(options.dataDir);
@@ -57,6 +74,7 @@ export async function createAofMcpContext(options: AofMcpOptions): Promise<AofMc
     logger,
     executor: options.executor,
     orgChartPath,
+    projectConfig,
   };
 }
 
