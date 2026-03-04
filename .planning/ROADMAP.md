@@ -62,7 +62,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md` for full details
 
 </details>
 
-### 🚧 v1.4 Context Optimization (In Progress)
+### v1.4 Context Optimization (In Progress)
 
 **Milestone Goal:** Cut agent context injection by 50%+ while preserving full AOF capability -- agents use less context but can still leverage DAG workflows, org chart setup, and all tools effectively.
 
@@ -100,7 +100,9 @@ Plans:
   5. SKILL.md contains no parameter tables (tool JSON schemas already provide parameter documentation)
   6. SKILL.md includes org chart setup guidance sufficient for an agent to provision teams, agents, and routing
   7. DAG workflow section includes examples of linear, review cycle, and parallel fan-out patterns via aof_dispatch
-**Plans**: TBD
+**Plans:** 1 plan
+Plans:
+- [ ] 22-01-PLAN.md -- Write compressed SKILL.md and create skill.json manifest
 
 ### Phase 23: Tiered Context Delivery
 **Goal**: Context injection supports two tiers so agents working on simple tasks receive a minimal seed, while complex tasks get the full skill
@@ -150,7 +152,7 @@ Phases execute in numeric order: 21 -> 22 -> 23 -> 24
 | 18. DAG-as-Default | v1.3 | 1/1 | Complete | 2026-03-04 |
 | 19. Verification & Smoke Tests | v1.3 | 2/2 | Complete | 2026-03-04 |
 | 20. Release Pipeline, Documentation & Release Cut | v1.3 | 1/1 | Complete | 2026-03-04 |
-| 21. Tool & Workflow API | 2/2 | Complete    | 2026-03-04 | - |
-| 22. Compressed Skill | v1.4 | 0/? | Not started | - |
+| 21. Tool & Workflow API | v1.4 | 2/2 | Complete | 2026-03-04 |
+| 22. Compressed Skill | v1.4 | 0/1 | Not started | - |
 | 23. Tiered Context Delivery | v1.4 | 0/? | Not started | - |
 | 24. Verification & Budget Gate | v1.4 | 0/? | Not started | - |
