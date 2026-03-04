@@ -112,11 +112,10 @@ Plans:
   1. The release pipeline runs smoke tests between tarball build and GitHub Releases upload -- a failing smoke test blocks the release
   2. UPGRADING.md exists and documents what changed, prerequisites, step-by-step upgrade instructions, verification commands, and rollback via backup restore
   3. v1.3.0 is tagged in git and published as a GitHub Release with an installer-downloadable tarball
-**Plans**: TBD
+**Plans:** 1 plan
 
 Plans:
-- [ ] 20-01: TBD
-- [ ] 20-02: TBD
+- [ ] 20-01-PLAN.md — Wire verify-tarball into release pipeline, write UPGRADING.md, prepare for v1.3.0 release cut
 
 ## Progress
 
@@ -143,5 +142,5 @@ Phases execute in numeric order: 17 → 18 → 19 → 20
 | 16. Integration Wiring Fixes | v1.2 | 1/1 | Complete | 2026-03-03 |
 | 17. Migration Foundation & Framework Hardening | v1.3 | 3/3 | Complete | 2026-03-04 |
 | 18. DAG-as-Default | v1.3 | 1/1 | Complete | 2026-03-04 |
-| 19. Verification & Smoke Tests | 2/2 | Complete    | 2026-03-04 | - |
-| 20. Release Pipeline, Documentation & Release Cut | v1.3 | 0/2 | Not started | - |
+| 19. Verification & Smoke Tests | v1.3 | 2/2 | Complete | 2026-03-04 |
+| 20. Release Pipeline, Documentation & Release Cut | v1.3 | 0/1 | Not started | - |
