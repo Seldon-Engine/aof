@@ -142,6 +142,6 @@ Phases execute in numeric order: 17 → 18 → 19 → 20
 | 15. Migration and Documentation | v1.2 | 3/3 | Complete | 2026-03-03 |
 | 16. Integration Wiring Fixes | v1.2 | 1/1 | Complete | 2026-03-03 |
 | 17. Migration Foundation & Framework Hardening | 3/3 | Complete    | 2026-03-04 | - |
-| 18. DAG-as-Default | 1/1 | Complete   | 2026-03-04 | - |
+| 18. DAG-as-Default | 1/1 | Complete    | 2026-03-04 | - |
 | 19. Verification & Smoke Tests | v1.3 | 0/2 | Not started | - |
 | 20. Release Pipeline, Documentation & Release Cut | v1.3 | 0/2 | Not started | - |
