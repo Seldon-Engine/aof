@@ -5,7 +5,8 @@
 - ✅ **v1.0 AOF Production Readiness** — Phases 1-3 (shipped 2026-02-26)
 - ✅ **v1.1 Stabilization & Ship** — Phases 4-9 (shipped 2026-02-27)
 - ✅ **v1.2 Task Workflows** — Phases 10-16 (shipped 2026-03-03)
-- 🚧 **v1.3 Seamless Upgrade** — Phases 17-20 (in progress)
+- ✅ **v1.3 Seamless Upgrade** — Phases 17-20 (shipped 2026-03-04)
+- 🚧 **v1.4 Context Optimization** — Phases 21-24 (in progress)
 
 ## Phases
 
@@ -49,78 +50,77 @@ See: `.planning/milestones/v1.2-ROADMAP.md` for full details
 
 </details>
 
-### 🚧 v1.3 Seamless Upgrade (In Progress)
+<details>
+<summary>✅ v1.3 Seamless Upgrade (Phases 17-20) — SHIPPED 2026-03-04</summary>
 
-**Milestone Goal:** Make the v1.2 DAG workflow system deployable with confidence -- upgrade path works end-to-end, DAGs become the default, release is cut and installable.
+- [x] Phase 17: Migration Foundation & Framework Hardening (3/3 plans) — completed 2026-03-04
+- [x] Phase 18: DAG-as-Default (1/1 plan) — completed 2026-03-04
+- [x] Phase 19: Verification & Smoke Tests (2/2 plans) — completed 2026-03-04
+- [x] Phase 20: Release Pipeline, Documentation & Release Cut (1/1 plan) — completed 2026-03-04
 
-- [x] **Phase 17: Migration Foundation & Framework Hardening** - Harden the migration framework and implement all config/data migrations for the v1.2-to-v1.3 upgrade path (completed 2026-03-04)
-- [x] **Phase 18: DAG-as-Default** - Make DAG workflows the default for new tasks via project-level configuration (completed 2026-03-04)
-- [x] **Phase 19: Verification & Smoke Tests** - Validate the entire upgrade path with automated smoke tests and a CLI health-check command (completed 2026-03-04)
-- [x] **Phase 20: Release Pipeline, Documentation & Release Cut** - Gate the release on tarball verification, document the upgrade, cut v1.3.0 (completed 2026-03-04)
+See: `.planning/milestones/v1.3-ROADMAP.md` for full details
+
+</details>
+
+### 🚧 v1.4 Context Optimization (In Progress)
+
+**Milestone Goal:** Cut agent context injection by 50%+ while preserving full AOF capability -- agents use less context but can still leverage DAG workflows, org chart setup, and all tools effectively.
+
+- [ ] **Phase 21: Compressed Skill** - Replace verbose agent documentation with a compact SKILL.md cheatsheet covering all tools, workflows, and org chart guidance
+- [ ] **Phase 22: Tool Description Trimming** - Reduce tool descriptions in tools.ts to schema + one-liner and merge projects skill into main skill
+- [ ] **Phase 23: Tiered Context Delivery** - Support seed and full context tiers so simple tasks get minimal injection
+- [ ] **Phase 24: Verification & Budget Gate** - Document 50%+ token reduction and enforce a token budget ceiling in CI
 
 ## Phase Details
 
-### Phase 17: Migration Foundation & Framework Hardening
-**Goal**: Users upgrading from pre-v1.2 or v1.2 installations get their config and task data migrated automatically, atomically, and safely -- with snapshot-based rollback on any failure
-**Depends on**: Phase 16 (v1.2 complete)
-**Requirements**: MIGR-01, MIGR-02, MIGR-03, MIGR-04, MIGR-05, CONF-01, CONF-02, CONF-03, CONF-04, BUGF-01, BUGF-02
+### Phase 21: Compressed Skill
+**Goal**: Agents receive a single compact SKILL.md (~150 lines) that replaces verbose documentation while preserving complete coverage of tools, workflows, protocols, and org chart setup guidance
+**Depends on**: Phase 20 (v1.3 complete)
+**Requirements**: SKILL-01, SKILL-02, SKILL-03, SKILL-04, SKILL-05, SKILL-06
 **Success Criteria** (what must be TRUE):
-  1. Running the installer upgrade on a pre-v1.2 data directory completes all three migrations (defaultWorkflow, gate-to-DAG batch, version metadata) without data loss or comment destruction in YAML files
-  2. If a migration is interrupted mid-run (simulated crash), re-running the installer detects the incomplete state and resumes from where it left off rather than corrupting or duplicating work
-  3. A pre-migration snapshot of the full data directory is created before any migration runs, and is restored automatically if any migration fails
-  4. `bd list` and `bd get --prefix` both return DAG-migrated tasks consistently (no format divergence between access methods)
-  5. `schemaVersion` field accepts version 2, and migrated installations carry version metadata in `.aof/channel.json`
-**Plans:** 3/3 plans complete
+  1. Agent context includes a SKILL.md file under ~150 lines that covers all AOF tools, workflow patterns, and agent protocols
+  2. SKILL.md contains no CLI reference section (agents don't run CLI commands)
+  3. SKILL.md contains no notification events table (agents emit events via tools, not by consulting a reference table)
+  4. SKILL.md uses minimal inline YAML examples for org chart concepts instead of verbose multi-line examples
+  5. SKILL.md contains no parameter tables (tool JSON schemas already provide parameter documentation)
+  6. SKILL.md includes org chart setup guidance sufficient for an agent to provision teams, agents, and routing
+**Plans**: TBD
 
-Plans:
-- [ ] 17-01-PLAN.md — Snapshot module, schema version relaxation, migration framework hardening
-- [ ] 17-02-PLAN.md — Three migration implementations (defaultWorkflow, gate-to-DAG batch, version metadata)
-- [ ] 17-03-PLAN.md — Bug fixes (getByPrefix gate-to-DAG, installer backup scope)
-
-### Phase 18: DAG-as-Default
-**Goal**: New tasks automatically use the project's configured workflow template, while bare tasks remain available for projects that have not configured a default
-**Depends on**: Phase 17
-**Requirements**: DAGD-01, DAGD-02, DAGD-03
+### Phase 22: Tool Description Trimming
+**Goal**: Tool descriptions in tools.ts carry only schema and a one-line summary, with the projects skill merged into the main compressed skill -- no functionality lost
+**Depends on**: Phase 21
+**Requirements**: TOOL-01, TOOL-02, TOOL-03
 **Success Criteria** (what must be TRUE):
-  1. `bd create "task name"` in a project with a `defaultWorkflow` configured auto-attaches that workflow template to the new task (visible in `bd get`)
-  2. `bd create --no-workflow "task name"` creates a bare task with no workflow, even when the project has a `defaultWorkflow` configured
-  3. `bd create "task name"` in a project without a `defaultWorkflow` creates a bare task as before (no errors, no warnings, graceful degradation)
-**Plans:** 1/1 plans complete
+  1. Every tool definition in tools.ts has a description of one sentence or less, with no inline examples or redundant parameter documentation
+  2. Projects skill content is merged into the main SKILL.md (single file injection, not two separate files)
+  3. All tool parameters and schemas remain correct -- existing tests pass, no tool functionality is broken by description trimming
+**Plans**: TBD
 
-Plans:
-- [ ] 18-01-PLAN.md — resolveDefaultWorkflow function, --no-workflow flag, three-way precedence in task create
-
-### Phase 19: Verification & Smoke Tests
-**Goal**: The upgrade path is validated end-to-end by automated tests that catch regressions in migration, installation, and DAG-default behavior before release
-**Depends on**: Phase 18
-**Requirements**: VERF-01, VERF-02, VERF-03
+### Phase 23: Tiered Context Delivery
+**Goal**: Context injection supports two tiers so agents working on simple tasks receive a minimal seed, while complex tasks get the full skill
+**Depends on**: Phase 21
+**Requirements**: SKILL-07
 **Success Criteria** (what must be TRUE):
-  1. `bd smoke` runs post-install health checks and reports pass/fail for version, schema, task store, org chart, migration status, and workflow templates
-  2. An automated test suite exercises four upgrade scenarios (fresh install, pre-v1.2 upgrade, v1.2 upgrade, DAG-default behavior) and passes in CI
-  3. A tarball verification script validates extraction, `npm ci --production`, CLI boot, version string match, and package size before any release upload
-**Plans:** 2/2 plans complete
+  1. A seed tier exists that injects significantly less context than the full tier while still enabling agents to complete simple tasks
+  2. A full tier exists that injects the complete compressed skill for complex tasks requiring workflow composition or org chart setup
+  3. The tier selection mechanism is explicit and deterministic (not LLM-decided)
+**Plans**: TBD
 
-Plans:
-- [ ] 19-01-PLAN.md — aof smoke CLI command with 6 health checks (version, schema, task store, org chart, migrations, workflows)
-- [ ] 19-02-PLAN.md — Upgrade scenario test suite (4 scenarios) and tarball verification script
-
-### Phase 20: Release Pipeline, Documentation & Release Cut
-**Goal**: v1.3.0 is tagged, built, verified, and published with upgrade documentation so users can confidently install or upgrade
-**Depends on**: Phase 19
-**Requirements**: RELS-01, RELS-02, RELS-03
+### Phase 24: Verification & Budget Gate
+**Goal**: The 50%+ context reduction is proven with before/after measurements and protected by an automated test that fails if context exceeds the budget
+**Depends on**: Phase 21, Phase 22, Phase 23
+**Requirements**: MEAS-01, MEAS-02
 **Success Criteria** (what must be TRUE):
-  1. The release pipeline runs smoke tests between tarball build and GitHub Releases upload -- a failing smoke test blocks the release
-  2. UPGRADING.md exists and documents what changed, prerequisites, step-by-step upgrade instructions, verification commands, and rollback via backup restore
-  3. v1.3.0 is tagged in git and published as a GitHub Release with an installer-downloadable tarball
-**Plans:** 1/1 plans complete
-
-Plans:
-- [ ] 20-01-PLAN.md — Wire verify-tarball into release pipeline, write UPGRADING.md, prepare for v1.3.0 release cut
+  1. A document exists showing before and after token counts for total context injection, proving at least 50% reduction
+  2. An automated test (vitest) fails if total context injection for the full tier exceeds a defined token budget ceiling
+  3. The token budget test runs in CI alongside existing tests
+**Plans**: TBD
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 17 → 18 → 19 → 20
+Phases execute in numeric order: 21 -> 22 -> 23 -> 24
+(Phase 23 depends on Phase 21 only, so it could run in parallel with Phase 22, but sequential execution is simpler.)
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -143,4 +143,8 @@ Phases execute in numeric order: 17 → 18 → 19 → 20
 | 17. Migration Foundation & Framework Hardening | v1.3 | 3/3 | Complete | 2026-03-04 |
 | 18. DAG-as-Default | v1.3 | 1/1 | Complete | 2026-03-04 |
 | 19. Verification & Smoke Tests | v1.3 | 2/2 | Complete | 2026-03-04 |
-| 20. Release Pipeline, Documentation & Release Cut | 1/1 | Complete   | 2026-03-04 | - |
+| 20. Release Pipeline, Documentation & Release Cut | v1.3 | 1/1 | Complete | 2026-03-04 |
+| 21. Compressed Skill | v1.4 | 0/? | Not started | - |
+| 22. Tool Description Trimming | v1.4 | 0/? | Not started | - |
+| 23. Tiered Context Delivery | v1.4 | 0/? | Not started | - |
+| 24. Verification & Budget Gate | v1.4 | 0/? | Not started | - |

@@ -1,7 +1,7 @@
 # Requirements: AOF
 
 **Defined:** 2026-03-03
-**Core Value:** Tasks never get dropped — they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
+**Core Value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
 
 ## v1.4 Requirements
 
@@ -21,7 +21,7 @@ Requirements for Context Optimization milestone. Each maps to roadmap phases.
 
 - [ ] **TOOL-01**: Tool descriptions in tools.ts reduced to schema + one-liner (no inline examples or redundant parameter docs)
 - [ ] **TOOL-02**: Projects skill merged into main compressed skill (single file)
-- [ ] **TOOL-03**: No functionality lost — all tool parameters and schemas remain correct after trimming
+- [ ] **TOOL-03**: No functionality lost -- all tool parameters and schemas remain correct after trimming
 
 ### Measurement
 
@@ -45,8 +45,8 @@ Requirements for Context Optimization milestone. Each maps to roadmap phases.
 
 | Feature | Reason |
 |---------|--------|
-| Dynamic context based on task content | Over-engineering for v1.4 — static tiers sufficient |
-| Per-agent skill customization | All agents use same tools — one skill fits all |
+| Dynamic context based on task content | Over-engineering for v1.4 -- static tiers sufficient |
+| Per-agent skill customization | All agents use same tools -- one skill fits all |
 | MCP resource description trimming | Already minimal (~1KB), not worth optimizing |
 | Skill versioning / migration | Single file replacement, no migration needed |
 
@@ -56,24 +56,24 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SKILL-01 | — | Pending |
-| SKILL-02 | — | Pending |
-| SKILL-03 | — | Pending |
-| SKILL-04 | — | Pending |
-| SKILL-05 | — | Pending |
-| SKILL-06 | — | Pending |
-| SKILL-07 | — | Pending |
-| TOOL-01 | — | Pending |
-| TOOL-02 | — | Pending |
-| TOOL-03 | — | Pending |
-| MEAS-01 | — | Pending |
-| MEAS-02 | — | Pending |
+| SKILL-01 | Phase 21 | Pending |
+| SKILL-02 | Phase 21 | Pending |
+| SKILL-03 | Phase 21 | Pending |
+| SKILL-04 | Phase 21 | Pending |
+| SKILL-05 | Phase 21 | Pending |
+| SKILL-06 | Phase 21 | Pending |
+| SKILL-07 | Phase 23 | Pending |
+| TOOL-01 | Phase 22 | Pending |
+| TOOL-02 | Phase 22 | Pending |
+| TOOL-03 | Phase 22 | Pending |
+| MEAS-01 | Phase 24 | Pending |
+| MEAS-02 | Phase 24 | Pending |
 
 **Coverage:**
 - v1.4 requirements: 12 total
-- Mapped to phases: 0
-- Unmapped: 12 ⚠️
+- Mapped to phases: 12
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-03*
-*Last updated: 2026-03-03 after initial definition*
+*Last updated: 2026-03-03 after roadmap creation*
