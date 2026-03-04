@@ -46,20 +46,29 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 - ✓ Auto-generated CLI reference from Commander.js command tree — v1.1
 - ✓ Pre-commit hook preventing doc drift (4 checks) — v1.1
 
-### Current Milestone: v1.3 Seamless Upgrade
+### Validated (v1.3)
 
-**Goal:** Make the v1.2 DAG workflow system deployable with confidence — upgrade path works end-to-end, DAGs become the default, release is cut and installable.
+- ✓ Migration framework with snapshot-based rollback — v1.3
+- ✓ Three auto-migrations (defaultWorkflow, gate-to-DAG batch, version metadata) — v1.3
+- ✓ DAG workflows as default for new tasks — v1.3
+- ✓ `aof smoke` CLI health check (6 checks) — v1.3
+- ✓ Tarball verification in CI release pipeline — v1.3
+- ✓ UPGRADING.md with three upgrade paths + rollback docs — v1.3
+- ✓ Legacy gate system fully removed — v1.3
+
+### Current Milestone: v1.4 Context Optimization
+
+**Goal:** Cut agent context injection by 50%+ while preserving full AOF capability — agents use less context but can still leverage DAG workflows, org chart setup, and all tools effectively.
 
 **Target features:**
-- Seamless upgrade from pre-v1.2 to v1.3 (config migration, data preservation)
-- DAG workflows as default for new tasks (not opt-in)
-- Tagged release with installer-downloadable tarball
-- Upgrade documentation and rollback safety
-- End-to-end smoke tests for the upgrade path
+- Compressed companion skill (SKILL.md cheatsheet replacing verbose docs)
+- Trimmed tool descriptions in adapter.ts (no redundancy with skill)
+- Org chart setup guidance preserved for agent-led provisioning
+- Measurable before/after token reduction
 
 ### Active
 
-(Defining requirements for v1.3)
+(Defining requirements for v1.4)
 
 ### Validated (v1.2)
 
@@ -80,10 +89,10 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 - Multi-host distribution — single-machine deployment for now
 - Non-OpenClaw runtimes — AOF is an OpenClaw plugin specifically
 - OpenTelemetry integration — deferred to v2
-- Self-healing (circuit breaker, dead-letter resurrection, stuck session recovery) — deferred to v1.4
-- Agent-guided org chart setup — deferred to v1.4
-- Standalone daemon executor wiring — deferred to v1.4
-- Memory search reranker — deferred to v1.4
+- Self-healing (circuit breaker, dead-letter resurrection, stuck session recovery) — deferred to v1.5
+- Agent-guided org chart setup — addressed in v1.4 (org chart guidance in compressed skill)
+- Standalone daemon executor wiring — deferred to v1.5
+- Memory search reranker — deferred to v1.5
 - Memory tier auto compaction — deferred to v2
 - Autoupdate mechanism — deferred to v2
 - OpenClaw version compat checks — deferred to v2
@@ -103,6 +112,7 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 - v1.0 shipped: scheduler is restart-safe, daemon runs under OS supervision, gateway dispatch works via GatewayAdapter
 - v1.1 shipped: memory fixed, CI pipeline live, curl|sh installer, multi-project isolation verified, documentation complete with guardrails
 - v1.2 shipped: per-task workflow DAGs — tasks carry pipeline definitions (hops), scheduler executes DAG mechanically, replaces linear gate system. 27 requirements, 10 phases, 23 plans, ~100K LOC
+- v1.3 shipped: seamless upgrade — migration framework, DAG-as-default, smoke tests, release pipeline, legacy gate removal
 - OpenClaw constraint: no nested agent sessions — scheduler must advance hops between independent sessions
 - Node 22 pinned as prerequisite (Node 24/25 have better-sqlite3 build failures)
 
@@ -138,4 +148,4 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 | Product messaging: "multi-team agent orchestration platform" | Domain-agnostic positioning, not implementation-centric | ✓ Good |
 
 ---
-*Last updated: 2026-03-03 after v1.3 milestone started*
+*Last updated: 2026-03-04 after v1.4 milestone started*

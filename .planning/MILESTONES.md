@@ -1,5 +1,21 @@
 # Milestones
 
+## v1.3 Seamless Upgrade (Shipped: 2026-03-04)
+
+**Phases completed:** 4 phases (17-20), 7 plans
+**Timeline:** 2026-03-04 (single day)
+
+**Key accomplishments:**
+- Migration framework with snapshot-based rollback and marker file resumption
+- Three auto-migrations: defaultWorkflow, gate-to-DAG batch conversion, version metadata
+- DAG workflows as default for new tasks via resolveDefaultWorkflow
+- `aof smoke` CLI command with 6 health checks
+- Tarball verification script + CI release pipeline gate
+- UPGRADING.md with three upgrade paths and rollback documentation
+- Legacy gate system fully removed (gate-transition-handler deleted, tests rewritten to DAG)
+
+---
+
 ## v1.2 Task Workflows (Shipped: 2026-03-03)
 
 **Phases completed:** 7 phases, 16 plans, 0 tasks
