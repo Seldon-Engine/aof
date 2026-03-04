@@ -70,12 +70,12 @@ See: `.planning/milestones/v1.2-ROADMAP.md` for full details
   3. A pre-migration snapshot of the full data directory is created before any migration runs, and is restored automatically if any migration fails
   4. `bd list` and `bd get --prefix` both return DAG-migrated tasks consistently (no format divergence between access methods)
   5. `schemaVersion` field accepts version 2, and migrated installations carry version metadata in `.aof/channel.json`
-**Plans**: TBD
+**Plans:** 3 plans
 
 Plans:
-- [ ] 17-01: TBD
-- [ ] 17-02: TBD
-- [ ] 17-03: TBD
+- [ ] 17-01-PLAN.md — Snapshot module, schema version relaxation, migration framework hardening
+- [ ] 17-02-PLAN.md — Three migration implementations (defaultWorkflow, gate-to-DAG batch, version metadata)
+- [ ] 17-03-PLAN.md — Bug fixes (getByPrefix gate-to-DAG, installer backup scope)
 
 ### Phase 18: DAG-as-Default
 **Goal**: New tasks automatically use the project's configured workflow template, while bare tasks remain available for projects that have not configured a default
