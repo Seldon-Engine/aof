@@ -125,7 +125,9 @@ Plans:
   1. A document exists showing before and after token counts for total context injection, proving at least 50% reduction
   2. An automated test (vitest) fails if total context injection for the full tier exceeds a defined token budget ceiling
   3. The token budget test runs in CI alongside existing tests
-**Plans**: TBD
+**Plans:** 1 plan
+Plans:
+- [ ] 24-01-PLAN.md -- Create budget gate test and measurement document proving 50%+ context reduction
 
 ## Progress
 
@@ -158,4 +160,4 @@ Phases execute in numeric order: 21 -> 22 -> 23 -> 24
 | 21. Tool & Workflow API | v1.4 | 2/2 | Complete | 2026-03-04 |
 | 22. Compressed Skill | 1/1 | Complete    | 2026-03-04 | - |
 | 23. Tiered Context Delivery | 2/2 | Complete    | 2026-03-04 | - |
-| 24. Verification & Budget Gate | v1.4 | 0/? | Not started | - |
+| 24. Verification & Budget Gate | v1.4 | 0/1 | Not started | - |
