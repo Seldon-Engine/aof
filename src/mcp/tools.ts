@@ -8,8 +8,7 @@ import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { loadOrgChart } from "../org/loader.js";
 import { appendSection, formatTimestamp, normalizePriority, resolveTask, type AofMcpContext } from "./shared.js";
-import { WorkflowDefinition, validateDAG } from "../schemas/workflow-dag.js";
-import type { WorkflowDefinition as WorkflowDefinitionType } from "../schemas/workflow-dag.js";
+import { WorkflowDefinition, validateDAG, type WorkflowDefinition as WorkflowDefinitionType } from "../schemas/workflow-dag.js";
 
 const dispatchInputSchema = z.object({
   title: z.string().min(1),
@@ -151,16 +150,16 @@ export async function handleAofDispatch(ctx: AofMcpContext, input: z.infer<typeo
       );
     }
     workflow = { definition, templateName: input.workflow };
-  } else if (typeof input.workflow === "object" && input.workflow !== null && input.workflow !== false) {
+  } else if (typeof input.workflow === "object" && input.workflow !== null) {
     // Inline DAG definition: validate and pass through
-    const dagErrors = validateDAG(input.workflow as WorkflowDefinitionType);
+    const dagErrors = validateDAG(input.workflow);
     if (dagErrors.length > 0) {
       throw new McpError(
         ErrorCode.InvalidParams,
         `Invalid workflow DAG: ${dagErrors.join(", ")}`,
       );
     }
-    workflow = { definition: input.workflow as WorkflowDefinitionType };
+    workflow = { definition: input.workflow };
   }
   // input.workflow === false or undefined: no workflow (explicit skip or backward compatible)
 
