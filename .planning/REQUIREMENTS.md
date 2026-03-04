@@ -9,12 +9,12 @@ Requirements for Context Optimization milestone. Each maps to roadmap phases.
 
 ### Skill Compression
 
-- [ ] **SKILL-01**: Agent receives a compact cheatsheet SKILL.md (~150 lines) covering all tools, workflows, and protocols without verbose examples
-- [ ] **SKILL-02**: CLI reference section removed from SKILL.md (agents don't run CLI commands)
-- [ ] **SKILL-03**: Notification events table removed from SKILL.md (agents emit events via tools, don't need full table)
-- [ ] **SKILL-04**: Verbose YAML org chart examples replaced with minimal inline examples
-- [ ] **SKILL-05**: Parameter tables removed from SKILL.md (tool JSON schemas provide this)
-- [ ] **SKILL-06**: Org chart setup guidance preserved in compressed skill for agent-led provisioning
+- [x] **SKILL-01**: Agent receives a compact cheatsheet SKILL.md (~150 lines) covering all tools, workflows, and protocols without verbose examples
+- [x] **SKILL-02**: CLI reference section removed from SKILL.md (agents don't run CLI commands)
+- [x] **SKILL-03**: Notification events table removed from SKILL.md (agents emit events via tools, don't need full table)
+- [x] **SKILL-04**: Verbose YAML org chart examples replaced with minimal inline examples
+- [x] **SKILL-05**: Parameter tables removed from SKILL.md (tool JSON schemas provide this)
+- [x] **SKILL-06**: Org chart setup guidance preserved in compressed skill for agent-led provisioning
 - [ ] **SKILL-07**: Context injection supports tiered delivery (seed tier for simple tasks, full tier for complex tasks)
 
 ### Tool Descriptions
@@ -57,12 +57,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SKILL-01 | Phase 22 | Pending |
-| SKILL-02 | Phase 22 | Pending |
-| SKILL-03 | Phase 22 | Pending |
-| SKILL-04 | Phase 22 | Pending |
-| SKILL-05 | Phase 22 | Pending |
-| SKILL-06 | Phase 22 | Pending |
+| SKILL-01 | Phase 22 | Complete |
+| SKILL-02 | Phase 22 | Complete |
+| SKILL-03 | Phase 22 | Complete |
+| SKILL-04 | Phase 22 | Complete |
+| SKILL-05 | Phase 22 | Complete |
+| SKILL-06 | Phase 22 | Complete |
 | SKILL-07 | Phase 23 | Pending |
 | TOOL-01 | Phase 21 | Complete |
 | TOOL-02 | Phase 21 | Complete |

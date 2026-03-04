@@ -67,7 +67,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md` for full details
 **Milestone Goal:** Cut agent context injection by 50%+ while preserving full AOF capability -- agents use less context but can still leverage DAG workflows, org chart setup, and all tools effectively.
 
 - [x] **Phase 21: Tool & Workflow API** - Add workflow param to aof_dispatch, trim tool descriptions, merge projects skill (completed 2026-03-04)
-- [ ] **Phase 22: Compressed Skill** - Replace verbose agent documentation with a compact SKILL.md reflecting actual tool capabilities
+- [x] **Phase 22: Compressed Skill** - Replace verbose agent documentation with a compact SKILL.md reflecting actual tool capabilities (completed 2026-03-04)
 - [ ] **Phase 23: Tiered Context Delivery** - Support seed and full context tiers so simple tasks get minimal injection
 - [ ] **Phase 24: Verification & Budget Gate** - Document 50%+ token reduction and enforce a token budget ceiling in CI
 
@@ -100,7 +100,7 @@ Plans:
   5. SKILL.md contains no parameter tables (tool JSON schemas already provide parameter documentation)
   6. SKILL.md includes org chart setup guidance sufficient for an agent to provision teams, agents, and routing
   7. DAG workflow section includes examples of linear, review cycle, and parallel fan-out patterns via aof_dispatch
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 Plans:
 - [ ] 22-01-PLAN.md -- Write compressed SKILL.md and create skill.json manifest
 
@@ -153,6 +153,6 @@ Phases execute in numeric order: 21 -> 22 -> 23 -> 24
 | 19. Verification & Smoke Tests | v1.3 | 2/2 | Complete | 2026-03-04 |
 | 20. Release Pipeline, Documentation & Release Cut | v1.3 | 1/1 | Complete | 2026-03-04 |
 | 21. Tool & Workflow API | v1.4 | 2/2 | Complete | 2026-03-04 |
-| 22. Compressed Skill | v1.4 | 0/1 | Not started | - |
+| 22. Compressed Skill | 1/1 | Complete   | 2026-03-04 | - |
 | 23. Tiered Context Delivery | v1.4 | 0/? | Not started | - |
 | 24. Verification & Budget Gate | v1.4 | 0/? | Not started | - |
