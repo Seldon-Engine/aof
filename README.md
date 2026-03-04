@@ -1,16 +1,18 @@
-# AOF -- Agentic Ops Fabric
+# AOF — Agentic Ops Fabric
 
-**Orchestrate teams of agents like you'd orchestrate teams of people.** AOF is a multi-team agent orchestration platform -- define orgs, teams, individual agents, and teams of teams, then enforce gated workflows across any domain: software engineering, RevOps, operations, sales and marketing, research, and more. Agents collaborate through shared memories, tasks, and protocols, with the same organizational primitives a human team would use. Nothing gets dropped -- tasks survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end.
+AOF lets you run teams of AI agents the way you'd run teams of people. Define your org structure, assign roles, and set up workflows. AOF handles the rest: routing tasks, enforcing review stages, recovering from crashes, and making sure nothing falls through the cracks.
+
+It works for any domain where agents collaborate — software engineering, RevOps, sales, marketing, research, whatever. If your process has steps, AOF can govern it.
 
 ---
 
 ## What It Does
 
-- **Multi-team agent orchestration** -- Model orgs, teams, individual agents, and hierarchies of teams with declarative YAML org charts; route work by capability, team, and priority
-- **Domain-agnostic workflows** -- Enforce gated processes for any domain: SWE (implement, review, QA, deploy), RevOps (qualify, enrich, handoff), sales pipelines, marketing campaigns, research workflows -- if it has a process, AOF can govern it
-- **Collaborative primitives** -- Agents share memories, tasks, and context the way human teams do; semantic memory with HNSW vector search and tiered curation lets agents build on each other's knowledge
-- **Workflow enforcement** -- Multi-stage gates with rejection loops ensure agents follow the process; no skipping steps, no dropped handoffs
-- **Resilient task fabric** -- Filesystem-first kanban with atomic state transitions, lease-based locking, deadletter recovery, and event sourcing; tasks survive crashes and always resume
+- **Org-chart-driven orchestration.** Model agents, teams, and hierarchies in a YAML org chart. Work gets routed by capability, team, and priority.
+- **Workflow DAGs.** Define multi-stage pipelines with review loops, conditional branches, and parallel fan-out. Agents follow the process — no skipping steps, no dropped handoffs.
+- **Shared memory.** Agents build on each other's knowledge through semantic memory with HNSW vector search and tiered curation.
+- **Works for any domain.** SWE (implement → review → QA → deploy), RevOps (qualify → enrich → handoff), sales pipelines, research workflows. If it has a process, it fits.
+- **Nothing gets dropped.** Filesystem-first task store with atomic state transitions, lease-based locking, and deadletter recovery. Tasks survive crashes, restarts, and API failures.
 
 ---
 
@@ -44,12 +46,12 @@ See the **[Getting Started Guide](docs/guide/getting-started.md)** for a complet
 
 | Feature | Description | Docs |
 |---------|-------------|------|
-| Org chart governance | Declarative YAML defines agents, teams, teams of teams, routing rules, and memory scopes | [Configuration](docs/guide/configuration.md) |
-| DAG workflows | Multi-stage review workflows with rejection loops and parallel fan-out | [Workflow DAGs](docs/guide/workflow-dags.md) |
+| Org chart governance | YAML org charts define agents, teams, routing rules, and memory scopes | [Configuration](docs/guide/configuration.md) |
+| DAG workflows | Multi-stage pipelines with rejection loops and parallel fan-out | [Workflow DAGs](docs/guide/workflow-dags.md) |
 | Protocol system | Typed inter-agent messages: handoff, resume, status update, completion | [Protocols](docs/guide/protocols.md) |
 | Semantic memory | HNSW vector index with hybrid search and tiered curation | [Memory](docs/guide/memory.md) |
 | Recovery-first | Deadletter queue, task resurrection, lease expiration, drift detection | [Recovery](docs/guide/recovery.md) |
-| Observability | Prometheus metrics, JSONL events, Kanban board, real-time views | [Event Logs](docs/guide/event-logs.md) |
+| Observability | Prometheus metrics, JSONL events, Kanban board | [Event Logs](docs/guide/event-logs.md) |
 
 ---
 
@@ -57,19 +59,19 @@ See the **[Getting Started Guide](docs/guide/getting-started.md)** for a complet
 
 ### For Users
 
-- **[Getting Started](docs/guide/getting-started.md)** -- Install, configure, and orchestrate your first agent team
-- **[Configuration Reference](docs/guide/configuration.md)** -- Org chart schema, AOF config, OpenClaw plugin wiring
-- **[CLI Reference](docs/guide/cli-reference.md)** -- Complete command reference (auto-generated)
-- **[Full User Guide](docs/README.md)** -- All user-facing docs
+- **[Getting Started](docs/guide/getting-started.md)** — Install, configure, and orchestrate your first agent team
+- **[Configuration Reference](docs/guide/configuration.md)** — Org chart schema, AOF config, OpenClaw plugin wiring
+- **[CLI Reference](docs/guide/cli-reference.md)** — Complete command reference (auto-generated)
+- **[Full User Guide](docs/README.md)** — All user-facing docs
 
 ### For Contributors
 
-- **[Architecture Overview](docs/dev/architecture.md)** -- System diagram, subsystem descriptions, key interfaces
-- **[Dev Workflow](docs/dev/dev-workflow.md)** -- Development setup and fast-feedback loop
-- **[Full Developer Guide](docs/README.md)** -- All contributor and design docs
+- **[Architecture Overview](docs/dev/architecture.md)** — System diagram, subsystem descriptions, key interfaces
+- **[Dev Workflow](docs/dev/dev-workflow.md)** — Development setup and fast-feedback loop
+- **[Full Developer Guide](docs/README.md)** — All contributor and design docs
 
 ---
 
 ## License
 
-MIT -- see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).
