@@ -15,35 +15,31 @@ Prove the v1.4 context optimization achieved 50%+ reduction with before/after me
 
 ### What counts as "total context"
 - **Scope:** SKILL.md + tool descriptions (registerTool description strings in tools.ts)
-- MCP resource descriptions (~1KB) are NOT part of the 50% claim but are shown as a separate line item for completeness
-- **Baseline source:** Check out pre-v1.4 files from git history to measure actual before values — no manual/estimated numbers
-- **Target tier:** 50% reduction target applies to the full tier only (seed tier documented as supplementary data)
+- MCP resource descriptions are out of scope for the 50% claim
+- **Baseline source:** Git history for actual before values
+- **Target tier:** Full tier only for the 50% reduction target
 
 ### Budget ceiling value
-- Ceiling = 50% of pre-v1.4 baseline (computed from git history measurement)
-- Separate budget ceiling for seed tier (prevents seed from growing unchecked)
-- **Constants:** Hardcoded in the test file as named constants (e.g. `FULL_TIER_BUDGET = <computed>`)
-- **Failure output:** On budget exceeded, print breakdown: total tokens, skill tokens, tool description tokens, ceiling value, overage amount
+- **Moderate ceiling:** Current measured value + 25% headroom
+- Hardcoded constant in the test file
+- Catches large regressions while allowing minor additions without immediate breakage
 
 ### Measurement document
-- Lives in `.planning/phases/24-verification-budget-gate/24-MEASUREMENT.md`
-- Format: before/after table with component breakdown (skill, tool descriptions), tokens before, tokens after, reduction %
-- Summary line proving 50%+ total reduction
-- Includes seed tier numbers as a supplementary section
-- Includes MCP resources as a separate row for full transparency (not counted toward 50% target)
+- Keep it small — minimal before/after comparison, not a detailed report
+- Location: Claude decides best fit (could be .planning/, dev/, or alongside tests)
 
 ### Test design
-- **Method:** Read actual files from disk — SKILL.md, SKILL-SEED.md, and tool description strings from tools.ts source
+- **Method:** Read actual files from disk — SKILL.md and tool description strings from tools.ts
 - Uses `estimateTokens()` from `src/context/budget.ts` for consistent counting
-- **Location:** `src/context/__tests__/context-budget-gate.test.ts` alongside existing budget.test.ts
-- **Skill.json accuracy check:** Test also verifies that skill.json `estimatedTokens` values match actual file content (catches manifest drift)
+- **Location:** Co-located with other tests (follows existing test patterns)
+- **No skill.json accuracy check** — no deterministic way to verify estimated token counts match reality
 - Runs in CI alongside existing vitest suite — no special CI config needed
 
 ### Claude's Discretion
-- How to extract tool descriptions from tools.ts (programmatic import vs regex parsing vs AST) — pick whichever is most reliable
-- Exact tolerance for skill.json accuracy check (exact match or within a small delta)
+- How to extract tool descriptions from tools.ts (programmatic import vs regex vs AST)
 - Whether to measure tool input schemas as part of tool description token count or just the description strings
-- Measurement document prose and methodology section depth
+- Exact measurement document location and format
+- Whether to include seed tier or MCP resource numbers as supplementary data in the measurement doc
 
 </decisions>
 
@@ -51,7 +47,6 @@ Prove the v1.4 context optimization achieved 50%+ reduction with before/after me
 ## Specific Ideas
 
 - Budget gate should catch regressions automatically — if someone adds a verbose tool description or expands SKILL.md, the test fails
-- The git baseline measurement gives the most credible "before" numbers — no room for cherry-picked estimates
 
 </specifics>
 
@@ -73,7 +68,6 @@ Prove the v1.4 context optimization achieved 50%+ reduction with before/after me
 
 ### Integration Points
 - `src/mcp/tools.ts`: Tool descriptions registered via `server.registerTool()` — source of tool description tokens
-- `skills/aof/skill.json`: Token estimates must stay in sync with actual files
 - `.github/workflows/`: Existing CI runs `npm test` — budget gate test automatically included
 
 ### Pre-v1.4 Baseline References
