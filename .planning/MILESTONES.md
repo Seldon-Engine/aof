@@ -1,5 +1,23 @@
 # Milestones
 
+## v1.4 Context Optimization (Shipped: 2026-03-04)
+
+**Phases completed:** 4 phases (21-24), 6 plans, 39 commits
+**Timeline:** 2026-03-03 → 2026-03-04 (1 day)
+**Code:** +3,767 / -580 lines across 47 files (~101k LOC TypeScript)
+
+**Key accomplishments:**
+- Compressed SKILL.md from 3411 to 1665 tokens (51.2% reduction) with full tool/workflow/protocol coverage
+- Added workflow parameter to aof_dispatch for agent-composed DAG pipelines (string template, inline DAG, or false)
+- Created tiered context delivery — seed tier (563 tokens) for simple tasks, full tier (1665 tokens) for complex tasks
+- Budget gate CI test enforces 2150-token ceiling on total context injection, preventing regression
+- Seed tier achieves 82.5% reduction vs pre-v1.4 full injection
+- Consolidated projects skill into single SKILL.md injection (eliminated separate file)
+
+**Git range:** feat(21-01) → docs(v1.4 audit)
+
+---
+
 ## v1.3 Seamless Upgrade (Shipped: 2026-03-04)
 
 **Phases completed:** 4 phases (17-20), 7 plans

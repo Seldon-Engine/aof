@@ -45,20 +45,63 @@
 
 ---
 
+## Milestone: v1.4 — Context Optimization
+
+**Shipped:** 2026-03-04
+**Phases:** 4 | **Plans:** 6 | **Sessions:** ~8
+
+### What Was Built
+- Compressed SKILL.md from 3411 to 1665 tokens (51.2% reduction) covering all tools, DAG workflows, and org chart setup
+- Tiered context delivery: seed tier (563 tokens, 82.5% reduction) for simple tasks, full tier for complex tasks
+- Workflow parameter on aof_dispatch enabling agent-composed DAG pipelines via MCP tools
+- CI budget gate test enforcing 2150-token ceiling on total context injection
+- skill.json manifest with programmatic tier selection and token estimates
+
+### What Worked
+- Prerequisite audit of existing code revealed tool descriptions were already one-liners — saved an entire plan's worth of refactoring
+- Linear dependency chain (21→22→23→24) kept execution clean with no blocked phases
+- Budget gate test design (read from disk, count tokens, assert ceiling) is simple and maintainable
+- Seed tier defaulting means existing agents get context reduction without code changes
+
+### What Was Inefficient
+- Phase 22 context capture initially had wrong user decisions — required a fix commit before planning
+- Progress table in ROADMAP.md had misaligned columns for phases 22-24 (missing milestone column) — minor but required manual fix during completion
+- Nyquist validation was missing for all 4 phases (marked in audit) — not a blocker but incomplete process coverage
+
+### Patterns Established
+- Token-counting budget gate as CI regression prevention for context size
+- Tier-based context delivery pattern (seed/full) applicable to future skill additions
+- skill.json manifest as machine-readable skill metadata
+- SKILL.md compression approach: table format for tools, inline examples for patterns, no parameter tables
+
+### Key Lessons
+1. Always check existing state before planning changes — Phase 21 found tool descriptions already optimized, avoiding unnecessary work
+2. Static tiers beat dynamic selection — simpler, deterministic, no LLM overhead for tier choice
+3. Budget gates with headroom (25% above current) prevent both regression and overly-tight constraints
+
+### Cost Observations
+- Sessions: ~8 (context capture + plan + execute per phase, plus audit and completion)
+- Total execution time: ~19 min for 6 plans (avg ~3.2 min/plan)
+- Notable: Fastest milestone yet — 1 day, 4 phases, 39 commits. Context optimization is a well-scoped, low-risk workstream
+
+---
+
 ## Cross-Milestone Trends
 
-| Metric | v1.0 | v1.1 |
-|--------|------|------|
-| Phases | 3 | 6 |
-| Plans | 7 | 16 |
-| Commits | 15 | 40 |
-| Files changed | 64 | 148 |
-| Lines added | +3,527 | +7,583 |
-| Lines removed | -584 | -4,865 |
-| Avg plan duration | ~4 min | ~4.3 min |
-| Total execution | ~30 min | ~1.7 hrs |
+| Metric | v1.0 | v1.1 | v1.2 | v1.3 | v1.4 |
+|--------|------|------|------|------|------|
+| Phases | 3 | 6 | 7 | 4 | 4 |
+| Plans | 7 | 16 | 16 | 7 | 6 |
+| Commits | 15 | 40 | — | — | 39 |
+| Files changed | 64 | 148 | — | — | 47 |
+| Lines added | +3,527 | +7,583 | — | — | +3,767 |
+| Lines removed | -584 | -4,865 | — | — | -580 |
+| Avg plan duration | ~4 min | ~4.3 min | — | — | ~3.2 min |
+| Total execution | ~30 min | ~1.7 hrs | — | — | ~19 min |
 
 **Observations:**
-- Plan execution time is consistent (~4 min avg) regardless of phase complexity
-- v1.1 had 3x more deletions proportionally — cleanup and refactoring (doc restructure, dead code removal)
-- Audit-driven hotfix phases (Phase 8) are lightweight and effective for gap closure
+- Plan execution time is consistent (~3-4 min avg) regardless of phase complexity
+- v1.4 was the fastest milestone: 4 phases in a single day, avg 3.2 min/plan
+- Context optimization work is lower-risk than infrastructure changes — fewer files, more targeted edits
+- Audit-driven hotfix phases (Phase 8 in v1.1) work well for closing audit gaps without replanning
+- Budget gate pattern (CI test asserting ceiling) is reusable for other measurable constraints

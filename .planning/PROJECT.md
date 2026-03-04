@@ -56,19 +56,20 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 - ✓ UPGRADING.md with three upgrade paths + rollback docs — v1.3
 - ✓ Legacy gate system fully removed — v1.3
 
-### Current Milestone: v1.4 Context Optimization
+### Validated (v1.4)
 
-**Goal:** Cut agent context injection by 50%+ while preserving full AOF capability — agents use less context but can still leverage DAG workflows, org chart setup, and all tools effectively.
-
-**Target features:**
-- Compressed companion skill (SKILL.md cheatsheet replacing verbose docs)
-- Trimmed tool descriptions in adapter.ts (no redundancy with skill)
-- Org chart setup guidance preserved for agent-led provisioning
-- Measurable before/after token reduction
+- ✓ Compressed SKILL.md (3411 → 1665 tokens, 51.2% reduction) — v1.4
+- ✓ Tool descriptions verified as one-liner + schema (no redundancy) — v1.4
+- ✓ Projects skill merged into single SKILL.md injection — v1.4
+- ✓ Workflow parameter on aof_dispatch (string template, inline DAG, or false) — v1.4
+- ✓ Org chart setup guidance preserved in compressed skill — v1.4
+- ✓ Tiered context delivery: seed (563 tokens) and full (1665 tokens) tiers — v1.4
+- ✓ Budget gate CI test enforces 2150-token ceiling on context injection — v1.4
+- ✓ Before/after token measurement proving 50%+ reduction — v1.4
 
 ### Active
 
-(Defining requirements for v1.4)
+(None — planning next milestone)
 
 ### Validated (v1.2)
 
@@ -90,7 +91,7 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 - Non-OpenClaw runtimes — AOF is an OpenClaw plugin specifically
 - OpenTelemetry integration — deferred to v2
 - Self-healing (circuit breaker, dead-letter resurrection, stuck session recovery) — deferred to v1.5
-- Agent-guided org chart setup — addressed in v1.4 (org chart guidance in compressed skill)
+- Agent-guided org chart setup — addressed in v1.4 (org chart guidance in compressed skill, agent-led provisioning)
 - Standalone daemon executor wiring — deferred to v1.5
 - Memory search reranker — deferred to v1.5
 - Memory tier auto compaction — deferred to v2
@@ -105,14 +106,15 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 
 - AOF lives at `~/Projects/AOF/` — TypeScript project with src/, tests/, dist/
 - Source structure: cli/, dispatch/, store/, protocol/, events/, org/, memory/, schemas/, daemon/, recovery/, gateway/, plugins/
-- Builds with tsdown, tests with vitest (~90k LOC, 2400+ tests)
+- Builds with tsdown, tests with vitest (~101k LOC, 2824+ tests)
 - Runtime data lands in `~/.openclaw/aof/` (events/, tasks/, state/, memory/)
 - OpenClaw gateway is at `~/.openclaw/workspace/package/` — AOF uses its plugin-sdk export
 - The org chart (`org/org-chart.yaml`) drives all routing, memory, and agent configuration
 - v1.0 shipped: scheduler is restart-safe, daemon runs under OS supervision, gateway dispatch works via GatewayAdapter
 - v1.1 shipped: memory fixed, CI pipeline live, curl|sh installer, multi-project isolation verified, documentation complete with guardrails
-- v1.2 shipped: per-task workflow DAGs — tasks carry pipeline definitions (hops), scheduler executes DAG mechanically, replaces linear gate system. 27 requirements, 10 phases, 23 plans, ~100K LOC
+- v1.2 shipped: per-task workflow DAGs — tasks carry pipeline definitions (hops), scheduler executes DAG mechanically, replaces linear gate system
 - v1.3 shipped: seamless upgrade — migration framework, DAG-as-default, smoke tests, release pipeline, legacy gate removal
+- v1.4 shipped: context optimization — compressed SKILL.md (51% reduction), tiered delivery (seed/full), workflow API on aof_dispatch, CI budget gate
 - OpenClaw constraint: no nested agent sessions — scheduler must advance hops between independent sessions
 - Node 22 pinned as prerequisite (Node 24/25 have better-sqlite3 build failures)
 
@@ -146,6 +148,11 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 | Auto-generated CLI reference | Commander tree walk produces markdown — stays in sync with code | ✓ Good |
 | Pre-commit hook for doc maintenance | Four checks prevent drift between code and documentation | ✓ Good |
 | Product messaging: "multi-team agent orchestration platform" | Domain-agnostic positioning, not implementation-centric | ✓ Good |
+| Workflow param as z.union (string\|object\|false) | Clean polymorphic input — template name, inline DAG, or explicit skip | ✓ Good |
+| SKILL.md compression (not elimination) | Agents still need guidance for DAG workflows and org chart setup | ✓ Good (51% reduction) |
+| Static tier selection (not LLM-decided) | Deterministic, no overhead — caller specifies seed or full | ✓ Good |
+| Budget gate CI test (not manual measurement) | Automated regression prevention for context size | ✓ Good |
+| Seed tier default for dispatched tasks | Simple tasks shouldn't pay full context cost | ✓ Good (82.5% reduction for seed) |
 
 ---
-*Last updated: 2026-03-04 after v1.4 milestone started*
+*Last updated: 2026-03-04 after v1.4 milestone completion*
