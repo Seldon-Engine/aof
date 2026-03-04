@@ -1,0 +1,8 @@
+{
+  "version": "v1",
+  "name": "aof",
+  "description": "AOF agent skill — tools, DAG workflows, org chart, protocols",
+  "tags": ["orchestration", "task-management", "dag-workflows", "multi-agent"],
+  "entrypoint": "SKILL.md",
+  "estimatedTokens": 1665
+}
