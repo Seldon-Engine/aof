@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.5.0](https://github.com/d0labs/aof/compare/v1.4.0...v1.5.0) (2026-03-04)
+
+### Features
+
+* consolidate version strings and deploy skill files on setup ([cecce74](https://github.com/d0labs/aof/commit/cecce745239e51df590db984aba876163e64f9ba))
+
 ## [1.3.0](https://github.com/d0labs/aof/compare/v1.2...v1.3.0) (2026-03-04)
 
 ### Features
