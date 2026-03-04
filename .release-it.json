@@ -25,7 +25,7 @@
           { "type": "perf",     "section": "Performance" },
           { "type": "refactor", "section": "Refactor" },
           { "type": "test",     "section": "Tests" },
-          { "type": "docs",     "section": "Documentation" },
+          { "type": "docs",     "section": "Documentation", "hidden": true },
           { "type": "chore",    "section": "Chores", "hidden": true },
           { "type": "ci",       "section": "CI/CD",  "hidden": true }
         ]

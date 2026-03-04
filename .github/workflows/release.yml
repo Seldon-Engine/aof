@@ -43,35 +43,10 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
 
-      - name: Generate changelog
+      - name: Generate release notes
         id: changelog
-        shell: bash
         run: |
-          # Find the previous tag
-          PREV_TAG=$(git tag --sort=-v:refname | grep '^v' | sed -n '2p')
-          if [ -z "$PREV_TAG" ]; then
-            RANGE="HEAD"
-          else
-            RANGE="${PREV_TAG}..HEAD"
-          fi
-
-          # Build changelog grouped by conventional-commit type
-          BODY=""
-          for pair in \
-            "feat:Features" \
-            "fix:Bug Fixes" \
-            "perf:Performance" \
-            "refactor:Refactor" \
-            "test:Tests" \
-            "docs:Documentation"; do
-            type="${pair%%:*}"
-            header="${pair#*:}"
-            commits=$(git log --pretty=format:"- %s (%h)" "$RANGE" --grep="^${type}" 2>/dev/null || true)
-            if [ -n "$commits" ]; then
-              BODY="${BODY}## ${header}"$'\n'"${commits}"$'\n\n'
-            fi
-          done
-
+          BODY=$(node scripts/generate-release-notes.mjs "${{ steps.version.outputs.version }}")
           {
             echo "body<<CHANGELOG_EOF"
             echo "$BODY"
