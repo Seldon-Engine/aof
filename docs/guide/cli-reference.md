@@ -75,6 +75,7 @@ Complete command reference for the `aof` CLI, auto-generated from the Commander 
   - [`aof channel check`](#aof-channel-check)
   - [`aof channel info`](#aof-channel-info)
 - [`aof update`](#aof-update)
+- [`aof smoke`](#aof-smoke)
 - [`aof setup`](#aof-setup)
 
 ---
@@ -340,6 +341,7 @@ Create a new pending task
 | `--tags <tags>` | Comma-separated tags |  |
 | `--project <id>` | Project ID | `"_inbox"` |
 | `-w, --workflow <template>` | Workflow template name from project manifest |  |
+| `--no-workflow` | Create bare task (skip default workflow) |  |
 
 ---
 
@@ -967,6 +969,12 @@ Update AOF to latest version
 | `--rollback` | Rollback to previous version | `false` |
 | `--backup <path>` | Backup path for rollback |  |
 | `--yes` | Skip confirmation prompt | `false` |
+
+---
+
+### `aof smoke`
+
+Run post-install health checks against the AOF data directory
 
 ---
 

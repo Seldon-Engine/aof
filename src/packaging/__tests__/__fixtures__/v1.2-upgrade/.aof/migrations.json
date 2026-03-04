@@ -1,0 +1,16 @@
+{
+  "migrations": [
+    {
+      "id": "001-default-workflow-template",
+      "version": "1.3.0",
+      "description": "Add defaultWorkflow field to project manifests",
+      "appliedAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "002-gate-to-dag-batch",
+      "version": "1.3.0",
+      "description": "Batch-convert gate-based tasks to DAG workflows",
+      "appliedAt": "2026-01-01T00:00:00.000Z"
+    }
+  ]
+}

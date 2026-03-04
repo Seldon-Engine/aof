@@ -1,0 +1,22 @@
+id: demo
+title: Demo Project
+type: swe
+owner:
+  team: eng
+  lead: alice
+workflow:
+  name: standard-sdlc
+  rejectionStrategy: origin
+  gates:
+    - id: dev
+      role: swe-backend
+    - id: review
+      role: qa
+workflowTemplates:
+  standard-sdlc:
+    name: standard-sdlc
+    hops:
+      - id: dev
+        role: swe-backend
+      - id: review
+        role: qa
