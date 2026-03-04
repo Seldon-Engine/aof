@@ -98,11 +98,11 @@ Plans:
   1. `bd smoke` runs post-install health checks and reports pass/fail for version, schema, task store, org chart, migration status, and workflow templates
   2. An automated test suite exercises four upgrade scenarios (fresh install, pre-v1.2 upgrade, v1.2 upgrade, DAG-default behavior) and passes in CI
   3. A tarball verification script validates extraction, `npm ci --production`, CLI boot, version string match, and package size before any release upload
-**Plans**: TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 19-01: TBD
-- [ ] 19-02: TBD
+- [ ] 19-01-PLAN.md — aof smoke CLI command with 6 health checks (version, schema, task store, org chart, migrations, workflows)
+- [ ] 19-02-PLAN.md — Upgrade scenario test suite (4 scenarios) and tarball verification script
 
 ### Phase 20: Release Pipeline, Documentation & Release Cut
 **Goal**: v1.3.0 is tagged, built, verified, and published with upgrade documentation so users can confidently install or upgrade
@@ -141,7 +141,7 @@ Phases execute in numeric order: 17 → 18 → 19 → 20
 | 14. Templates, Ad-Hoc API, Artifacts | v1.2 | 3/3 | Complete | 2026-03-03 |
 | 15. Migration and Documentation | v1.2 | 3/3 | Complete | 2026-03-03 |
 | 16. Integration Wiring Fixes | v1.2 | 1/1 | Complete | 2026-03-03 |
-| 17. Migration Foundation & Framework Hardening | 3/3 | Complete    | 2026-03-04 | - |
-| 18. DAG-as-Default | 1/1 | Complete    | 2026-03-04 | - |
+| 17. Migration Foundation & Framework Hardening | v1.3 | 3/3 | Complete | 2026-03-04 |
+| 18. DAG-as-Default | v1.3 | 1/1 | Complete | 2026-03-04 |
 | 19. Verification & Smoke Tests | v1.3 | 0/2 | Not started | - |
 | 20. Release Pipeline, Documentation & Release Cut | v1.3 | 0/2 | Not started | - |
