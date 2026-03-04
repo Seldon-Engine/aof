@@ -66,7 +66,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md` for full details
 
 **Milestone Goal:** Cut agent context injection by 50%+ while preserving full AOF capability -- agents use less context but can still leverage DAG workflows, org chart setup, and all tools effectively.
 
-- [ ] **Phase 21: Tool & Workflow API** - Add workflow param to aof_dispatch, trim tool descriptions, merge projects skill
+- [x] **Phase 21: Tool & Workflow API** - Add workflow param to aof_dispatch, trim tool descriptions, merge projects skill (completed 2026-03-04)
 - [ ] **Phase 22: Compressed Skill** - Replace verbose agent documentation with a compact SKILL.md reflecting actual tool capabilities
 - [ ] **Phase 23: Tiered Context Delivery** - Support seed and full context tiers so simple tasks get minimal injection
 - [ ] **Phase 24: Verification & Budget Gate** - Document 50%+ token reduction and enforce a token budget ceiling in CI
@@ -83,7 +83,7 @@ See: `.planning/milestones/v1.3-ROADMAP.md` for full details
   3. Projects skill content is merged into the main SKILL.md (single file injection, not two separate files)
   4. All tool parameters and schemas remain correct -- existing tests pass, no tool functionality is broken
   5. Workflow parameter is wired through handleAofDispatch to task creation with proper validation
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 - [ ] 21-01-PLAN.md -- Trim tool descriptions, merge projects skill into main SKILL.md
 - [ ] 21-02-PLAN.md -- Add workflow parameter to aof_dispatch with template resolution and DAG validation
@@ -150,7 +150,7 @@ Phases execute in numeric order: 21 -> 22 -> 23 -> 24
 | 18. DAG-as-Default | v1.3 | 1/1 | Complete | 2026-03-04 |
 | 19. Verification & Smoke Tests | v1.3 | 2/2 | Complete | 2026-03-04 |
 | 20. Release Pipeline, Documentation & Release Cut | v1.3 | 1/1 | Complete | 2026-03-04 |
-| 21. Tool & Workflow API | 1/2 | In Progress|  | - |
+| 21. Tool & Workflow API | 2/2 | Complete   | 2026-03-04 | - |
 | 22. Compressed Skill | v1.4 | 0/? | Not started | - |
 | 23. Tiered Context Delivery | v1.4 | 0/? | Not started | - |
 | 24. Verification & Budget Gate | v1.4 | 0/? | Not started | - |
