@@ -379,6 +379,21 @@ tasks.** See [Workflow DAGs](docs/guide/workflow-dags.md) for full documentation
 
 ---
 
+## Projects
+
+AOF supports multi-project isolation with dedicated tools:
+
+- `aof_project_create` -- Create an isolated project with its own task store and memory pool
+- `aof_project_list` -- List all projects on the instance
+- `aof_project_add_participant` -- Add an agent to a project's participant list
+
+**Isolation rules:**
+- Tasks with a `project` field are stored in that project's directory; without it, global store
+- Memory is scoped per-project via the `project` parameter on memory tools
+- If participants are listed, only those agents receive tasks from that project
+
+---
+
 ## Human Operator CLI Reference
 
 **These commands are for humans, not agents.** Use for setup, debugging, and maintenance.
