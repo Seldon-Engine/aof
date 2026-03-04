@@ -85,10 +85,10 @@ Plans:
   1. `bd create "task name"` in a project with a `defaultWorkflow` configured auto-attaches that workflow template to the new task (visible in `bd get`)
   2. `bd create --no-workflow "task name"` creates a bare task with no workflow, even when the project has a `defaultWorkflow` configured
   3. `bd create "task name"` in a project without a `defaultWorkflow` creates a bare task as before (no errors, no warnings, graceful degradation)
-**Plans**: TBD
+**Plans:** 1 plan
 
 Plans:
-- [ ] 18-01: TBD
+- [ ] 18-01-PLAN.md — resolveDefaultWorkflow function, --no-workflow flag, three-way precedence in task create
 
 ### Phase 19: Verification & Smoke Tests
 **Goal**: The upgrade path is validated end-to-end by automated tests that catch regressions in migration, installation, and DAG-default behavior before release
