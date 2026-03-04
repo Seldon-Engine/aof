@@ -153,6 +153,6 @@ Phases execute in numeric order: 21 -> 22 -> 23 -> 24
 | 19. Verification & Smoke Tests | v1.3 | 2/2 | Complete | 2026-03-04 |
 | 20. Release Pipeline, Documentation & Release Cut | v1.3 | 1/1 | Complete | 2026-03-04 |
 | 21. Tool & Workflow API | v1.4 | 2/2 | Complete | 2026-03-04 |
-| 22. Compressed Skill | 1/1 | Complete   | 2026-03-04 | - |
+| 22. Compressed Skill | 1/1 | Complete    | 2026-03-04 | - |
 | 23. Tiered Context Delivery | v1.4 | 0/? | Not started | - |
 | 24. Verification & Budget Gate | v1.4 | 0/? | Not started | - |
