@@ -8,11 +8,13 @@
 
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { readFile, access, mkdir, cp, writeFile } from "node:fs/promises";
+import { readFile, access, mkdir, cp, writeFile, unlink } from "node:fs/promises";
 import type { Command } from "commander";
+import writeFileAtomic from "write-file-atomic";
 import { runWizard } from "../../packaging/wizard.js";
 import { runMigrations } from "../../packaging/migrations.js";
 import type { Migration } from "../../packaging/migrations.js";
+import { createSnapshot, restoreSnapshot, pruneSnapshots } from "../../packaging/snapshot.js";
 import {
   detectOpenClaw,
   isAofPluginRegistered,
@@ -254,19 +256,51 @@ export async function runSetup(opts: SetupOptions): Promise<void> {
     await migrateLegacyData(dataDir);
   }
 
-  // 2. If upgrade or legacy: run migrations
+  // 2. If upgrade or legacy: run migrations with snapshot wrapper
   if (upgrade || legacy) {
     const currentVersion = await readVersionFile(dataDir);
     const targetVersion = await readPackageVersion(dataDir);
     console.log(`  Running migrations (${currentVersion} -> ${targetVersion})...`);
 
-    const result = await runMigrations({
-      aofRoot: dataDir,
-      migrations: getAllMigrations(),
-      targetVersion,
-    });
+    const markerPath = join(dataDir, ".aof", "migration-in-progress");
 
-    say(`Migrations: ${result.applied.length} applied`);
+    // Check for interrupted migration marker
+    try {
+      await access(markerPath);
+      warn("Previous migration was interrupted. Re-running from clean state.");
+    } catch {
+      // No marker — normal flow
+    }
+
+    // Create pre-migration snapshot
+    const snapshotPath = await createSnapshot(dataDir);
+    say("Pre-migration snapshot created");
+
+    // Prune old snapshots (keep last 2)
+    await pruneSnapshots(dataDir, 2);
+
+    // Write in-progress marker (atomic write for crash safety)
+    await mkdir(join(dataDir, ".aof"), { recursive: true });
+    await writeFileAtomic(markerPath, new Date().toISOString());
+
+    try {
+      const result = await runMigrations({
+        aofRoot: dataDir,
+        migrations: getAllMigrations(),
+        targetVersion,
+      });
+
+      // Success: remove marker file
+      try { await unlink(markerPath); } catch { /* ignore if already gone */ }
+      say(`Migrations: ${result.applied.length} applied`);
+    } catch (error) {
+      // Failure: restore snapshot, remove marker, report error
+      err(`Migration failed: ${error instanceof Error ? error.message : String(error)}`);
+      await restoreSnapshot(dataDir, snapshotPath);
+      try { await unlink(markerPath); } catch { /* ignore if already gone */ }
+      say("Data restored from pre-migration snapshot");
+      throw error;
+    }
   }
 
   // 3. If fresh install: run wizard for workspace scaffolding
