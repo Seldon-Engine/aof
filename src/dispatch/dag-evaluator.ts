@@ -247,8 +247,9 @@ function evaluateNewlyEligibleConditions(
         completedAt: timestamp,
       };
       changes.push({ hopId: hop.id, from: "pending", to: "skipped", reason: "condition" });
-      // Cascade skips from condition-skipped hop
-      cascadeSkips(definition, state, changes, downstreamIndex, hop.id, timestamp);
+      // NOTE: condition-skipped hops do NOT cascade-skip downstream.
+      // Downstream hops treat condition-skipped predecessors as satisfied,
+      // allowing optional hops to be truly optional.
     }
   }
 }
@@ -295,12 +296,7 @@ function determineReadyHops(
         const s = state.hops[depId]?.status;
         return s === "complete" || s === "skipped";
       });
-      // Additional check: at least one predecessor completed (not ALL skipped/failed,
-      // which would have been cascade-skipped already — but defensive)
-      const hasComplete = hop.dependsOn.some(
-        (depId) => state.hops[depId]?.status === "complete",
-      );
-      if (allSatisfied && hasComplete) {
+      if (allSatisfied) {
         newlyReady.push(hop.id);
       }
     }

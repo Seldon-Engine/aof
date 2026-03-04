@@ -3,9 +3,8 @@
  */
 
 import type { ITaskStore } from "../store/interfaces.js";
-import type { TaskStatus, Task } from "../schemas/task.js";
+import type { TaskStatus } from "../schemas/task.js";
 import { compactResponse, type ToolResponseEnvelope } from "./envelope.js";
-import { handleGateTransition } from "../dispatch/gate-transition-handler.js";
 import type { ToolContext } from "./aof-tools.js";
 
 async function resolveTask(store: ITaskStore, taskId: string) {
@@ -16,94 +15,13 @@ async function resolveTask(store: ITaskStore, taskId: string) {
   throw new Error(`Task not found: ${taskId}`);
 }
 
-/**
- * Validate gate completion parameters with teaching error messages.
- * 
- * Progressive Disclosure Level 3 — when agents make mistakes, the error teaches
- * them the correct approach.
- */
-async function validateGateCompletion(
-  store: ITaskStore,
-  task: Task,
-  input: AOFTaskCompleteInput,
-): Promise<void> {
-  if (!task.frontmatter.gate) {
-    throw new Error(
-      `Task ${task.frontmatter.id} is not in a gate workflow.\n\n` +
-      `This task doesn't require outcome/blockers parameters. Use:\n` +
-      `  aofTaskComplete({ taskId: "${task.frontmatter.id}", summary: "..." })`
-    );
-  }
-
-  if (!input.outcome) {
-    throw new Error(
-      `Task ${task.frontmatter.id} is in a gate workflow (current gate: "${task.frontmatter.gate.current}").\n\n` +
-      `Gate tasks REQUIRE an 'outcome' parameter. Use:\n` +
-      `  aofTaskComplete({\n` +
-      `    taskId: "${task.frontmatter.id}",\n` +
-      `    outcome: "complete" | "needs_review" | "blocked",\n` +
-      `    summary: "..."\n` +
-      `  })\n\n` +
-      `Current gate: ${task.frontmatter.gate.current}`
-    );
-  }
-
-  const validOutcomes: string[] = ["complete", "needs_review", "blocked"];
-  if (!validOutcomes.includes(input.outcome)) {
-    throw new Error(
-      `Invalid outcome: "${input.outcome}".\n\n` +
-      `Valid outcomes for gate workflows:\n` +
-      `- "complete": Mark work done and advance to next gate\n` +
-      `- "needs_review": Request changes (requires rejectionNotes)\n` +
-      `- "blocked": Cannot proceed due to external dependency (requires blockers)\n\n` +
-      `Use:\n` +
-      `  aofTaskComplete({\n` +
-      `    taskId: "${task.frontmatter.id}",\n` +
-      `    outcome: "complete",\n` +
-      `    summary: "..."\n` +
-      `  })`
-    );
-  }
-
-  // blocked → requires blockers
-  if (input.outcome === "blocked" && (!input.blockers || input.blockers.length === 0)) {
-    throw new Error(
-      `Outcome "blocked" requires 'blockers'.\n\n` +
-      `When blocking a task, list what's preventing progress.\n\n` +
-      `Use:\n` +
-      `  aofTaskComplete({\n` +
-      `    taskId: "${task.frontmatter.id}",\n` +
-      `    outcome: "blocked",\n` +
-      `    blockers: ["Waiting for API key from platform team"],\n` +
-      `    summary: "..."\n` +
-      `  })`
-    );
-  }
-
-  // needs_review → requires blockers
-  if (input.outcome === "needs_review" && (!input.blockers || input.blockers.length === 0)) {
-    throw new Error(
-      `Outcome "needs_review" requires 'blockers' (specific issues to fix).\n\n` +
-      `Specify what needs to be fixed before this can proceed.\n\n` +
-      `Use:\n` +
-      `  aofTaskComplete({\n` +
-      `    taskId: "${task.frontmatter.id}",\n` +
-      `    outcome: "needs_review",\n` +
-      `    blockers: ["Missing error handling in auth flow"],\n` +
-      `    summary: "Waiting on fixes"\n` +
-      `  })`
-    );
-  }
-}
-
 // ===== TYPES =====
 
 /**
- * Input for completing a task, supporting both legacy and gate-workflow paths.
+ * Input for completing a task through the lifecycle completion path.
  *
- * For gate-workflow tasks, `outcome` is required and determines the gate
- * transition (complete, needs_review, blocked). For non-gate tasks, only
- * `taskId` and optionally `summary` are needed.
+ * Workflow tasks (DAG) complete through the protocol router, not this tool.
+ * This input is for non-workflow tasks only: `taskId` and optionally `summary`.
  */
 export interface AOFTaskCompleteInput {
   /** Full or prefix task ID to complete. */
@@ -112,24 +30,13 @@ export interface AOFTaskCompleteInput {
   actor?: string;
   /** Completion summary appended to the task body. */
   summary?: string;
-  /** Gate workflow outcome; required for tasks in a gate workflow. */
-  outcome?: import("../schemas/gate.js").GateOutcome;
-  /** List of blockers; required when outcome is "blocked" or "needs_review". */
+  /** @deprecated Gate workflow outcome — no longer used (DAG workflows complete via protocol router). */
+  outcome?: string;
+  /** @deprecated Gate workflow blockers — no longer used. */
   blockers?: string[];
-  /** Rejection notes explaining why review was not passed. */
+  /** @deprecated Gate workflow rejection notes — no longer used. */
   rejectionNotes?: string;
-  /**
-   * Declared role of the calling agent (e.g., "swe-architect", "swe-qa").
-   *
-   * When provided, the runtime validates this against the gate's required role
-   * and rejects the transition if they don't match. This is the primary
-   * mechanism that prevents, for example, a backend agent from approving the
-   * code-review or qa gates.
-   *
-   * Production callers (agents in the SDLC pipeline) MUST supply this field.
-   * Omitting it allows the transition without role validation (backwards-compat
-   * only — do not rely on this in new code).
-   */
+  /** @deprecated Gate workflow caller role — no longer used. */
   callerRole?: string;
 }
 
@@ -139,7 +46,7 @@ export interface AOFTaskCompleteInput {
 export interface AOFTaskCompleteResult extends ToolResponseEnvelope {
   /** The resolved task ID. */
   taskId: string;
-  /** The task's status after completion (typically "done" or a gate-dependent state). */
+  /** The task's status after completion (typically "done"). */
   status: TaskStatus;
 }
 
@@ -238,19 +145,16 @@ export interface AOFTaskUnblockResult extends ToolResponseEnvelope {
 // ===== FUNCTIONS =====
 
 /**
- * Complete a task through either the gate-workflow or legacy completion path.
+ * Complete a task through the lifecycle completion path.
  *
- * Gate-workflow tasks require an `outcome` parameter and are routed through
- * the gate transition handler, which validates the outcome, enforces role
- * requirements, and advances the gate state machine. Non-gate tasks follow
- * the legacy path: append an optional summary, then walk through the
+ * Appends an optional summary, then walks through the
  * in-progress -> review -> done lifecycle automatically.
+ * Workflow tasks (DAG) complete through the protocol router, not this tool.
  *
- * Throws if the task is already done (done-state lock) or if gate
- * validation fails (missing outcome, invalid outcome, missing blockers).
+ * Throws if the task is already done (done-state lock).
  *
  * @param ctx - Tool context providing store and logger access
- * @param input - Task ID, optional summary, and gate-workflow fields
+ * @param input - Task ID and optional summary
  * @returns The completed task's ID and final status
  */
 export async function aofTaskComplete(
@@ -270,48 +174,7 @@ export async function aofTaskComplete(
     );
   }
 
-  // AC-2: Gate workflow tasks MUST use the gate path — no legacy bypass allowed.
-  // Previously, a gate task called without `outcome` would fall through to the
-  // legacy completion path and mark the task `done` without any gate validation.
-  // Now we gate the legacy path behind `!task.frontmatter.gate`.
-  if (task.frontmatter.gate) {
-    // Gate task: always validate and use gate transition handler
-    await validateGateCompletion(ctx.store, task, input);
-
-    await handleGateTransition(
-      ctx.store,
-      ctx.logger,
-      input.taskId,
-      input.outcome!,  // validated above — will be defined
-      {
-        summary: input.summary ?? "Completed",
-        blockers: input.blockers,
-        rejectionNotes: input.rejectionNotes,
-        agent: actor,
-        callerRole: input.callerRole,
-      }
-    );
-
-    // Reload task to get updated state
-    const reloadedTask = await ctx.store.get(input.taskId);
-    if (!reloadedTask) {
-      throw new Error(`Task ${input.taskId} not found after gate transition`);
-    }
-
-    const summary = `Task ${input.taskId} transitioned through gate workflow`;
-    const envelope = compactResponse(summary, {
-      taskId: input.taskId,
-      status: reloadedTask.frontmatter.status,
-    });
-
-    return {
-      ...envelope,
-      taskId: input.taskId,
-      status: reloadedTask.frontmatter.status,
-    };
-  }
-
-  // Legacy completion path (non-gate tasks only)
+  // Completion path
   if (input.summary) {
     const body = task.body ? `${task.body}\n\n## Completion Summary\n${input.summary}` : `## Completion Summary\n${input.summary}`;
     updatedTask = await ctx.store.updateBody(task.frontmatter.id, body);

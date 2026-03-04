@@ -432,7 +432,7 @@ describe("evaluateDAG", () => {
       expect(result.state.hops.B.status).toBe("ready");
     });
 
-    it("cascades skips from condition-skipped hops downstream", () => {
+    it("does not cascade skips from condition-skipped hops — downstream proceeds", () => {
       const condDef: WorkflowDefinition = {
         name: "cond-cascade",
         hops: [
@@ -465,7 +465,9 @@ describe("evaluateDAG", () => {
       }));
 
       expect(result.state.hops.B.status).toBe("skipped");
-      expect(result.state.hops.C.status).toBe("skipped");
+      // Condition-skipped hops are treated as satisfied — C proceeds
+      expect(result.state.hops.C.status).toBe("ready");
+      expect(result.readyHops).toContain("C");
     });
 
     it("evaluates condition using live hop states", () => {

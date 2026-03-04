@@ -1,31 +1,94 @@
 /**
- * E2E Test Suite 12: Gate Validation Errors with Teaching Messages
- * 
- * Tests that invalid gate interactions return actionable, teaching error messages.
- * This is Progressive Disclosure Level 3 — when agents make mistakes, the error
- * teaches them the correct approach.
- * 
- * Error scenarios tested:
- * 1. Invalid outcome value
- * 2. Rejection at non-rejectable gate
- * 3. needs_review without rejectionNotes
- * 4. blocked without blockers
- * 5. Graceful fallback for non-workflow tasks
+ * E2E Test Suite 12: DAG Validation & Completion Behavior
+ *
+ * Tests that the DAG workflow engine handles edge cases and invalid states
+ * correctly, and that non-workflow tasks still complete normally via
+ * aofTaskComplete.
+ *
+ * Scenarios tested:
+ * 1. Rejection at non-rejectable hop — treated as completion, not rejection
+ * 2. needs_review at rejectable hop — triggers origin rejection cascade
+ * 3. Blocked outcome — maps to hop failure with downstream cascade
+ * 4. No dispatched hop — graceful no-op
+ * 5. Graceful fallback for non-workflow tasks (aofTaskComplete)
+ * 6. Non-workflow task with outcome params — graceful ignore
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { FilesystemTaskStore } from "../../../src/store/task-store.js";
+import { FilesystemTaskStore, serializeTask } from "../../../src/store/task-store.js";
 import type { ITaskStore } from "../../../src/store/interfaces.js";
 import { EventLogger } from "../../../src/events/logger.js";
 import { aofTaskComplete, type ToolContext } from "../../../src/tools/aof-tools.js";
+import { handleDAGHopCompletion } from "../../../src/dispatch/dag-transition-handler.js";
+import { initializeWorkflowState } from "../../../src/schemas/workflow-dag.js";
+import type { WorkflowDefinition, Hop } from "../../../src/schemas/workflow-dag.js";
+import type { RunResult } from "../../../src/schemas/run-result.js";
+import type { Task } from "../../../src/schemas/task.js";
 import { seedTestData, cleanupTestData } from "../utils/test-data.js";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { writeFile, mkdir } from "node:fs/promises";
+import writeFileAtomic from "write-file-atomic";
 
-const TEST_DATA_DIR = join(homedir(), ".openclaw-aof-e2e-test", "gate-validation-errors");
+const TEST_DATA_DIR = join(homedir(), ".openclaw-aof-e2e-test", "dag-validation-errors");
 
-describe("E2E: Gate Validation Errors with Teaching Messages", () => {
+/**
+ * Helper: Create a task with DAG workflow, first hop dispatched.
+ */
+async function createDAGTask(
+  store: ITaskStore,
+  definition: WorkflowDefinition,
+  opts: { initialHop?: string; tags?: string[] } = {},
+): Promise<Task> {
+  const task = await store.create({
+    title: "Test task",
+    body: "# Work",
+    createdBy: "system",
+  });
+  await store.transition(task.frontmatter.id, "ready");
+  await store.transition(task.frontmatter.id, "in-progress");
+
+  const reloaded = await store.get(task.frontmatter.id);
+  if (!reloaded) throw new Error(`Task not found after transition`);
+
+  const state = initializeWorkflowState(definition);
+  const hopId = opts.initialHop ?? definition.hops[0]!.id;
+  state.hops[hopId] = {
+    ...state.hops[hopId]!,
+    status: "dispatched",
+    startedAt: new Date().toISOString(),
+    agent: "test-agent",
+  };
+  state.status = "running";
+
+  reloaded.frontmatter.workflow = { definition, state };
+  reloaded.frontmatter.routing = {
+    role: "test-role",
+    tags: opts.tags ?? [],
+  };
+
+  const taskPath = join(
+    TEST_DATA_DIR, "tasks", reloaded.frontmatter.status, `${reloaded.frontmatter.id}.md`,
+  );
+  await writeFileAtomic(taskPath, serializeTask(reloaded));
+  return reloaded;
+}
+
+function makeRunResult(taskId: string, outcome: string, notes: string = ""): RunResult {
+  return {
+    taskId,
+    agentId: "test-agent",
+    completedAt: new Date().toISOString(),
+    outcome: outcome as any,
+    summaryRef: "summary.md",
+    handoffRef: "handoff.md",
+    deliverables: [],
+    tests: { passed: 1, failed: 0, total: 1 },
+    blockers: [],
+    notes,
+  };
+}
+
+describe("E2E: DAG Validation & Completion Behavior", () => {
   let store: ITaskStore;
   let logger: EventLogger;
   let ctx: ToolContext;
@@ -42,239 +105,95 @@ describe("E2E: Gate Validation Errors with Teaching Messages", () => {
     await cleanupTestData(TEST_DATA_DIR);
   });
 
-  describe("Scenario 1: Invalid outcome value", () => {
-    it("should provide teaching error for invalid outcome", async () => {
-      const task = await store.create({
-        title: "Test task",
-        body: "# Work",
-        createdBy: "system",
-      });
-      await store.transition(task.frontmatter.id, "ready");
-      await store.transition(task.frontmatter.id, "in-progress");
+  describe("Scenario 1: Rejection at non-rejectable hop", () => {
+    it("should treat needs_review as completion when canReject is false", async () => {
+      const definition: WorkflowDefinition = {
+        name: "simple-workflow",
+        hops: [
+          { id: "ready-check", role: "swe-backend", dependsOn: [], autoAdvance: true },
+          { id: "qa", role: "swe-qa", dependsOn: ["ready-check"], canReject: true, autoAdvance: true },
+        ] as Hop[],
+      };
 
-      // Create a simple workflow
-      const projectYaml = `
-id: test
-title: Test Project
-type: swe
-status: active
-owner:
-  team: eng
-  lead: test-agent
-workflow:
-  name: simple-workflow
-  gates:
-    - id: dev
-      role: swe-backend
-      canReject: false
-`;
-      await mkdir(join(TEST_DATA_DIR, ".git"), { recursive: true });
-      await writeFile(join(TEST_DATA_DIR, "project.yaml"), projectYaml);
+      const task = await createDAGTask(store, definition);
+      const runResult = makeRunResult(task.frontmatter.id, "needs_review", "Some feedback");
 
-      // Add gate to task
-      task.frontmatter.gate = { current: "dev", entered: new Date().toISOString() };
-      task.frontmatter.routing = { role: "swe-backend", workflow: "simple-workflow" };
-      const { serializeTask } = await import("../../../src/store/task-store.js");
-      const writeFileAtomic = (await import("write-file-atomic")).default;
-      const taskPath = join(TEST_DATA_DIR, "tasks", task.frontmatter.status, `${task.frontmatter.id}.md`);
-      await writeFileAtomic(taskPath, serializeTask(task));
+      // On a non-rejectable hop, needs_review maps to "complete" (not "rejected")
+      const result = await handleDAGHopCompletion(store, logger, task, runResult);
 
-      // Try to complete with invalid outcome
-      await expect(
-        aofTaskComplete(ctx, {
-          taskId: task.frontmatter.id,
-          actor: "test-agent",
-          summary: "Done",
-          outcome: "done" as any, // Invalid outcome
-        })
-      ).rejects.toThrow(/Invalid outcome: "done"/);
-
-      await expect(
-        aofTaskComplete(ctx, {
-          taskId: task.frontmatter.id,
-          actor: "test-agent",
-          summary: "Done",
-          outcome: "done" as any,
-        })
-      ).rejects.toThrow(/Valid outcomes for gate workflows/);
-
-      await expect(
-        aofTaskComplete(ctx, {
-          taskId: task.frontmatter.id,
-          actor: "test-agent",
-          summary: "Done",
-          outcome: "done" as any,
-        })
-      ).rejects.toThrow(/outcome: "complete"/);
+      const updated = await store.get(task.frontmatter.id);
+      // ready-check completes (needs_review treated as complete since canReject=false)
+      expect(updated?.frontmatter.workflow?.state.hops["ready-check"]?.status).toBe("complete");
+      // qa should be the next hop
+      expect(result.readyHops).toContain("qa");
     });
   });
 
-  describe("Scenario 2: Rejection at non-rejectable gate", () => {
-    it("should provide teaching error when trying to reject at canReject=false gate", async () => {
-      const task = await store.create({
-        title: "Test task",
-        body: "# Work",
-        createdBy: "system",
-      });
-      await store.transition(task.frontmatter.id, "ready");
-      await store.transition(task.frontmatter.id, "in-progress");
+  describe("Scenario 2: Rejection at rejectable hop triggers origin cascade", () => {
+    it("should reset all hops when needs_review on canReject=true hop", async () => {
+      const definition: WorkflowDefinition = {
+        name: "simple-workflow",
+        hops: [
+          { id: "dev", role: "swe-backend", dependsOn: [], autoAdvance: true },
+          { id: "qa", role: "swe-qa", dependsOn: ["dev"], canReject: true, rejectionStrategy: "origin", autoAdvance: true },
+        ] as Hop[],
+      };
 
-      // Create workflow with non-rejectable gate
-      const projectYaml = `
-id: test
-title: Test Project
-type: swe
-status: active
-owner:
-  team: eng
-  lead: test-agent
-workflow:
-  name: simple-workflow
-  gates:
-    - id: ready-check
-      role: swe-backend
-      canReject: false
-    - id: qa
-      role: swe-qa
-      canReject: true
-`;
-      await mkdir(join(TEST_DATA_DIR, ".git"), { recursive: true });
-      await writeFile(join(TEST_DATA_DIR, "project.yaml"), projectYaml);
+      // Start at qa hop (dev already completed)
+      const task = await createDAGTask(store, definition, { initialHop: "qa" });
+      // Set dev to complete
+      task.frontmatter.workflow!.state.hops["dev"] = {
+        ...task.frontmatter.workflow!.state.hops["dev"]!,
+        status: "complete",
+        completedAt: new Date().toISOString(),
+      };
+      await writeFileAtomic(task.path!, serializeTask(task));
 
-      // Add gate to task
-      task.frontmatter.gate = { current: "ready-check", entered: new Date().toISOString() };
-      task.frontmatter.routing = { role: "swe-backend", workflow: "simple-workflow" };
-      const { serializeTask } = await import("../../../src/store/task-store.js");
-      const writeFileAtomic = (await import("write-file-atomic")).default;
-      const taskPath = join(TEST_DATA_DIR, "tasks", task.frontmatter.status, `${task.frontmatter.id}.md`);
-      await writeFileAtomic(taskPath, serializeTask(task));
+      const runResult = makeRunResult(task.frontmatter.id, "needs_review", "Issues found");
 
-      // canReject: false is now strictly enforced by the runtime.
-      // Attempting needs_review on a gate with canReject: false must throw.
-      await expect(
-        aofTaskComplete(ctx, {
-          taskId: task.frontmatter.id,
-          actor: "test-agent",
-          summary: "Rejecting",
-          outcome: "needs_review",
-          blockers: ["Issue found"],
-          rejectionNotes: "Please fix",
-        })
-      ).rejects.toThrow(/does not allow rejections.*canReject: false/i);
+      const result = await handleDAGHopCompletion(store, logger, task, runResult);
+
+      const updated = await store.get(task.frontmatter.id);
+      // Origin rejection: dev reset to ready, qa reset to pending
+      expect(updated?.frontmatter.workflow?.state.hops["dev"]?.status).toBe("ready");
+      expect(updated?.frontmatter.workflow?.state.hops["qa"]?.status).toBe("pending");
+      expect(updated?.frontmatter.workflow?.state.hops["qa"]?.rejectionCount).toBe(1);
+      expect(result.readyHops).toContain("dev");
     });
   });
 
-  describe("Scenario 3: needs_review without rejectionNotes", () => {
-    it("should provide teaching error when rejectionNotes is missing", async () => {
-      const task = await store.create({
-        title: "Test task",
-        body: "# Work",
-        createdBy: "system",
-      });
-      await store.transition(task.frontmatter.id, "ready");
-      await store.transition(task.frontmatter.id, "in-progress");
+  describe("Scenario 3: Blocked outcome maps to hop failure", () => {
+    it("should mark hop as failed and cascade skips downstream", async () => {
+      const definition: WorkflowDefinition = {
+        name: "simple-workflow",
+        hops: [
+          { id: "dev", role: "swe-backend", dependsOn: [], autoAdvance: true },
+          { id: "deploy", role: "swe-devops", dependsOn: ["dev"], autoAdvance: true },
+        ] as Hop[],
+      };
 
-      // Create workflow with rejectable gate
-      const projectYaml = `
-id: test
-title: Test Project
-type: swe
-status: active
-owner:
-  team: eng
-  lead: test-agent
-workflow:
-  name: simple-workflow
-  gates:
-    - id: dev
-      role: swe-backend
-      canReject: false
-    - id: qa
-      role: swe-qa
-      canReject: true
-`;
-      await mkdir(join(TEST_DATA_DIR, ".git"), { recursive: true });
-      await writeFile(join(TEST_DATA_DIR, "project.yaml"), projectYaml);
+      const task = await createDAGTask(store, definition);
+      const runResult = makeRunResult(task.frontmatter.id, "blocked", "Waiting on infra");
 
-      // Add gate to task
-      task.frontmatter.gate = { current: "qa", entered: new Date().toISOString() };
-      task.frontmatter.routing = { role: "swe-qa", workflow: "simple-workflow" };
-      const { serializeTask } = await import("../../../src/store/task-store.js");
-      const writeFileAtomic = (await import("write-file-atomic")).default;
-      const taskPath = join(TEST_DATA_DIR, "tasks", task.frontmatter.status, `${task.frontmatter.id}.md`);
-      await writeFileAtomic(taskPath, serializeTask(task));
+      const result = await handleDAGHopCompletion(store, logger, task, runResult);
 
-      // NOTE: The current implementation does NOT require rejectionNotes for needs_review.
-      // Only blockers are validated. A needs_review with valid blockers and no rejectionNotes
-      // succeeds — the task loops back to the first gate (origin rejection strategy).
-      const result = await aofTaskComplete(ctx, {
-        taskId: task.frontmatter.id,
-        actor: "test-agent",
-        summary: "Found issues",
-        outcome: "needs_review",
-        blockers: ["Missing tests"],
-        // rejectionNotes missing — allowed by current validation
-      });
-
-      // Task transitions back to first gate (dev) with reviewContext
-      expect(result.taskId).toBe(task.frontmatter.id);
-    });
-
-    it("should accept needs_review with empty/whitespace rejectionNotes (not validated)", async () => {
-      const task = await store.create({
-        title: "Test task",
-        body: "# Work",
-        createdBy: "system",
-      });
-      await store.transition(task.frontmatter.id, "ready");
-      await store.transition(task.frontmatter.id, "in-progress");
-
-      // Use a valid two-gate workflow (first gate cannot have canReject=true)
-      const projectYaml = `
-id: test
-title: Test Project
-type: swe
-status: active
-owner:
-  team: eng
-  lead: test-agent
-workflow:
-  name: simple-workflow
-  gates:
-    - id: dev
-      role: swe-backend
-      canReject: false
-    - id: qa
-      role: swe-qa
-      canReject: true
-`;
-      await mkdir(join(TEST_DATA_DIR, ".git"), { recursive: true });
-      await writeFile(join(TEST_DATA_DIR, "project.yaml"), projectYaml);
-
-      task.frontmatter.gate = { current: "qa", entered: new Date().toISOString() };
-      task.frontmatter.routing = { role: "swe-qa", workflow: "simple-workflow" };
-      const { serializeTask } = await import("../../../src/store/task-store.js");
-      const writeFileAtomic = (await import("write-file-atomic")).default;
-      const taskPath = join(TEST_DATA_DIR, "tasks", task.frontmatter.status, `${task.frontmatter.id}.md`);
-      await writeFileAtomic(taskPath, serializeTask(task));
-
-      // NOTE: The current implementation does NOT validate that rejectionNotes is non-empty.
-      // A whitespace-only rejectionNotes is accepted — it is stored in reviewContext.notes as-is.
-      const result = await aofTaskComplete(ctx, {
-        taskId: task.frontmatter.id,
-        actor: "test-agent",
-        summary: "Found issues",
-        outcome: "needs_review",
-        blockers: ["Missing tests"],
-        rejectionNotes: "   ", // Only whitespace — accepted by current validation
-      });
-
-      expect(result.taskId).toBe(task.frontmatter.id);
+      const updated = await store.get(task.frontmatter.id);
+      // Blocked maps to "failed"
+      expect(updated?.frontmatter.workflow?.state.hops["dev"]?.status).toBe("failed");
+      // deploy cascaded to skipped
+      expect(updated?.frontmatter.workflow?.state.hops["deploy"]?.status).toBe("skipped");
     });
   });
 
-  describe("Scenario 4: blocked without blockers", () => {
-    it("should provide teaching error when blockers array is missing", async () => {
+  describe("Scenario 4: No dispatched hop — graceful no-op", () => {
+    it("should return empty result when no hop is dispatched", async () => {
+      const definition: WorkflowDefinition = {
+        name: "simple-workflow",
+        hops: [
+          { id: "dev", role: "swe-backend", dependsOn: [], autoAdvance: true },
+        ] as Hop[],
+      };
+
       const task = await store.create({
         title: "Test task",
         body: "# Work",
@@ -283,96 +202,24 @@ workflow:
       await store.transition(task.frontmatter.id, "ready");
       await store.transition(task.frontmatter.id, "in-progress");
 
-      const projectYaml = `
-id: test
-title: Test Project
-type: swe
-status: active
-owner:
-  team: eng
-  lead: test-agent
-workflow:
-  name: simple-workflow
-  gates:
-    - id: dev
-      role: swe-backend
-      canReject: false
-`;
-      await mkdir(join(TEST_DATA_DIR, ".git"), { recursive: true });
-      await writeFile(join(TEST_DATA_DIR, "project.yaml"), projectYaml);
+      const reloaded = await store.get(task.frontmatter.id);
+      if (!reloaded) throw new Error("Task not found");
 
-      task.frontmatter.gate = { current: "dev", entered: new Date().toISOString() };
-      task.frontmatter.routing = { role: "swe-backend", workflow: "simple-workflow" };
-      const { serializeTask } = await import("../../../src/store/task-store.js");
-      const writeFileAtomic = (await import("write-file-atomic")).default;
-      const taskPath = join(TEST_DATA_DIR, "tasks", task.frontmatter.status, `${task.frontmatter.id}.md`);
-      await writeFileAtomic(taskPath, serializeTask(task));
+      // Set workflow with dev=ready (NOT dispatched)
+      const state = initializeWorkflowState(definition);
+      reloaded.frontmatter.workflow = { definition, state };
+      const taskPath = join(
+        TEST_DATA_DIR, "tasks", reloaded.frontmatter.status, `${reloaded.frontmatter.id}.md`,
+      );
+      await writeFileAtomic(taskPath, serializeTask(reloaded));
 
-      // Try blocked without blockers
-      await expect(
-        aofTaskComplete(ctx, {
-          taskId: task.frontmatter.id,
-          actor: "test-agent",
-          summary: "Blocked on dependency",
-          outcome: "blocked",
-          // blockers missing
-        })
-      ).rejects.toThrow(/Outcome "blocked" requires 'blockers'/);
+      const runResult = makeRunResult(reloaded.frontmatter.id, "done");
 
-      await expect(
-        aofTaskComplete(ctx, {
-          taskId: task.frontmatter.id,
-          actor: "test-agent",
-          summary: "Blocked on dependency",
-          outcome: "blocked",
-        })
-      ).rejects.toThrow(/list what's preventing progress/);
-    });
+      const result = await handleDAGHopCompletion(store, logger, reloaded, runResult);
 
-    it("should provide teaching error when blockers array is empty", async () => {
-      const task = await store.create({
-        title: "Test task",
-        body: "# Work",
-        createdBy: "system",
-      });
-      await store.transition(task.frontmatter.id, "ready");
-      await store.transition(task.frontmatter.id, "in-progress");
-
-      const projectYaml = `
-id: test
-title: Test Project
-type: swe
-status: active
-owner:
-  team: eng
-  lead: test-agent
-workflow:
-  name: simple-workflow
-  gates:
-    - id: dev
-      role: swe-backend
-      canReject: false
-`;
-      await mkdir(join(TEST_DATA_DIR, ".git"), { recursive: true });
-      await writeFile(join(TEST_DATA_DIR, "project.yaml"), projectYaml);
-
-      task.frontmatter.gate = { current: "dev", entered: new Date().toISOString() };
-      task.frontmatter.routing = { role: "swe-backend", workflow: "simple-workflow" };
-      const { serializeTask } = await import("../../../src/store/task-store.js");
-      const writeFileAtomic = (await import("write-file-atomic")).default;
-      const taskPath = join(TEST_DATA_DIR, "tasks", task.frontmatter.status, `${task.frontmatter.id}.md`);
-      await writeFileAtomic(taskPath, serializeTask(task));
-
-      // Empty blockers array should fail
-      await expect(
-        aofTaskComplete(ctx, {
-          taskId: task.frontmatter.id,
-          actor: "test-agent",
-          summary: "Blocked on dependency",
-          outcome: "blocked",
-          blockers: [], // Empty array
-        })
-      ).rejects.toThrow(/Outcome "blocked" requires 'blockers'/);
+      // No dispatched hop → graceful no-op
+      expect(result.readyHops).toHaveLength(0);
+      expect(result.dagComplete).toBe(false);
     });
   });
 
@@ -387,7 +234,7 @@ workflow:
       await store.transition(task.frontmatter.id, "in-progress");
       await store.transition(task.frontmatter.id, "review");
 
-      // No gate workflow, but agent sends outcome
+      // No DAG workflow, but agent sends outcome
       // Should gracefully ignore outcome and complete normally
       const result = await aofTaskComplete(ctx, {
         taskId: task.frontmatter.id,
