@@ -245,6 +245,12 @@ export async function runSkillStep(state: WizardState, yes: boolean): Promise<vo
     console.log("✅ AOF companion skill already installed — skipping.\n");
     state.skillInstalled = true;
     state.skipped.push("Companion skill (already installed)");
+
+    // Ensure seed file is up to date even if main skill already installed
+    const seedSrc = join(PKG_ROOT, "skills", "aof", "SKILL-SEED.md");
+    const seedDest = join(homedir(), ".openclaw", "skills", "aof", "SKILL-SEED.md");
+    try { await copyFile(seedSrc, seedDest); } catch { /* seed is optional */ }
+
     return;
   } catch {
     // Not installed yet
@@ -269,6 +275,15 @@ export async function runSkillStep(state: WizardState, yes: boolean): Promise<vo
     await copyFile(skillSrc, skillDest);
     state.skillInstalled = true;
     console.log(`  ✅ Skill installed at ${skillDest}\n`);
+
+    // Also copy seed skill for tiered context delivery
+    const seedSrc = join(PKG_ROOT, "skills", "aof", "SKILL-SEED.md");
+    const seedDest = join(homedir(), ".openclaw", "skills", "aof", "SKILL-SEED.md");
+    try {
+      await copyFile(seedSrc, seedDest);
+    } catch {
+      // Seed skill is optional -- don't fail installation if missing
+    }
   } catch (err) {
     state.warnings.push(
       `Skill installation failed: ${err instanceof Error ? err.message : String(err)}`,
