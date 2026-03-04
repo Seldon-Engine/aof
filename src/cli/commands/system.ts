@@ -16,6 +16,7 @@ import {
   registerChannelCommands,
   registerUpdateCommand,
 } from "./system-commands.js";
+import { registerSmokeCommand } from "./smoke.js";
 
 /**
  * Register all system-related commands with the Commander program.
@@ -31,4 +32,7 @@ export function registerSystemCommands(program: Command): void {
   registerDepsCommands(program);
   registerChannelCommands(program);
   registerUpdateCommand(program);
+
+  // Verification
+  registerSmokeCommand(program);
 }
