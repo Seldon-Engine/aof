@@ -1,75 +1,54 @@
-# Requirements: AOF v1.3 Seamless Upgrade
+# Requirements: AOF
 
 **Defined:** 2026-03-03
-**Core Value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
+**Core Value:** Tasks never get dropped — they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
 
-## v1.3 Requirements
+## v1.4 Requirements
 
-Requirements for the seamless upgrade milestone. Each maps to roadmap phases.
+Requirements for Context Optimization milestone. Each maps to roadmap phases.
 
-### Migration Framework
+### Skill Compression
 
-- [x] **MIGR-01**: Migration framework uses atomic writes (write-file-atomic) for all file mutations
-- [x] **MIGR-02**: Migration framework tracks in-progress state so interrupted migrations can be detected and resumed
-- [x] **MIGR-03**: Pre-migration snapshot captures full data directory before any migration runs, restores on failure
-- [x] **MIGR-04**: YAML config modifications preserve user comments and formatting (parseDocument API)
-- [x] **MIGR-05**: `schemaVersion` relaxed from `z.literal(1)` to support version 2 for migration versioning
+- [ ] **SKILL-01**: Agent receives a compact cheatsheet SKILL.md (~150 lines) covering all tools, workflows, and protocols without verbose examples
+- [ ] **SKILL-02**: CLI reference section removed from SKILL.md (agents don't run CLI commands)
+- [ ] **SKILL-03**: Notification events table removed from SKILL.md (agents emit events via tools, don't need full table)
+- [ ] **SKILL-04**: Verbose YAML org chart examples replaced with minimal inline examples
+- [ ] **SKILL-05**: Parameter tables removed from SKILL.md (tool JSON schemas provide this)
+- [ ] **SKILL-06**: Org chart setup guidance preserved in compressed skill for agent-led provisioning
+- [ ] **SKILL-07**: Context injection supports tiered delivery (seed tier for simple tasks, full tier for complex tasks)
 
-### Config Migration
+### Tool Descriptions
 
-- [x] **CONF-01**: Migration 001 adds `defaultWorkflow` field to project.yaml pointing to a sensible workflow template
-- [x] **CONF-02**: Migration 002 batch-converts all gate-based tasks to DAG workflows eagerly across all status directories
-- [x] **CONF-03**: Migration 003 writes version metadata to `.aof/channel.json` for upgrade tracking
-- [x] **CONF-04**: Migrations are wired into `setup.ts` `getAllMigrations()` and run automatically during installer upgrade
+- [ ] **TOOL-01**: Tool descriptions in tools.ts reduced to schema + one-liner (no inline examples or redundant parameter docs)
+- [ ] **TOOL-02**: Projects skill merged into main compressed skill (single file)
+- [ ] **TOOL-03**: No functionality lost — all tool parameters and schemas remain correct after trimming
 
-### Bug Fixes
+### Measurement
 
-- [x] **BUGF-01**: `getByPrefix()` in task-store runs gate-to-DAG migration (same as `get()` and `list()`)
-- [x] **BUGF-02**: Installer backup scope includes `Projects/` directory tree (not just flat v1.0 data dirs)
-
-### DAG Default
-
-- [x] **DAGD-01**: `bd create` auto-attaches the project's `defaultWorkflow` template when no `--workflow` flag is specified
-- [x] **DAGD-02**: `--no-workflow` flag on `bd create` allows opting out of the default workflow for bare tasks
-- [x] **DAGD-03**: Tasks created without a configured `defaultWorkflow` continue to work as bare tasks (graceful degradation)
-
-### Verification
-
-- [x] **VERF-01**: `bd smoke` command runs post-install health checks (version, schema, task store, org chart, migration status, workflow templates)
-- [x] **VERF-02**: Upgrade smoke test suite validates fresh install, pre-v1.2 upgrade, v1.2 upgrade, and DAG default scenarios
-- [x] **VERF-03**: Tarball verification script validates extraction, `npm ci --production`, CLI boot, version match, and size check before release upload
-
-### Release
-
-- [x] **RELS-01**: Release pipeline runs smoke tests between tarball build and GitHub Releases upload
-- [x] **RELS-02**: UPGRADING.md documents what changed, prerequisites, step-by-step upgrade, verification commands, and rollback via backup restore
-- [x] **RELS-03**: v1.3.0 release tagged and published with installer-downloadable tarball
+- [ ] **MEAS-01**: Before/after token count documented proving 50%+ total context reduction
+- [ ] **MEAS-02**: Automated test fails if total context injection exceeds defined token budget
 
 ## Future Requirements
 
-Deferred to v1.4+. Tracked but not in current roadmap.
+### Self-Healing (deferred to v1.5)
 
-### Rollback CLI
+- **HEAL-01**: Circuit breaker for repeated agent failures
+- **HEAL-02**: Dead-letter resurrection with retry policy
+- **HEAL-03**: Stuck session recovery
 
-- **ROLL-01**: `bd rollback` command lists available backups and restores a selected one
-- **ROLL-02**: Automatic daemon stop/start around upgrade process
+### Observability (deferred to v2)
 
-### Upgrade UX
-
-- **UPGR-01**: `install.sh --dry-run` shows what would change without modifying anything
-- **UPGR-02**: `bd migrations` command shows migration history and pending migrations
-- **UPGR-03**: Automatic daemon restart after successful upgrade
+- **OBS-01**: OpenTelemetry integration
+- **OBS-02**: Basic telemetry collection
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| Auto-update mechanism | Deferred to v2 per PROJECT.md |
-| In-place binary replacement | Impossible for Node.js runtime |
-| Backward gate-from-DAG conversion | Rollback restores from backup instead |
-| Multi-version coexistence | Rollback is the mechanism |
-| Interactive migration wizard | Migrations must be automatic and deterministic |
-| Dynamic workflow template variables | Deferred to v2 -- adds complexity for marginal value |
+| Dynamic context based on task content | Over-engineering for v1.4 — static tiers sufficient |
+| Per-agent skill customization | All agents use same tools — one skill fits all |
+| MCP resource description trimming | Already minimal (~1KB), not worth optimizing |
+| Skill versioning / migration | Single file replacement, no migration needed |
 
 ## Traceability
 
@@ -77,32 +56,24 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| MIGR-01 | Phase 17 | Complete |
-| MIGR-02 | Phase 17 | Complete |
-| MIGR-03 | Phase 17 | Complete |
-| MIGR-04 | Phase 17 | Complete |
-| MIGR-05 | Phase 17 | Complete |
-| CONF-01 | Phase 17 | Complete |
-| CONF-02 | Phase 17 | Complete |
-| CONF-03 | Phase 17 | Complete |
-| CONF-04 | Phase 17 | Complete |
-| BUGF-01 | Phase 17 | Complete |
-| BUGF-02 | Phase 17 | Complete |
-| DAGD-01 | Phase 18 | Complete |
-| DAGD-02 | Phase 18 | Complete |
-| DAGD-03 | Phase 18 | Complete |
-| VERF-01 | Phase 19 | Complete |
-| VERF-02 | Phase 19 | Complete |
-| VERF-03 | Phase 19 | Complete |
-| RELS-01 | Phase 20 | Complete |
-| RELS-02 | Phase 20 | Complete |
-| RELS-03 | Phase 20 | Complete |
+| SKILL-01 | — | Pending |
+| SKILL-02 | — | Pending |
+| SKILL-03 | — | Pending |
+| SKILL-04 | — | Pending |
+| SKILL-05 | — | Pending |
+| SKILL-06 | — | Pending |
+| SKILL-07 | — | Pending |
+| TOOL-01 | — | Pending |
+| TOOL-02 | — | Pending |
+| TOOL-03 | — | Pending |
+| MEAS-01 | — | Pending |
+| MEAS-02 | — | Pending |
 
 **Coverage:**
-- v1.3 requirements: 20 total
-- Mapped to phases: 20
-- Unmapped: 0
+- v1.4 requirements: 12 total
+- Mapped to phases: 0
+- Unmapped: 12 ⚠️
 
 ---
 *Requirements defined: 2026-03-03*
-*Last updated: 2026-03-03 after roadmap creation*
+*Last updated: 2026-03-03 after initial definition*
