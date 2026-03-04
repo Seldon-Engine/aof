@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Seamless Upgrade
 status: executing
-stopped_at: Phase 19 context gathered
-last_updated: "2026-03-04T01:28:38.203Z"
-last_activity: 2026-03-04 -- Completed plan 18-01 (default workflow auto-attachment)
+stopped_at: Completed 19-01-PLAN.md
+last_updated: "2026-03-04T01:49:52.239Z"
+last_activity: 2026-03-04 -- Completed plan 19-01 (smoke check CLI command)
 progress:
   total_phases: 4
   completed_phases: 2
-  total_plans: 4
-  completed_plans: 4
-  percent: 50
+  total_plans: 6
+  completed_plans: 5
+  percent: 83
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-03)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** v1.3 Seamless Upgrade -- Phase 18 complete
+**Current focus:** v1.3 Seamless Upgrade -- Phase 19 in progress
 
 ## Current Position
 
-Phase: 18 of 20 (DAG-as-Default) -- COMPLETE
-Plan: 1 of 1 (all plans completed)
+Phase: 19 of 20 (Verification & Smoke Tests)
+Plan: 1 of 2 (19-01 complete)
 Status: Executing
-Last activity: 2026-03-04 -- Completed plan 18-01 (default workflow auto-attachment)
+Last activity: 2026-03-04 -- Completed plan 19-01 (smoke check CLI command)
 
-Progress: [#####░░░░░] 50%
+Progress: [████████░░] 83%
 
 ## Performance Metrics
 
@@ -44,6 +44,7 @@ Progress: [#####░░░░░] 50%
 | 17-02 | 1 | 5min | 5min |
 | 17-03 | 1 | 4min | 4min |
 | 18-01 | 1 | 5min | 5min |
+| 19-01 | 1 | 4min | 4min |
 
 ## Accumulated Context
 
@@ -58,6 +59,9 @@ All prior decisions logged in PROJECT.md Key Decisions table.
 - [Phase 18]: resolveDefaultWorkflow returns undefined (never throws) for all failure cases -- graceful degradation
 - [Phase 18]: Stale defaultWorkflow references warn to stderr and fall back to bare task
 - [Phase 18]: Output annotates default workflows with (default) suffix for user clarity
+- [Phase 19]: Inlined version read instead of importing private readPackageVersion from setup.ts
+- [Phase 19]: Each smoke check runs independently -- one failure does not prevent others
+- [Phase 19]: Org chart and Projects directory treated as optional (pass when absent)
 
 ### Roadmap Evolution
 
@@ -76,6 +80,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-04T01:28:38.199Z
-Stopped at: Phase 19 context gathered
-Resume file: .planning/phases/19-verification-smoke-tests/19-CONTEXT.md
+Last session: 2026-03-04T01:49:52.235Z
+Stopped at: Completed 19-01-PLAN.md
+Resume file: None
