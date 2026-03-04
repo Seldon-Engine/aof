@@ -207,18 +207,26 @@ describe("Context Resolvers", () => {
       await mkdir(skillsDir, { recursive: true });
     });
 
-    async function createSkill(name: string, entryContent: string, entrypoint = "SKILL.md") {
+    async function createSkill(
+      name: string,
+      entryContent: string,
+      entrypoint = "SKILL.md",
+      tiers?: Record<string, { entrypoint: string; estimatedTokens?: number }>,
+    ) {
       const skillDir = join(skillsDir, name);
       await mkdir(skillDir, { recursive: true });
-      
-      const manifest = {
+
+      const manifest: Record<string, unknown> = {
         version: "v1",
         name,
         description: `${name} skill`,
         tags: ["test"],
         entrypoint,
       };
-      
+      if (tiers) {
+        manifest.tiers = tiers;
+      }
+
       await writeFile(join(skillDir, "skill.json"), JSON.stringify(manifest), "utf-8");
       await writeFile(join(skillDir, entrypoint), entryContent, "utf-8");
     }
@@ -317,6 +325,74 @@ describe("Context Resolvers", () => {
       
       const skillContent = await chain.resolve("skill:chain-test");
       expect(skillContent).toContain("Chain Test");
+    });
+
+    it("resolves seed tier from tiers field", async () => {
+      const skillDir = join(skillsDir, "tiered");
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(join(skillDir, "SKILL-SEED.md"), "# Seed Content", "utf-8");
+
+      await createSkill("tiered", "# Full Content", "SKILL.md", {
+        seed: { entrypoint: "SKILL-SEED.md", estimatedTokens: 100 },
+        full: { entrypoint: "SKILL.md", estimatedTokens: 500 },
+      });
+
+      const { SkillResolver } = await import("../resolvers.js");
+      const resolver = new SkillResolver(skillsDir);
+
+      const content = await resolver.resolve("skill:tiered", "seed");
+      expect(content).toBe("# Seed Content");
+    });
+
+    it("resolves full tier from tiers field", async () => {
+      const skillDir = join(skillsDir, "tiered-full");
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(join(skillDir, "SKILL-SEED.md"), "# Seed", "utf-8");
+
+      await createSkill("tiered-full", "# Full Content Here", "SKILL.md", {
+        seed: { entrypoint: "SKILL-SEED.md", estimatedTokens: 100 },
+        full: { entrypoint: "SKILL.md", estimatedTokens: 500 },
+      });
+
+      const { SkillResolver } = await import("../resolvers.js");
+      const resolver = new SkillResolver(skillsDir);
+
+      const content = await resolver.resolve("skill:tiered-full", "full");
+      expect(content).toBe("# Full Content Here");
+    });
+
+    it("falls back to main entrypoint when tier not found in tiers", async () => {
+      await createSkill("fallback-tier", "# Main Content", "SKILL.md", {
+        seed: { entrypoint: "SKILL-SEED.md", estimatedTokens: 100 },
+      });
+
+      const { SkillResolver } = await import("../resolvers.js");
+      const resolver = new SkillResolver(skillsDir);
+
+      const content = await resolver.resolve("skill:fallback-tier", "nonexistent");
+      expect(content).toBe("# Main Content");
+    });
+
+    it("falls back to main entrypoint when manifest has no tiers", async () => {
+      await createSkill("no-tiers", "# No Tiers Content");
+
+      const { SkillResolver } = await import("../resolvers.js");
+      const resolver = new SkillResolver(skillsDir);
+
+      const content = await resolver.resolve("skill:no-tiers", "seed");
+      expect(content).toBe("# No Tiers Content");
+    });
+
+    it("resolves without tier parameter (backward compat)", async () => {
+      await createSkill("compat", "# Compatible Content", "SKILL.md", {
+        seed: { entrypoint: "SKILL-SEED.md", estimatedTokens: 100 },
+      });
+
+      const { SkillResolver } = await import("../resolvers.js");
+      const resolver = new SkillResolver(skillsDir);
+
+      const content = await resolver.resolve("skill:compat");
+      expect(content).toBe("# Compatible Content");
     });
 
     it("throws error for malformed skill reference", async () => {

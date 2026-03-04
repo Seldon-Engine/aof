@@ -28,6 +28,8 @@ export interface SkillManifest {
   references?: string[];
   /** Pre-computed token count estimate for cost planning */
   estimatedTokens?: number;
+  /** Optional tiered entrypoints for context-size optimization */
+  tiers?: Record<string, { entrypoint: string; estimatedTokens?: number }>;
 }
 
 /**
@@ -87,7 +89,27 @@ export async function loadSkillManifest(skillPath: string): Promise<SkillManifes
   if (m.estimatedTokens !== undefined && typeof m.estimatedTokens !== "number") {
     throw new Error(`Skill manifest 'estimatedTokens' must be a number: ${manifestPath}`);
   }
-  
+
+  // Validate optional tiers field
+  if (m.tiers !== undefined) {
+    if (typeof m.tiers !== "object" || m.tiers === null || Array.isArray(m.tiers)) {
+      throw new Error(`Skill manifest 'tiers' must be an object: ${manifestPath}`);
+    }
+    const tiers = m.tiers as Record<string, unknown>;
+    for (const [tierName, tierValue] of Object.entries(tiers)) {
+      if (typeof tierValue !== "object" || tierValue === null) {
+        throw new Error(`Skill manifest tier '${tierName}' must be an object: ${manifestPath}`);
+      }
+      const tier = tierValue as Record<string, unknown>;
+      if (typeof tier.entrypoint !== "string") {
+        throw new Error(`Skill manifest tier '${tierName}' must have a string 'entrypoint': ${manifestPath}`);
+      }
+      if (tier.estimatedTokens !== undefined && typeof tier.estimatedTokens !== "number") {
+        throw new Error(`Skill manifest tier '${tierName}' 'estimatedTokens' must be a number: ${manifestPath}`);
+      }
+    }
+  }
+
   return manifest as SkillManifest;
 }
 

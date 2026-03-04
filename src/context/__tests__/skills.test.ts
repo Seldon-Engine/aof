@@ -99,6 +99,73 @@ describe("Skills Module", () => {
       await expect(loadSkillManifest(skillDir)).rejects.toThrow("version");
     });
 
+    it("loads manifest with tiers field", async () => {
+      const skillDir = join(skillsDir, "tiered-skill");
+      await mkdir(skillDir, { recursive: true });
+
+      const manifest = {
+        version: "v1",
+        name: "tiered-skill",
+        description: "A skill with tiers",
+        tags: ["test"],
+        entrypoint: "SKILL.md",
+        estimatedTokens: 1665,
+        tiers: {
+          seed: { entrypoint: "SKILL-SEED.md", estimatedTokens: 500 },
+          full: { entrypoint: "SKILL.md", estimatedTokens: 1665 },
+        },
+      };
+
+      await writeFile(join(skillDir, "skill.json"), JSON.stringify(manifest), "utf-8");
+
+      const loaded = await loadSkillManifest(skillDir);
+
+      expect(loaded.tiers).toBeDefined();
+      expect(loaded.tiers!.seed.entrypoint).toBe("SKILL-SEED.md");
+      expect(loaded.tiers!.seed.estimatedTokens).toBe(500);
+      expect(loaded.tiers!.full.entrypoint).toBe("SKILL.md");
+    });
+
+    it("validates tiers entries have string entrypoint", async () => {
+      const skillDir = join(skillsDir, "bad-tiers");
+      await mkdir(skillDir, { recursive: true });
+
+      const manifest = {
+        version: "v1",
+        name: "bad-tiers",
+        description: "Bad tiers",
+        tags: [],
+        entrypoint: "SKILL.md",
+        tiers: {
+          seed: { entrypoint: 123 },
+        },
+      };
+
+      await writeFile(join(skillDir, "skill.json"), JSON.stringify(manifest), "utf-8");
+
+      await expect(loadSkillManifest(skillDir)).rejects.toThrow("entrypoint");
+    });
+
+    it("accepts manifest without tiers (backward compat)", async () => {
+      const skillDir = join(skillsDir, "no-tiers");
+      await mkdir(skillDir, { recursive: true });
+
+      const manifest = {
+        version: "v1",
+        name: "no-tiers",
+        description: "No tiers skill",
+        tags: [],
+        entrypoint: "SKILL.md",
+      };
+
+      await writeFile(join(skillDir, "skill.json"), JSON.stringify(manifest), "utf-8");
+
+      const loaded = await loadSkillManifest(skillDir);
+
+      expect(loaded.tiers).toBeUndefined();
+      expect(loaded.entrypoint).toBe("SKILL.md");
+    });
+
     it("validates required fields are present", async () => {
       const skillDir = join(skillsDir, "incomplete");
       await mkdir(skillDir, { recursive: true });

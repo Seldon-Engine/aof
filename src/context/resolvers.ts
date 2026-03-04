@@ -169,7 +169,7 @@ export class SkillResolver implements ContextResolver {
     return ref.startsWith("skill:");
   }
 
-  async resolve(ref: string): Promise<string> {
+  async resolve(ref: string, tier?: string): Promise<string> {
     if (!this.canResolve(ref)) {
       throw new Error(`Not a skill reference: ${ref}`);
     }
@@ -180,17 +180,23 @@ export class SkillResolver implements ContextResolver {
     }
 
     const skillPath = join(this.skillsDir, skillName);
-    
+
     // Load manifest to get entrypoint
     const manifest = await loadSkillManifest(skillPath);
-    
+
+    // Determine entrypoint: use tier-specific if available, otherwise main
+    let entrypoint = manifest.entrypoint;
+    if (tier && manifest.tiers && manifest.tiers[tier]) {
+      entrypoint = manifest.tiers[tier].entrypoint;
+    }
+
     // Read entrypoint file
-    const entrypointPath = join(skillPath, manifest.entrypoint);
-    
+    const entrypointPath = join(skillPath, entrypoint);
+
     try {
       return await readFile(entrypointPath, "utf-8");
     } catch (err) {
-      throw new Error(`Failed to read skill entrypoint: ${manifest.entrypoint}`, { cause: err });
+      throw new Error(`Failed to read skill entrypoint: ${entrypoint}`, { cause: err });
     }
   }
 }
