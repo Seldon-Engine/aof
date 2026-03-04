@@ -54,7 +54,7 @@ See: `.planning/milestones/v1.2-ROADMAP.md` for full details
 **Milestone Goal:** Make the v1.2 DAG workflow system deployable with confidence -- upgrade path works end-to-end, DAGs become the default, release is cut and installable.
 
 - [x] **Phase 17: Migration Foundation & Framework Hardening** - Harden the migration framework and implement all config/data migrations for the v1.2-to-v1.3 upgrade path (completed 2026-03-04)
-- [ ] **Phase 18: DAG-as-Default** - Make DAG workflows the default for new tasks via project-level configuration
+- [x] **Phase 18: DAG-as-Default** - Make DAG workflows the default for new tasks via project-level configuration (completed 2026-03-04)
 - [ ] **Phase 19: Verification & Smoke Tests** - Validate the entire upgrade path with automated smoke tests and a CLI health-check command
 - [ ] **Phase 20: Release Pipeline, Documentation & Release Cut** - Gate the release on tarball verification, document the upgrade, cut v1.3.0
 
@@ -85,7 +85,7 @@ Plans:
   1. `bd create "task name"` in a project with a `defaultWorkflow` configured auto-attaches that workflow template to the new task (visible in `bd get`)
   2. `bd create --no-workflow "task name"` creates a bare task with no workflow, even when the project has a `defaultWorkflow` configured
   3. `bd create "task name"` in a project without a `defaultWorkflow` creates a bare task as before (no errors, no warnings, graceful degradation)
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 
 Plans:
 - [ ] 18-01-PLAN.md — resolveDefaultWorkflow function, --no-workflow flag, three-way precedence in task create
@@ -142,6 +142,6 @@ Phases execute in numeric order: 17 → 18 → 19 → 20
 | 15. Migration and Documentation | v1.2 | 3/3 | Complete | 2026-03-03 |
 | 16. Integration Wiring Fixes | v1.2 | 1/1 | Complete | 2026-03-03 |
 | 17. Migration Foundation & Framework Hardening | 3/3 | Complete    | 2026-03-04 | - |
-| 18. DAG-as-Default | v1.3 | 0/1 | Not started | - |
+| 18. DAG-as-Default | 1/1 | Complete   | 2026-03-04 | - |
 | 19. Verification & Smoke Tests | v1.3 | 0/2 | Not started | - |
 | 20. Release Pipeline, Documentation & Release Cut | v1.3 | 0/2 | Not started | - |

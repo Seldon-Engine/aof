@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Seamless Upgrade
 status: executing
-stopped_at: Phase 18 context gathered
-last_updated: "2026-03-04T01:01:07.131Z"
-last_activity: 2026-03-04 -- Completed plan 17-02 (migration implementations)
+stopped_at: Completed 18-01-PLAN.md
+last_updated: "2026-03-04T01:19:53.000Z"
+last_activity: 2026-03-04 -- Completed plan 18-01 (default workflow auto-attachment)
 progress:
   total_phases: 4
-  completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
-  percent: 25
+  completed_phases: 2
+  total_plans: 4
+  completed_plans: 4
+  percent: 50
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-03)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** v1.3 Seamless Upgrade -- Phase 17 executing
+**Current focus:** v1.3 Seamless Upgrade -- Phase 18 complete
 
 ## Current Position
 
-Phase: 17 of 20 (Migration Foundation & Framework Hardening) -- COMPLETE
-Plan: 3 of 3 (all plans completed)
+Phase: 18 of 20 (DAG-as-Default) -- COMPLETE
+Plan: 1 of 1 (all plans completed)
 Status: Executing
-Last activity: 2026-03-04 -- Completed plan 17-02 (migration implementations)
+Last activity: 2026-03-04 -- Completed plan 18-01 (default workflow auto-attachment)
 
-Progress: [###░░░░░░░] 25%
+Progress: [#####░░░░░] 50%
 
 ## Performance Metrics
 
@@ -43,6 +43,7 @@ Progress: [###░░░░░░░] 25%
 | 17-01 | 1 | 4min | 4min |
 | 17-02 | 1 | 5min | 5min |
 | 17-03 | 1 | 4min | 4min |
+| 18-01 | 1 | 5min | 5min |
 
 ## Accumulated Context
 
@@ -54,6 +55,9 @@ All prior decisions logged in PROJECT.md Key Decisions table.
 - [Phase 17]: Replicated exact same gate-to-DAG migration pattern from get() into getByPrefix() for consistency
 - [Phase 17]: Used parseDocument() API for migration 001 comment-preserving YAML edits in project.yaml
 - [Phase 17]: Fresh installs run migration003 directly after wizard scaffolding for consistent channel.json
+- [Phase 18]: resolveDefaultWorkflow returns undefined (never throws) for all failure cases -- graceful degradation
+- [Phase 18]: Stale defaultWorkflow references warn to stderr and fall back to bare task
+- [Phase 18]: Output annotates default workflows with (default) suffix for user clarity
 
 ### Roadmap Evolution
 
@@ -72,6 +76,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-04T01:01:07.127Z
-Stopped at: Phase 18 context gathered
-Resume file: .planning/phases/18-dag-as-default/18-CONTEXT.md
+Last session: 2026-03-04T01:19:53Z
+Stopped at: Completed 18-01-PLAN.md
+Resume file: .planning/phases/18-dag-as-default/18-01-SUMMARY.md

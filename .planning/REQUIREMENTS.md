@@ -29,9 +29,9 @@ Requirements for the seamless upgrade milestone. Each maps to roadmap phases.
 
 ### DAG Default
 
-- [ ] **DAGD-01**: `bd create` auto-attaches the project's `defaultWorkflow` template when no `--workflow` flag is specified
-- [ ] **DAGD-02**: `--no-workflow` flag on `bd create` allows opting out of the default workflow for bare tasks
-- [ ] **DAGD-03**: Tasks created without a configured `defaultWorkflow` continue to work as bare tasks (graceful degradation)
+- [x] **DAGD-01**: `bd create` auto-attaches the project's `defaultWorkflow` template when no `--workflow` flag is specified
+- [x] **DAGD-02**: `--no-workflow` flag on `bd create` allows opting out of the default workflow for bare tasks
+- [x] **DAGD-03**: Tasks created without a configured `defaultWorkflow` continue to work as bare tasks (graceful degradation)
 
 ### Verification
 
@@ -88,9 +88,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CONF-04 | Phase 17 | Complete |
 | BUGF-01 | Phase 17 | Complete |
 | BUGF-02 | Phase 17 | Complete |
-| DAGD-01 | Phase 18 | Pending |
-| DAGD-02 | Phase 18 | Pending |
-| DAGD-03 | Phase 18 | Pending |
+| DAGD-01 | Phase 18 | Complete |
+| DAGD-02 | Phase 18 | Complete |
+| DAGD-03 | Phase 18 | Complete |
 | VERF-01 | Phase 19 | Pending |
 | VERF-02 | Phase 19 | Pending |
 | VERF-03 | Phase 19 | Pending |
