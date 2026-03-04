@@ -107,6 +107,7 @@ export const TaskFrontmatter = z.preprocess((input) => {
   dependsOn: z.array(TaskId).default([]).describe("Task IDs this depends on"),
   contentHash: z.string().optional().describe("SHA-256 of body content for idempotency"),
   metadata: z.record(z.string(), z.unknown()).default({}),
+  contextTier: z.enum(["seed", "full"]).optional().describe("Context tier for skill injection (seed=minimal, full=complete)"),
   requiredRunbook: z.string().optional().describe("Required runbook path or ID for compliance"),
   instructionsRef: z.string().min(1).optional().describe("Path to instructions file (optional)"),
   guidanceRef: z.string().min(1).optional().describe("Path to guidance/conventions file (optional)"),

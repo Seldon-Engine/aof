@@ -44,6 +44,8 @@ export interface ITaskStore {
     dependsOn?: string[];
     /** Workflow definition (ad-hoc or template-resolved). Auto-validated and auto-initialized. */
     workflow?: { definition: WorkflowDefinition; templateName?: string };
+    /** Context tier for skill injection (seed=minimal, full=complete). */
+    contextTier?: "seed" | "full";
   }): Promise<Task>;
 
   /**

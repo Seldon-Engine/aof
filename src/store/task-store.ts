@@ -180,6 +180,7 @@ export class FilesystemTaskStore implements ITaskStore {
     parentId?: string;
     dependsOn?: string[];
     workflow?: { definition: WorkflowDefinition; templateName?: string };
+    contextTier?: "seed" | "full";
   }): Promise<Task> {
     const now = new Date();
     const nowIso = now.toISOString();
@@ -223,6 +224,7 @@ export class FilesystemTaskStore implements ITaskStore {
       parentId: opts.parentId,
       dependsOn: opts.dependsOn ?? [],
       metadata: opts.metadata ?? {},
+      contextTier: opts.contextTier,
       contentHash: contentHash(body),
       ...(resolvedWorkflow ? { workflow: resolvedWorkflow } : {}),
     });

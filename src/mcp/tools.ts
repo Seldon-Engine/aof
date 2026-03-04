@@ -22,6 +22,8 @@ const dispatchInputSchema = z.object({
   actor: z.string().optional(),
   /** Workflow: template name (string), inline WorkflowDefinition (object), or false (skip). */
   workflow: z.union([z.string(), WorkflowDefinition, z.literal(false)]).optional(),
+  /** Context tier for skill injection: 'seed' (minimal) or 'full' (complete). Defaults to 'seed'. */
+  contextTier: z.enum(["seed", "full"]).optional().default("seed"),
 });
 
 const dispatchOutputSchema = z.object({
@@ -174,6 +176,7 @@ export async function handleAofDispatch(ctx: AofMcpContext, input: z.infer<typeo
     metadata,
     createdBy: input.actor ?? "mcp",
     workflow,
+    contextTier: input.contextTier ?? "seed",
   });
 
   let currentTask = await ctx.store.transition(task.frontmatter.id, "ready");

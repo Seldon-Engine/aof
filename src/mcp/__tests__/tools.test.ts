@@ -153,6 +153,41 @@ describe("mcp tools", () => {
     expect(report.byStatus.ready).toBe(1);
   });
 
+  it("dispatch stores contextTier on task frontmatter", async () => {
+    const ctx = await createAofMcpContext({
+      dataDir,
+      store,
+      logger: new EventLogger(join(dataDir, "events")),
+    });
+
+    const result = await handleAofDispatch(ctx, {
+      title: "Full context task",
+      brief: "Needs full skill context",
+      contextTier: "full",
+    });
+
+    const created = await store.get(result.taskId);
+    expect(created).toBeDefined();
+    expect(created?.frontmatter.contextTier).toBe("full");
+  });
+
+  it("dispatch defaults contextTier to seed", async () => {
+    const ctx = await createAofMcpContext({
+      dataDir,
+      store,
+      logger: new EventLogger(join(dataDir, "events")),
+    });
+
+    const result = await handleAofDispatch(ctx, {
+      title: "Default context task",
+      brief: "No explicit contextTier",
+    });
+
+    const created = await store.get(result.taskId);
+    expect(created).toBeDefined();
+    expect(created?.frontmatter.contextTier).toBe("seed");
+  });
+
   it("builds a kanban board via aof_board", async () => {
     const ctx = await createAofMcpContext({
       dataDir,
