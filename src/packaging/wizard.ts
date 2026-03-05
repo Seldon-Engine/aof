@@ -11,7 +11,7 @@ import { OrgChart } from "../schemas/org-chart.js";
 import { lintOrgChart } from "../org/linter.js";
 
 export interface WizardOptions {
-  /** Installation directory (e.g., ~/Projects/AOF) */
+  /** Installation directory (e.g., ~/.aof) */
   installDir: string;
   /** Template name (minimal or full) */
   template: "minimal" | "full";

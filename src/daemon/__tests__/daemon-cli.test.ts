@@ -45,7 +45,7 @@ function makeHealthStatus(
       eventLogger: "ok",
     },
     config: {
-      dataDir: "/Users/xavier/Projects/AOF",
+      dataDir: "/Users/xavier/.aof",
       pollIntervalMs: 30000,
       providersConfigured: 3,
     },
@@ -85,7 +85,7 @@ describe("formatStatusTable", () => {
 
     // Config section
     expect(output).toContain("Config");
-    expect(output).toContain("Data Dir:       /Users/xavier/Projects/AOF");
+    expect(output).toContain("Data Dir:       /Users/xavier/.aof");
     expect(output).toContain("Poll Interval:  30s");
     expect(output).toContain("Providers:      3");
   });

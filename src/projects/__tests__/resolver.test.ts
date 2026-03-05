@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir, homedir } from "node:os";
-import { resolveProject, projectExists } from "../resolver.js";
+import { tmpdir } from "node:os";
+import { resolveProject, projectExists, DEFAULT_AOF_ROOT } from "../resolver.js";
 
 describe("project resolver", () => {
   let tmpDir: string;
@@ -49,16 +49,15 @@ describe("project resolver", () => {
     }
   });
 
-  it("falls back to ~/Projects/AOF when no vaultRoot or env", async () => {
+  it("falls back to ~/.aof when no vaultRoot or env", async () => {
     const originalEnv = process.env["AOF_ROOT"];
     delete process.env["AOF_ROOT"];
 
     try {
       const resolution = await resolveProject("my-project");
 
-      const expectedVaultRoot = join(homedir(), "Projects", "AOF");
-      expect(resolution.vaultRoot).toBe(expectedVaultRoot);
-      expect(resolution.projectRoot).toBe(join(expectedVaultRoot, "Projects", "my-project"));
+      expect(resolution.vaultRoot).toBe(DEFAULT_AOF_ROOT);
+      expect(resolution.projectRoot).toBe(join(DEFAULT_AOF_ROOT, "Projects", "my-project"));
     } finally {
       if (originalEnv !== undefined) {
         process.env["AOF_ROOT"] = originalEnv;

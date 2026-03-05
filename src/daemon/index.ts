@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
 import { resolve } from "node:path";
-import { homedir } from "node:os";
 import { Command } from "commander";
 import { startAofDaemon } from "./daemon.js";
+import { DEFAULT_AOF_ROOT } from "../projects/resolver.js";
 
-const AOF_ROOT = process.env["AOF_ROOT"] ?? resolve(homedir(), "Projects", "AOF");
+const AOF_ROOT = process.env["AOF_ROOT"] ?? DEFAULT_AOF_ROOT;
 
 const program = new Command()
   .name("aof-daemon")

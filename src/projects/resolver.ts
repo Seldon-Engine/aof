@@ -8,6 +8,9 @@ import { resolve, join } from "node:path";
 import { homedir } from "node:os";
 import { access } from "node:fs/promises";
 
+/** Default AOF vault root — the runtime deployment directory. */
+export const DEFAULT_AOF_ROOT = resolve(homedir(), ".aof");
+
 export interface ProjectResolution {
   projectId: string;
   projectRoot: string;
@@ -18,7 +21,7 @@ export interface ProjectResolution {
  * Resolve a project ID to its root directory.
  *
  * @param projectId - Project ID (e.g., "_inbox", "aof-core")
- * @param vaultRoot - Optional vault root (defaults to AOF_ROOT env or ~/Projects/AOF)
+ * @param vaultRoot - Optional vault root (defaults to AOF_ROOT env or ~/.aof)
  * @returns Project resolution with projectId, projectRoot, and vaultRoot
  */
 export async function resolveProject(
@@ -29,7 +32,7 @@ export async function resolveProject(
   const resolvedVaultRoot =
     vaultRoot ??
     process.env["AOF_ROOT"] ??
-    resolve(homedir(), "Projects", "AOF");
+    DEFAULT_AOF_ROOT;
 
   // For _inbox or other projects, resolve under Projects/
   const projectRoot = join(resolvedVaultRoot, "Projects", projectId);

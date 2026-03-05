@@ -13,7 +13,7 @@ export interface DetectionResult {
 }
 
 export interface IntegrationOptions {
-  /** AOF root directory (e.g., ~/Projects/AOF) */
+  /** AOF root directory (e.g., ~/.aof) */
   aofRoot: string;
   /** Path to OpenClaw config file */
   openclawConfigPath: string;

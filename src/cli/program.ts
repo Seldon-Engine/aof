@@ -7,8 +7,7 @@
  * doc generator can import the program object without triggering parseAsync.
  */
 
-import { resolve, join } from "node:path";
-import { homedir } from "node:os";
+import { join } from "node:path";
 import { readFile } from "node:fs/promises";
 import { Command } from "commander";
 import { VERSION } from "../version.js";
@@ -36,8 +35,9 @@ import { registerOrgCommands } from "./commands/org.js";
 import { registerViewCommands } from "./commands/views.js";
 import { registerSystemCommands } from "./commands/system.js";
 import { registerSetupCommand } from "./commands/setup.js";
+import { DEFAULT_AOF_ROOT } from "../projects/resolver.js";
 
-const AOF_ROOT = process.env["AOF_ROOT"] ?? resolve(homedir(), "Projects", "AOF");
+const AOF_ROOT = process.env["AOF_ROOT"] ?? DEFAULT_AOF_ROOT;
 
 const program = new Command()
   .name("aof")
