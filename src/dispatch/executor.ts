@@ -48,6 +48,20 @@ export interface SpawnResult {
 export type ExecutorResult = SpawnResult;
 
 /**
+ * Outcome of a completed agent run (XRAY-005 fix).
+ * Passed to the onRunComplete callback so the dispatcher can detect
+ * agents that finished without calling aof_task_complete.
+ */
+export interface AgentRunOutcome {
+  taskId: string;
+  sessionId: string;
+  success: boolean;
+  aborted: boolean;
+  error?: { kind: string; message: string };
+  durationMs: number;
+}
+
+/**
  * Status of an active or completed agent session.
  */
 export interface SessionStatus {
@@ -73,7 +87,11 @@ export interface GatewayAdapter {
    */
   spawnSession(
     context: TaskContext,
-    opts?: { timeoutMs?: number; correlationId?: string },
+    opts?: {
+      timeoutMs?: number;
+      correlationId?: string;
+      onRunComplete?: (outcome: AgentRunOutcome) => void | Promise<void>;
+    },
   ): Promise<SpawnResult>;
 
   /**
@@ -124,7 +142,11 @@ interface MockAdapterOptions {
 export class MockAdapter implements GatewayAdapter {
   readonly spawned: Array<{
     context: TaskContext;
-    opts?: { timeoutMs?: number; correlationId?: string };
+    opts?: {
+      timeoutMs?: number;
+      correlationId?: string;
+      onRunComplete?: (outcome: AgentRunOutcome) => void | Promise<void>;
+    };
   }> = [];
 
   private sessions = new Map<string, MockSession>();
@@ -141,7 +163,11 @@ export class MockAdapter implements GatewayAdapter {
 
   async spawnSession(
     context: TaskContext,
-    opts?: { timeoutMs?: number; correlationId?: string },
+    opts?: {
+      timeoutMs?: number;
+      correlationId?: string;
+      onRunComplete?: (outcome: AgentRunOutcome) => void | Promise<void>;
+    },
   ): Promise<SpawnResult> {
     this.spawned.push({ context, opts });
 

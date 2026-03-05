@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { OpenClawAdapter } from "../executor.js";
 import type { OpenClawApi } from "../types.js";
-import type { TaskContext } from "../../dispatch/executor.js";
+import type { TaskContext, AgentRunOutcome } from "../../dispatch/executor.js";
 
 const mockRunEmbeddedPiAgent = vi.fn();
 const mockExtApi = {
@@ -216,5 +216,151 @@ describe("OpenClawAdapter", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("config");
+  });
+
+  it("invokes onRunComplete callback after successful agent run", async () => {
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
+      meta: { durationMs: 2000, agentMeta: { sessionId: "s-cb", provider: "a", model: "m" } },
+    });
+
+    const onRunComplete = vi.fn();
+
+    const context: TaskContext = {
+      taskId: "TASK-CB-001",
+      taskPath: "/path/to/task.md",
+      agent: "swe-backend",
+      priority: "normal",
+      routing: {},
+    };
+
+    await executor.spawnSession(context, { onRunComplete });
+
+    await vi.waitFor(() => expect(onRunComplete).toHaveBeenCalledTimes(1));
+    const outcome: AgentRunOutcome = onRunComplete.mock.calls[0][0];
+    expect(outcome.taskId).toBe("TASK-CB-001");
+    expect(outcome.success).toBe(true);
+    expect(outcome.aborted).toBe(false);
+    expect(outcome.durationMs).toBe(2000);
+  });
+
+  it("invokes onRunComplete with error when agent fails", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockRunEmbeddedPiAgent.mockRejectedValueOnce(new Error("Agent crashed"));
+
+    const onRunComplete = vi.fn();
+
+    const context: TaskContext = {
+      taskId: "TASK-CB-002",
+      taskPath: "/path/to/task.md",
+      agent: "swe-backend",
+      priority: "normal",
+      routing: {},
+    };
+
+    await executor.spawnSession(context, { onRunComplete });
+
+    await vi.waitFor(() => expect(onRunComplete).toHaveBeenCalledTimes(1));
+    const outcome: AgentRunOutcome = onRunComplete.mock.calls[0][0];
+    expect(outcome.taskId).toBe("TASK-CB-002");
+    expect(outcome.success).toBe(false);
+    expect(outcome.error?.kind).toBe("exception");
+    expect(outcome.error?.message).toContain("Agent crashed");
+
+    errorSpy.mockRestore();
+  });
+
+  it("invokes onRunComplete with aborted=true when agent is aborted", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
+      meta: { durationMs: 500, aborted: true },
+    });
+
+    const onRunComplete = vi.fn();
+
+    const context: TaskContext = {
+      taskId: "TASK-CB-003",
+      taskPath: "/path/to/task.md",
+      agent: "swe-backend",
+      priority: "normal",
+      routing: {},
+    };
+
+    await executor.spawnSession(context, { onRunComplete });
+
+    await vi.waitFor(() => expect(onRunComplete).toHaveBeenCalledTimes(1));
+    const outcome: AgentRunOutcome = onRunComplete.mock.calls[0][0];
+    expect(outcome.success).toBe(false);
+    expect(outcome.aborted).toBe(true);
+
+    warnSpy.mockRestore();
+  });
+
+  it("passes alsoAllow with AOF tool names to runEmbeddedPiAgent", async () => {
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
+      meta: { durationMs: 1000 },
+    });
+
+    const context: TaskContext = {
+      taskId: "TASK-ALLOW-001",
+      taskPath: "/path/to/task.md",
+      agent: "swe-backend",
+      priority: "normal",
+      routing: {},
+    };
+
+    await executor.spawnSession(context);
+
+    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
+    expect(mockRunEmbeddedPiAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        alsoAllow: expect.arrayContaining(["aof_task_complete", "aof_task_update"]),
+      }),
+    );
+  });
+
+  it("includes tool verification instruction in prompt", async () => {
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
+      meta: { durationMs: 1000 },
+    });
+
+    const context: TaskContext = {
+      taskId: "TASK-VERIFY-001",
+      taskPath: "/path/to/task.md",
+      agent: "swe-backend",
+      priority: "normal",
+      routing: {},
+    };
+
+    await executor.spawnSession(context);
+
+    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
+    const params = mockRunEmbeddedPiAgent.mock.calls[0][0];
+    expect(params.prompt).toContain("verify that the `aof_task_complete` tool is available");
+  });
+
+  it("handles onRunComplete callback errors gracefully", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
+      meta: { durationMs: 1000 },
+    });
+
+    const onRunComplete = vi.fn().mockRejectedValueOnce(new Error("callback boom"));
+
+    const context: TaskContext = {
+      taskId: "TASK-CB-ERR",
+      taskPath: "/path/to/task.md",
+      agent: "swe-backend",
+      priority: "normal",
+      routing: {},
+    };
+
+    await executor.spawnSession(context, { onRunComplete });
+
+    await vi.waitFor(() => expect(onRunComplete).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("onRunComplete callback failed"),
+    ));
+
+    errorSpy.mockRestore();
   });
 });

@@ -39,6 +39,7 @@ export interface WizardState {
   addedToAllowList: boolean;
   syncCompleted: boolean;
   memoryConfigured: boolean;
+  toolVisibilityConfigured: boolean;
   skillInstalled: boolean;
   skillsWired: boolean;
   orgChartValid: boolean;
@@ -54,6 +55,7 @@ export function makeInitialState(): WizardState {
     addedToAllowList: false,
     syncCompleted: false,
     memoryConfigured: false,
+    toolVisibilityConfigured: false,
     skillInstalled: false,
     skillsWired: false,
     orgChartValid: false,
@@ -117,6 +119,42 @@ export async function runPluginStep(state: WizardState, yes: boolean): Promise<v
         `Failed to add AOF to allow list: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Step 2b: Plugin tool visibility for sub-agent sessions
+// ---------------------------------------------------------------------------
+
+export async function runToolVisibilityStep(state: WizardState, _yes: boolean): Promise<void> {
+  const aofTools = [
+    "aof_task_complete", "aof_task_update", "aof_task_block",
+    "aof_status_report",
+  ];
+
+  try {
+    const current = (await openclawConfigGet("tools.alsoAllow")) as string[] | undefined;
+    const list = Array.isArray(current) ? [...current] : [];
+    const missing = aofTools.filter((t) => !list.includes(t));
+
+    if (missing.length === 0) {
+      console.log("✅ AOF tools already in tools.alsoAllow — skipping.\n");
+      state.toolVisibilityConfigured = true;
+      state.skipped.push("Tool visibility (already configured)");
+      return;
+    }
+
+    list.push(...missing);
+    await openclawConfigSet("tools.alsoAllow", list);
+    state.toolVisibilityConfigured = true;
+    console.log(`  ✅ Added ${missing.length} AOF tool(s) to tools.alsoAllow.\n`);
+  } catch (err) {
+    state.warnings.push(
+      `Tool visibility config failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    console.log(
+      `  ❌ Tool visibility config failed: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
   }
 }
 

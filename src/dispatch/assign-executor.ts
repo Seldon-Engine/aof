@@ -10,7 +10,7 @@ import type { ITaskStore } from "../store/interfaces.js";
 import type { EventLogger } from "../events/logger.js";
 import type { DispatchConfig, SchedulerAction } from "./task-dispatcher.js";
 import { acquireLease, releaseLease } from "../store/lease.js";
-import { isLeaseActive, startLeaseRenewal } from "./lease-manager.js";
+import { isLeaseActive, startLeaseRenewal, stopLeaseRenewal } from "./lease-manager.js";
 import { updateThrottleState } from "./throttle.js";
 import { serializeTask } from "../store/task-store.js";
 import { buildGateContext } from "./gate-context-builder.js";
@@ -165,10 +165,66 @@ export async function executeAssignAction(
       }
     }
 
-    // Spawn agent session with correlation ID
+    // Spawn agent session with correlation ID and fallback completion callback
     const result = await config.executor.spawnSession(context, {
       timeoutMs: config.spawnTimeoutMs ?? 30_000,
       correlationId,
+      onRunComplete: async (outcome) => {
+        // Always stop lease renewal — the agent is done regardless of outcome
+        stopLeaseRenewal(store, action.taskId);
+
+        // Re-read task to check current status
+        const currentTask = await store.get(action.taskId);
+        if (!currentTask) return;
+
+        // If agent already transitioned the task (called aof_task_complete), nothing to do
+        if (currentTask.frontmatter.status !== "in-progress") return;
+
+        // Agent finished without calling aof_task_complete — fallback handling
+        console.error(
+          `[AOF] Task ${action.taskId} still in-progress after agent completed. ` +
+          `Agent likely could not access aof_task_complete tool. ` +
+          `Run \`aof setup\` to fix tool visibility config.`,
+        );
+
+        try {
+          if (outcome.success) {
+            // Agent succeeded but didn't transition — move through review → done
+            await store.transition(action.taskId, "review", {
+              reason: "dispatch.fallback: agent completed without calling aof_task_complete",
+            });
+            await store.transition(action.taskId, "done", {
+              reason: "dispatch.fallback: auto-completed after successful agent run",
+            });
+          } else {
+            // Agent errored or was aborted — block the task
+            const reason = outcome.error
+              ? `Agent error: ${outcome.error.kind}: ${outcome.error.message}`
+              : outcome.aborted
+                ? "Agent run was aborted"
+                : "Agent run failed (unknown reason)";
+            await store.transition(action.taskId, "blocked", { reason });
+          }
+        } catch (transitionErr) {
+          const msg = transitionErr instanceof Error ? transitionErr.message : String(transitionErr);
+          console.error(`[AOF] Fallback transition failed for ${action.taskId}: ${msg}`);
+        }
+
+        // Log fallback event (non-fatal)
+        try {
+          await logger.logDispatch("dispatch.fallback", "scheduler", action.taskId, {
+            agent: action.agent,
+            sessionId: outcome.sessionId,
+            success: outcome.success,
+            aborted: outcome.aborted,
+            durationMs: outcome.durationMs,
+            error: outcome.error?.message,
+            correlationId,
+          });
+        } catch {
+          // Logging errors should not crash the scheduler
+        }
+      },
     });
 
     if (result.success) {

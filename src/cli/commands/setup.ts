@@ -240,6 +240,27 @@ async function wireOpenClawPlugin(dataDir: string, openclawPath?: string): Promi
     }
   }
 
+  // Ensure AOF plugin tools are in tools.alsoAllow so agents can call them
+  try {
+    const aofTools = [
+      "aof_task_complete", "aof_task_update", "aof_task_block",
+      "aof_status_report",
+    ];
+    const current = (await openclawConfigGet("tools.alsoAllow")) as string[] | undefined;
+    const list = Array.isArray(current) ? [...current] : [];
+    const missing = aofTools.filter((t) => !list.includes(t));
+
+    if (missing.length === 0) {
+      say("AOF tools already in tools.alsoAllow");
+    } else {
+      list.push(...missing);
+      await openclawConfigSet("tools.alsoAllow", list);
+      say(`Added ${missing.length} AOF tool(s) to tools.alsoAllow`);
+    }
+  } catch (e) {
+    warn(`Failed to update tools.alsoAllow: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
   // Deploy skill files to ~/.openclaw/skills/aof/
   try {
     const skillTargetDir = join(homedir(), ".openclaw", "skills", "aof");

@@ -69,15 +69,15 @@ agents:
 
 ---
 
-## XRAY-005: Agents don't call `aof_task_complete` (Category A/B — under investigation)
+## XRAY-005: Agents don't call `aof_task_complete` (Category A/B — MITIGATED)
 **Date**: 2026-02-16
 **Symptoms**: Tasks dispatched successfully, agents do work (create files, sub-tasks), but never mark task complete. Lease expires → task re-queued → infinite loop. 46 dispatches, 0 completions observed.
-**Root cause**: **Under investigation**. Hypotheses:
-1. Plugin tools (`aof_task_complete`) not visible in sub-agent sessions (possibly due to `tools.sessions.visibility: tree` default in OpenClaw 2026.2.14)
-2. Model (`qwen3-coder:30b`) doesn't reliably follow tool-calling instructions
-3. No fallback completion mechanism exists
-**Fix**: Pending root cause analysis (architect investigating).
-**Prevention**: TBD.
+**Root cause**: Plugin tools (`aof_task_complete`) not visible in sub-agent sessions due to `tools.sessions.pluginVisibility` defaulting to restrictive mode.
+**Fix** (three layers):
+1. **Setup**: `aof setup` now sets `tools.sessions.pluginVisibility = inherit` so spawned sub-agents inherit plugin tools. Additionally, `alsoAllow` param is passed to `runEmbeddedPiAgent` as belt-and-suspenders.
+2. **Detection**: Agent prompt now instructs agents to verify `aof_task_complete` is available before starting. Runtime logs a loud error when a task remains in-progress after agent completion.
+3. **Fallback**: `onRunComplete` callback on `spawnSession` detects orphaned in-progress tasks and transitions them (success → review → done; error → blocked).
+**Prevention**: Run `aof setup` after install/upgrade. The fallback mechanism handles edge cases automatically.
 
 ---
 

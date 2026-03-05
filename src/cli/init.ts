@@ -12,6 +12,7 @@ import { runSyncStep } from "./init-sync.js";
 import {
   makeInitialState,
   runPluginStep,
+  runToolVisibilityStep,
   runMemoryStep,
   runSkillStep,
   runSkillWiringStep,
@@ -62,6 +63,9 @@ export async function init(opts: InitOptions = {}): Promise<void> {
   // Step 2: Plugin registration
   await runPluginStep(state, yes);
 
+  // Step 2b: Ensure plugin tools are visible in sub-agent sessions
+  await runToolVisibilityStep(state, yes);
+
   // Step 2.5: Org chart ↔ OpenClaw agent sync
   const orgChartPath = join(process.cwd(), "org", "org-chart.yaml");
   try {
@@ -106,6 +110,7 @@ function printSummary(state: WizardState, configPath: string | null | undefined)
   if (state.pluginRegistered) done.push("✅ AOF plugin registered");
   if (state.addedToAllowList) done.push("✅ Added to allow list");
   if (state.syncCompleted) done.push("✅ Org chart synced with OpenClaw agents");
+  if (state.toolVisibilityConfigured) done.push("✅ Plugin tool visibility configured");
   if (state.memoryConfigured) done.push("✅ Memory system configured");
   if (state.skillInstalled) done.push("✅ Companion skill installed");
   if (state.skillsWired) done.push("✅ AOF skill wired to all agents");

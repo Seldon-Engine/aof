@@ -12,7 +12,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import type { GatewayAdapter, TaskContext, SpawnResult, SessionStatus } from "../dispatch/executor.js";
+import type { GatewayAdapter, TaskContext, SpawnResult, SessionStatus, AgentRunOutcome } from "../dispatch/executor.js";
 import type { OpenClawApi } from "./types.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import { readHeartbeat, markRunArtifactExpired } from "../recovery/run-artifacts.js";
@@ -63,7 +63,11 @@ export class OpenClawAdapter implements GatewayAdapter {
 
   async spawnSession(
     context: TaskContext,
-    opts?: { timeoutMs?: number; correlationId?: string },
+    opts?: {
+      timeoutMs?: number;
+      correlationId?: string;
+      onRunComplete?: (outcome: AgentRunOutcome) => void | Promise<void>;
+    },
   ): Promise<SpawnResult> {
     console.info(`[AOF] OpenClawAdapter.spawnSession() for task ${context.taskId}, agent: ${context.agent}`);
 
@@ -122,6 +126,7 @@ export class OpenClawAdapter implements GatewayAdapter {
         runId,
         taskId: context.taskId,
         thinking: context.thinking,
+        onRunComplete: opts?.onRunComplete,
       });
 
       // Track sessionId -> taskId mapping for getSessionStatus / forceCompleteSession
@@ -201,10 +206,15 @@ export class OpenClawAdapter implements GatewayAdapter {
       runId: string;
       taskId: string;
       thinking?: string;
+      onRunComplete?: (outcome: AgentRunOutcome) => void | Promise<void>;
     },
   ): Promise<void> {
+    const startMs = Date.now();
+    let outcome: AgentRunOutcome;
+
     try {
-      const result = await ext.runEmbeddedPiAgent({
+      // Race agent execution against a hard timeout
+      const agentPromise = ext.runEmbeddedPiAgent({
         sessionId: params.sessionId,
         sessionFile: params.sessionFile,
         workspaceDir: params.workspaceDir,
@@ -216,8 +226,23 @@ export class OpenClawAdapter implements GatewayAdapter {
         runId: params.runId,
         lane: "aof",
         senderIsOwner: true,
+        alsoAllow: [
+          "aof_task_complete", "aof_task_update", "aof_task_block",
+          "aof_status_report",
+        ],
         ...(params.thinking && { thinkLevel: params.thinking }),
       });
+
+      const timeoutPromise = new Promise<never>((_resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error(`Agent run timed out after ${params.timeoutMs}ms`)),
+          params.timeoutMs,
+        );
+        // Don't block process exit
+        if (typeof timer === "object" && "unref" in timer) timer.unref();
+      });
+
+      const result = await Promise.race([agentPromise, timeoutPromise]);
 
       if (result.meta.error) {
         console.warn(
@@ -230,9 +255,37 @@ export class OpenClawAdapter implements GatewayAdapter {
           `[AOF] Agent run completed for ${params.taskId} in ${result.meta.durationMs}ms`,
         );
       }
+
+      outcome = {
+        taskId: params.taskId,
+        sessionId: params.sessionId,
+        success: !result.meta.error && !result.meta.aborted,
+        aborted: result.meta.aborted ?? false,
+        error: result.meta.error,
+        durationMs: result.meta.durationMs,
+      };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[AOF] Background agent run failed for ${params.taskId}: ${message}`);
+
+      outcome = {
+        taskId: params.taskId,
+        sessionId: params.sessionId,
+        success: false,
+        aborted: false,
+        error: { kind: "exception", message },
+        durationMs: Date.now() - startMs,
+      };
+    }
+
+    // Invoke the completion callback (dispatcher's fallback handler)
+    if (params.onRunComplete) {
+      try {
+        await params.onRunComplete(outcome);
+      } catch (cbErr) {
+        const msg = cbErr instanceof Error ? cbErr.message : String(cbErr);
+        console.error(`[AOF] onRunComplete callback failed for ${params.taskId}: ${msg}`);
+      }
     }
   }
 
@@ -258,7 +311,7 @@ export class OpenClawAdapter implements GatewayAdapter {
       instruction += `\nTask path (relative): ${context.taskRelpath}`;
     }
 
-    instruction += `\n\nPriority: ${context.priority}\nRouting: ${JSON.stringify(context.routing)}\n\nRead the task file for full details and acceptance criteria.\n\n**IMPORTANT:** When you have completed this task, call the \`aof_task_complete\` tool with taskId="${context.taskId}" to mark it as done.`;
+    instruction += `\n\nPriority: ${context.priority}\nRouting: ${JSON.stringify(context.routing)}\n\nRead the task file for full details and acceptance criteria.\n\n**CRITICAL:** Before starting work, verify that the \`aof_task_complete\` tool is available to you. If it is NOT available, STOP IMMEDIATELY and output: "ERROR: aof_task_complete tool not available in this session." Do not attempt to complete the task without the tool — your work will be lost.\n\n**IMPORTANT:** When you have completed this task, call the \`aof_task_complete\` tool with taskId="${context.taskId}" to mark it as done.`;
 
     return instruction;
   }
