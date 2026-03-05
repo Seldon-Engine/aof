@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.6.0](https://github.com/d0labs/aof/compare/v1.5.0...v1.6.0) (2026-03-05)
+
+### Features
+
+* agent tool visibility fix with dispatch fallback completion ([b643183](https://github.com/d0labs/aof/commit/b643183eff1b8e6a5739727670c6ef3b9420d850))
+
 ## [1.5.0](https://github.com/d0labs/aof/compare/v1.4.0...v1.5.0) (2026-03-04)
 
 ### Features
