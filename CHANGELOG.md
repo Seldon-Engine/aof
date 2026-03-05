@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.6.1](https://github.com/d0labs/aof/compare/v1.6.0...v1.6.1) (2026-03-05)
+
+### Bug Fixes
+
+* change default vault root from ~/Projects/AOF to ~/.aof ([356c744](https://github.com/d0labs/aof/commit/356c744860a24125219391fc9a3c3e03823aaf01))
+
 ## [1.6.0](https://github.com/d0labs/aof/compare/v1.5.0...v1.6.0) (2026-03-05)
 
 ### Features
