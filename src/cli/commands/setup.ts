@@ -97,7 +97,7 @@ async function readPackageVersion(dataDir: string): Promise<string> {
  */
 async function migrateLegacyData(dataDir: string): Promise<void> {
   const legacyDir = join(homedir(), ".openclaw", "aof");
-  const dataDirs = ["tasks", "events", "memory", "data", "state"];
+  const dataDirs = ["tasks", "events", "memory", "data", "state", "org"];
   let migrated = 0;
 
   for (const dir of dataDirs) {

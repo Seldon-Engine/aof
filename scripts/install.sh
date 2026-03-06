@@ -288,8 +288,9 @@ extract_and_install() {
     done
 
     # Also backup individual data files
-    for f in memory.db memory-hnsw.dat .version; do
+    for f in memory.db memory-hnsw.dat .version org/org-chart.yaml; do
       if [ -f "$INSTALL_DIR/$f" ]; then
+        mkdir -p "$BACKUP_DIR/$(dirname "$f")"
         cp "$INSTALL_DIR/$f" "$BACKUP_DIR/$f"
       fi
     done
@@ -312,8 +313,9 @@ extract_and_install() {
           cp -R "$BACKUP_DIR/$dir" "$INSTALL_DIR/$dir"
         fi
       done
-      for f in memory.db memory-hnsw.dat .version; do
+      for f in memory.db memory-hnsw.dat .version org/org-chart.yaml; do
         if [ -f "$BACKUP_DIR/$f" ]; then
+          mkdir -p "$INSTALL_DIR/$(dirname "$f")"
           cp "$BACKUP_DIR/$f" "$INSTALL_DIR/$f"
         fi
       done
@@ -345,8 +347,9 @@ extract_and_install() {
         cp -R "$BACKUP_DIR/$dir" "$INSTALL_DIR/$dir"
       fi
     done
-    for f in memory.db memory-hnsw.dat; do
+    for f in memory.db memory-hnsw.dat org/org-chart.yaml; do
       if [ -f "$BACKUP_DIR/$f" ]; then
+        mkdir -p "$INSTALL_DIR/$(dirname "$f")"
         cp "$BACKUP_DIR/$f" "$INSTALL_DIR/$f"
       fi
     done
