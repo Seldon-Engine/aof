@@ -226,7 +226,7 @@ describe("DAG Hop Completion Enforcement", () => {
     if (freshTask?.frontmatter.workflow) {
       freshTask.frontmatter.workflow.state.hops[hopId] = {
         ...freshTask.frontmatter.workflow.state.hops[hopId]!,
-        status: "completed",
+        status: "complete",
       };
       const { serializeTask } = await import("../../store/task-store.js");
       const writeFileAtomic = (await import("write-file-atomic")).default;

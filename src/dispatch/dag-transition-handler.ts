@@ -39,6 +39,7 @@ import type { TaskContext, GatewayAdapter } from "./executor.js";
 import type { EventLogger } from "../events/logger.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import type { RunResult } from "../schemas/run-result.js";
+import { trackDispatchFailure, shouldTransitionToDeadletter, transitionToDeadletter } from "./failure-tracker.js";
 
 // ---------------------------------------------------------------------------
 // Result Types
@@ -316,10 +317,63 @@ export async function dispatchDAGHop(
     hopContext,
   };
 
-  // Spawn session
+  // Spawn session with enforcement callback
   const spawnResult = await executor.spawnSession(context, {
     timeoutMs: config.spawnTimeoutMs ?? 30_000,
     correlationId,
+    onRunComplete: async (outcome) => {
+      // Re-read task to get fresh state
+      const freshTask = await store.get(task.frontmatter.id);
+      if (!freshTask) return;
+
+      // Check if hop is still "dispatched" — if not, agent already completed via protocol
+      const hopState = freshTask.frontmatter.workflow?.state.hops[hopId];
+      if (!hopState || hopState.status !== "dispatched") return;
+
+      // Hop agent exited without calling aof_task_complete — enforcement
+      const enforcementReason =
+        `DAG hop "${hopId}" failed: agent exited without calling aof_task_complete. ` +
+        `Session lasted ${(outcome.durationMs / 1000).toFixed(1)}s. ` +
+        `Run \`aof trace ${task.frontmatter.id}\` for details.`;
+
+      console.error(`[AOF] ${enforcementReason}`);
+
+      try {
+        // Track dispatch failure on the parent task
+        await trackDispatchFailure(store, task.frontmatter.id, enforcementReason);
+
+        // Check deadletter threshold on parent task
+        const updatedTask = await store.get(task.frontmatter.id);
+        if (updatedTask && shouldTransitionToDeadletter(updatedTask)) {
+          await transitionToDeadletter(store, logger, task.frontmatter.id, enforcementReason);
+        } else if (updatedTask?.frontmatter.workflow) {
+          // Mark hop as failed in workflow state
+          updatedTask.frontmatter.workflow.state.hops[hopId] = {
+            ...updatedTask.frontmatter.workflow.state.hops[hopId]!,
+            status: "failed",
+            completedAt: new Date().toISOString(),
+          };
+          await persistWorkflowState(updatedTask, updatedTask.frontmatter.workflow.state);
+        }
+
+        // Emit enforcement event with hopId
+        await logger.log("completion.enforcement", "scheduler", {
+          taskId: task.frontmatter.id,
+          payload: {
+            hopId,
+            agent: hop.role,
+            sessionId: outcome.sessionId,
+            durationMs: outcome.durationMs,
+            correlationId,
+            reason: "agent_exited_without_completion",
+            dispatchFailures: updatedTask?.frontmatter.metadata.dispatchFailures,
+          },
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[AOF] DAG enforcement failed for hop ${hopId} on task ${task.frontmatter.id}: ${msg}`);
+      }
+    },
   });
 
   if (!spawnResult.success) {
