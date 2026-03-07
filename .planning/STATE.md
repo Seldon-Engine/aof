@@ -2,12 +2,12 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Event Tracing
-status: defining_requirements
+status: ready_to_plan
 stopped_at: null
-last_updated: "2026-03-06T00:00:00.000Z"
-last_activity: 2026-03-06 -- Milestone v1.5 started
+last_updated: "2026-03-07T00:00:00.000Z"
+last_activity: 2026-03-07 -- Roadmap created for v1.5 Event Tracing
 progress:
-  total_phases: 0
+  total_phases: 3
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -20,14 +20,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-06)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** Defining requirements for v1.5 Event Tracing
+**Current focus:** Phase 25 -- Completion Enforcement
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-03-06 — Milestone v1.5 started
+Phase: 25 (1 of 3 in v1.5 Event Tracing)
+Plan: Not yet planned
+Status: Ready to plan
+Last activity: 2026-03-07 -- Roadmap created for v1.5 Event Tracing
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -38,6 +40,10 @@ Last activity: 2026-03-06 — Milestone v1.5 started
 ### Decisions
 
 All decisions logged in PROJECT.md Key Decisions table.
+Recent decisions affecting current work:
+
+- [v1.5 Roadmap]: GUID requirements grouped with completion enforcement (Phase 25) -- agent guidance about completion is part of the enforcement feature
+- [v1.5 Roadmap]: 3 phases (not 4) -- dropped standalone integration/polish phase since all 16 requirements map to Phases 25-27
 
 ### Roadmap Evolution
 
@@ -46,6 +52,7 @@ All decisions logged in PROJECT.md Key Decisions table.
 - v1.2: Phases 10-16 (Schema, Evaluator, Scheduler, Safety, Templates, Migration, Integration)
 - v1.3: Phases 17-20 (Migration Framework, DAG-as-Default, Verification, Release)
 - v1.4: Phases 21-24 (Tool API, Compressed Skill, Tiered Delivery, Budget Gate)
+- v1.5: Phases 25-27 (Completion Enforcement, Trace Infrastructure, Trace CLI)
 
 ### Pending Todos
 
@@ -53,4 +60,5 @@ None.
 
 ### Blockers/Concerns
 
-None.
+- OpenClaw session JSONL format is undocumented -- parser must be defensive (Phase 26 concern)
+- Enforcement rollout risk -- must start in warn-only mode to avoid deadletter pileup (Phase 25 concern)

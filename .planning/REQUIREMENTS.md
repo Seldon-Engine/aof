@@ -67,28 +67,28 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ENFC-01 | — | Pending |
-| ENFC-02 | — | Pending |
-| ENFC-03 | — | Pending |
-| ENFC-04 | — | Pending |
-| TRAC-01 | — | Pending |
-| TRAC-02 | — | Pending |
-| TRAC-03 | — | Pending |
-| TRAC-04 | — | Pending |
-| TRAC-05 | — | Pending |
-| TRAC-06 | — | Pending |
-| PRES-01 | — | Pending |
-| PRES-02 | — | Pending |
-| PRES-03 | — | Pending |
-| PRES-04 | — | Pending |
-| GUID-01 | — | Pending |
-| GUID-02 | — | Pending |
+| ENFC-01 | Phase 25 | Pending |
+| ENFC-02 | Phase 25 | Pending |
+| ENFC-03 | Phase 25 | Pending |
+| ENFC-04 | Phase 25 | Pending |
+| TRAC-01 | Phase 26 | Pending |
+| TRAC-02 | Phase 26 | Pending |
+| TRAC-03 | Phase 26 | Pending |
+| TRAC-04 | Phase 26 | Pending |
+| TRAC-05 | Phase 26 | Pending |
+| TRAC-06 | Phase 26 | Pending |
+| PRES-01 | Phase 27 | Pending |
+| PRES-02 | Phase 27 | Pending |
+| PRES-03 | Phase 27 | Pending |
+| PRES-04 | Phase 27 | Pending |
+| GUID-01 | Phase 25 | Pending |
+| GUID-02 | Phase 25 | Pending |
 
 **Coverage:**
 - v1.5 requirements: 16 total
-- Mapped to phases: 0
-- Unmapped: 16 ⚠️
+- Mapped to phases: 16
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-07*
-*Last updated: 2026-03-07 after initial definition*
+*Last updated: 2026-03-07 after roadmap creation*

@@ -7,6 +7,7 @@
 - ✅ **v1.2 Task Workflows** — Phases 10-16 (shipped 2026-03-03)
 - ✅ **v1.3 Seamless Upgrade** — Phases 17-20 (shipped 2026-03-04)
 - ✅ **v1.4 Context Optimization** — Phases 21-24 (shipped 2026-03-04)
+- 📋 **v1.5 Event Tracing** — Phases 25-27 (planned)
 
 ## Phases
 
@@ -74,7 +75,55 @@ See: `.planning/milestones/v1.4-ROADMAP.md` for full details
 
 </details>
 
+### 📋 v1.5 Event Tracing (Planned)
+
+**Milestone Goal:** Make agent work visible and trustworthy — enforce explicit completion, capture session traces, and surface what agents actually did (or didn't do).
+
+- [ ] **Phase 25: Completion Enforcement** - Stop trusting exit codes; require explicit aof_task_complete and update agent guidance
+- [ ] **Phase 26: Trace Infrastructure** - Capture and store structured session traces from OpenClaw transcripts
+- [ ] **Phase 27: Trace CLI** - Operator-facing trace presentation with summary, debug, and DAG views
+
+## Phase Details
+
+### Phase 25: Completion Enforcement
+**Goal**: Tasks that exit without explicit completion are caught and handled, not silently auto-completed
+**Depends on**: Phase 24 (v1.4 complete)
+**Requirements**: ENFC-01, ENFC-02, ENFC-03, ENFC-04, GUID-01, GUID-02
+**Success Criteria** (what must be TRUE):
+  1. When an agent exits without calling `aof_task_complete`, the task is marked failed (not done) and the operator can see why
+  2. Enforcement mode is configurable — warn-only mode logs the violation but allows the existing fallback, block mode prevents auto-completion
+  3. Sessions with zero meaningful tool calls are flagged as suspicious in the event log
+  4. SKILL.md and dispatch-time instructions tell agents that exiting without `aof_task_complete` blocks the task
+  5. All enforcement actions emit structured events to the JSONL event log
+**Plans**: TBD
+
+### Phase 26: Trace Infrastructure
+**Goal**: Every completed agent session produces a structured trace record that captures what the agent did
+**Depends on**: Phase 25
+**Requirements**: TRAC-01, TRAC-02, TRAC-03, TRAC-04, TRAC-05, TRAC-06
+**Success Criteria** (what must be TRUE):
+  1. After an agent session completes, the OpenClaw session JSONL is parsed and a structured `trace.json` appears in the task artifact directory
+  2. Trace capture never blocks or delays task state transitions — if capture fails, the task still transitions normally
+  3. Trace lifecycle events (`trace.captured`, `trace.capture_failed`) are emitted to the JSONL event log
+  4. When a task is retried, subsequent traces accumulate alongside prior attempt traces so the full history is preserved
+  5. The per-task `metadata.debug` flag controls whether traces store full detail or summary-only
+**Plans**: TBD
+
+### Phase 27: Trace CLI
+**Goal**: Operators can inspect what any agent did on any task through a CLI command
+**Depends on**: Phase 26
+**Requirements**: PRES-01, PRES-02, PRES-03, PRES-04
+**Success Criteria** (what must be TRUE):
+  1. `aof trace <task-id>` shows a human-readable summary including tool calls made, outcome, duration, and token usage
+  2. `aof trace <task-id> --debug` shows the full tool call details and reasoning text
+  3. `aof trace <task-id> --json` outputs structured trace data suitable for piping to jq or other tools
+  4. For DAG workflow tasks, `aof trace <task-id>` shows per-hop traces with hop identification so operators can see what each stage did
+**Plans**: TBD
+
 ## Progress
+
+**Execution Order:**
+Phases execute in numeric order: 25 → 26 → 27
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -102,3 +151,6 @@ See: `.planning/milestones/v1.4-ROADMAP.md` for full details
 | 22. Compressed Skill | v1.4 | 1/1 | Complete | 2026-03-04 |
 | 23. Tiered Context Delivery | v1.4 | 2/2 | Complete | 2026-03-04 |
 | 24. Verification & Budget Gate | v1.4 | 1/1 | Complete | 2026-03-04 |
+| 25. Completion Enforcement | v1.5 | 0/? | Not started | - |
+| 26. Trace Infrastructure | v1.5 | 0/? | Not started | - |
+| 27. Trace CLI | v1.5 | 0/? | Not started | - |
