@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Event Tracing
 status: executing
-stopped_at: "Completed 25-01-PLAN.md"
-last_updated: "2026-03-07T20:03:00.000Z"
-last_activity: 2026-03-07 -- Completed Phase 25 Plan 01 (Completion Enforcement)
+stopped_at: "Completed 25-02-PLAN.md"
+last_updated: "2026-03-07T20:05:08.000Z"
+last_activity: 2026-03-07 -- Completed Phase 25 Plan 02 (Agent Guidance)
 progress:
   total_phases: 3
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State
@@ -25,11 +25,11 @@ See: .planning/PROJECT.md (updated 2026-03-06)
 ## Current Position
 
 Phase: 25 (1 of 3 in v1.5 Event Tracing)
-Plan: 1 of 2 complete
+Plan: 2 of 2 complete (Phase 25 done)
 Status: Executing
-Last activity: 2026-03-07 -- Completed Phase 25 Plan 01 (Completion Enforcement)
+Last activity: 2026-03-07 -- Completed Phase 25 Plan 02 (Agent Guidance)
 
-Progress: [█████░░░░░] 50%
+Progress: [███░░░░░░░] 33%
 
 ## Performance Metrics
 
@@ -47,6 +47,8 @@ Recent decisions affecting current work:
 - [25-01]: Block-only enforcement, no warn mode -- agents that skip aof_task_complete are always blocked
 - [25-01]: Enforcement metadata stored directly on task (enforcementReason, enforcementAt) for next retry agent visibility
 - [25-01]: Both success and failure branches in onRunComplete trigger enforcement events
+- [25-02]: Trimmed SKILL.md completion protocol to stay within 50% reduction threshold; full summary instruction delivered via formatTaskInstruction channel
+- [25-02]: Dual-channel agent guidance: SKILL.md (standing context) + formatTaskInstruction (per-dispatch reinforcement with consequences)
 
 ### Roadmap Evolution
 

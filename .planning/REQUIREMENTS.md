@@ -32,8 +32,8 @@ Requirements for event tracing milestone. Each maps to roadmap phases.
 
 ### Agent Guidance
 
-- [ ] **GUID-01**: SKILL.md updated to instruct agents that exiting without `aof_task_complete` blocks the task
-- [ ] **GUID-02**: `formatTaskInstruction()` includes completion expectations in dispatch-time context
+- [x] **GUID-01**: SKILL.md updated to instruct agents that exiting without `aof_task_complete` blocks the task
+- [x] **GUID-02**: `formatTaskInstruction()` includes completion expectations in dispatch-time context
 
 ## Future Requirements
 
@@ -81,8 +81,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PRES-02 | Phase 27 | Pending |
 | PRES-03 | Phase 27 | Pending |
 | PRES-04 | Phase 27 | Pending |
-| GUID-01 | Phase 25 | Pending |
-| GUID-02 | Phase 25 | Pending |
+| GUID-01 | Phase 25 | Complete |
+| GUID-02 | Phase 25 | Complete |
 
 **Coverage:**
 - v1.5 requirements: 16 total
