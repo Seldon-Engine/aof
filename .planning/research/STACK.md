@@ -1,318 +1,235 @@
 # Technology Stack
 
-**Project:** AOF v1.3 Seamless Upgrade
-**Researched:** 2026-03-03
-**Scope:** Stack additions/changes for config migration, DAG-as-default, smoke tests, rollback safety, and release validation
+**Project:** AOF v1.5 Event Tracing & Session Observability
+**Researched:** 2026-03-06
+**Scope:** Stack additions/changes for session transcript parsing, structured trace storage, CLI trace viewing, and completion enforcement
 
 ## Executive Assessment
 
-**No new dependencies required.** The existing stack already contains every library needed. The v1.3 milestone is an integration and hardening milestone, not a greenfield feature build. The work is writing new migration code, new test suites, and new release hooks -- all using tools already in the project.
+**No new runtime dependencies required.** The existing stack covers all needs for v1.5. Session transcript parsing is line-by-line JSONL (Node.js built-in `readline` or manual split), structured trace storage uses the same filesystem patterns as the task store, and CLI output uses the project's existing raw ANSI code approach (no library). Zod validates trace schemas. Vitest tests everything.
+
+The one area that warrants attention is the OpenClaw session JSONL format -- it is an internal format without a published schema, so AOF must parse it defensively with version detection.
+
+**Confidence:** HIGH -- all capabilities verified against installed packages and existing codebase patterns.
 
 ## Existing Stack (Confirmed Current)
 
-| Technology | Installed | Purpose | Status for v1.3 |
-|------------|-----------|---------|------------------|
-| yaml | 2.8.2 | YAML parse/stringify for project.yaml migration | Sufficient |
-| zod | 3.25.76 | Schema validation for migrated config | Sufficient |
-| vitest | 3.2.4 | Smoke and integration test runner | Sufficient |
-| release-it | 19.2.4 | Release pipeline with hook lifecycle | Sufficient |
-| @release-it/conventional-changelog | (installed) | Changelog generation from conventional commits | Sufficient |
-| write-file-atomic | 7.x | Atomic file writes for rollback-safe operations | Sufficient |
-| gray-matter | 4.0.3 | YAML frontmatter parsing for task migration | Sufficient |
-| TypeScript | 5.7.x | Type safety across migration code | Sufficient |
-| Node.js | 22 (pinned) | Runtime | Sufficient |
+| Technology | Installed | Purpose for v1.5 | Status |
+|------------|-----------|-------------------|--------|
+| Node.js | 22 (pinned) | `readline` for streaming JSONL parse, `fs/promises` for trace I/O | Sufficient |
+| TypeScript | 5.7.x | Type-safe trace schemas and parsers | Sufficient |
+| zod | 3.24.x | Session transcript schemas, trace record validation | Sufficient |
+| commander | 14.0.x | `aof trace <task-id>` command registration | Sufficient |
+| vitest | 3.0.x | Unit/integration tests for parser, trace store, CLI output | Sufficient |
+| write-file-atomic | 7.x | Atomic trace file writes | Sufficient |
+| yaml | 2.7.x | Reading task frontmatter to locate session IDs | Sufficient |
+| gray-matter | 4.0.3 | Task file parsing for trace correlation | Sufficient |
 
-**Confidence:** HIGH -- versions verified from installed `node_modules`.
+## What Each v1.5 Feature Needs
 
-## What Each v1.3 Feature Needs
+### 1. Session Transcript Parsing
 
-### 1. Config Migration (project.yaml gets workflowTemplates)
+**What:** Parse OpenClaw session `.jsonl` files into structured trace records. Each line is a JSON object with a `type` field.
 
-**Existing infrastructure:** The migration framework at `src/packaging/migrations.ts` already provides:
-- `Migration` interface with `up(ctx)` / `down(ctx)` lifecycle
-- `runMigrations()` with version comparison, history tracking, and ordered execution
-- Migration history persisted to `.aof/migrations.json`
-- Forward and reverse migration support
+**OpenClaw Session JSONL Format (verified from live files):**
 
-**Existing YAML tooling:** The `yaml` library (v2.8.2) is already used throughout the codebase for:
-- `src/projects/migration.ts` -- YAML frontmatter parse/stringify for task migration
-- `src/projects/manifest.ts` -- project.yaml write via `stringifyYaml`
-- `src/cli/commands/task-create-workflow.ts` -- project.yaml read via `parseYaml`
+```
+Line types:
+  session        - Session metadata (version, id, timestamp, cwd)
+  model_change   - Provider/model switch (provider, modelId)
+  thinking_level_change - Thinking level adjustment
+  custom         - Custom events (e.g., model-snapshot)
+  message        - Conversation turn (role: user|assistant|toolResult)
 
-**What to build (no new deps):**
-- A new `Migration` entry (e.g., `003-add-workflow-templates`) that:
-  1. Reads each project's `project.yaml`
-  2. Parses with `yaml` library
-  3. Adds empty `workflowTemplates: {}` section if absent
-  4. Writes back with `stringifyYaml` preserving formatting (yaml@2 handles this natively)
-  5. `down()` removes the `workflowTemplates` key
-- The `WorkflowConfig` to `WorkflowDefinition` conversion already exists in `gate-to-dag.ts` -- reuse for converting legacy `workflow.gates` into a default template entry
+Assistant message fields:
+  message.role       = "assistant"
+  message.content[]  = [{type: "thinking"}, {type: "text"}, {type: "toolCall"}]
+  message.usage      = {input, output, cacheRead, cacheWrite, totalTokens, cost: {input, output, cacheRead, cacheWrite, total}}
+  message.model      = "claude-sonnet-4-5"
+  message.provider   = "anthropic-api"
+  message.stopReason = "toolUse" | "endTurn"
 
-**Stack decision:** Use `yaml` library's `parseDocument()` API (not `parse()`) for the config migration because `parseDocument()` preserves comments and formatting, which matters when editing user config files. This is available in yaml@2 already installed.
+Tool call content block:
+  {type: "toolCall", id, name, arguments: {...}}
 
-**Why not add a dedicated config migration library (like `kyrage` or custom)?** The existing `Migration` framework is purpose-built and lightweight. Adding another migration framework creates two systems to maintain. The existing framework handles versioning, history, up/down, and ordering -- everything needed.
+Tool result message:
+  message.role       = "toolResult"
+  message.toolCallId = <matches toolCall.id>
+  message.toolName   = <tool name>
+  message.isError    = boolean
+```
 
-### 2. DAG Workflows as Default for New Tasks
+**Stack needed:** Node.js built-in only.
+- `fs/promises.readFile()` for small-to-medium session files (typical: 30-200 lines, <1MB)
+- `String.split('\n')` + `JSON.parse()` per line (same pattern as `EventLogger.query()`)
+- No streaming needed -- session files are bounded by agent timeout (5min default)
 
-**Existing infrastructure:**
-- `src/store/task-store.ts` create() already accepts `workflow?: { definition, templateName }`
-- `src/cli/commands/task-create-workflow.ts` resolves templates from `project.yaml`
-- `src/schemas/project.ts` already defines `workflowTemplates: z.record(TemplateNameKey, WorkflowDefinition).optional()`
-- `src/schemas/workflow.ts` is already marked `@deprecated` with "Will be removed in v1.3"
+**Why not use a JSONL library:** The parsing is trivial (split + JSON.parse), the project already does it in `EventLogger.query()`, and adding a dependency for one function call adds maintenance burden with zero value.
 
-**What to build (no new deps):**
-- Add a `defaultWorkflow` field to the ProjectManifest schema (string key referencing a workflowTemplates entry)
-- Modify task create path to auto-attach the default workflow when no explicit workflow is specified
-- The config migration (above) seeds a sensible default template
+**Schema approach:** Use Zod with `.passthrough()` for forward compatibility. Parse only the fields AOF needs; ignore unknown fields so future OpenClaw versions don't break AOF.
 
-**Stack decision:** This is a schema addition to the existing Zod schema in `src/schemas/project.ts`, plus a lookup in the task creation path. Zero new dependencies.
+### 2. Structured Trace Storage
 
-### 3. Smoke/Integration Tests for the Upgrade Path
+**What:** Write a trace summary file alongside task artifacts after session completion.
 
-**Existing infrastructure:**
-- vitest 3.2.4 with two configs: root `vitest.config.ts` (unit) and `tests/vitest.e2e.config.ts` (e2e)
-- E2E tests use tmpdir-based fixtures with `beforeEach`/`afterEach` cleanup (see `src/projects/__tests__/migration.test.ts`)
-- The packaging migration tests (`src/packaging/__tests__/migrations.test.ts`) demonstrate the pattern: create temp dir, run migrations, assert state
-- The project migration tests (`src/projects/__tests__/migration.test.ts`) demonstrate full upgrade flow: create legacy layout, migrate, verify, rollback, verify
+**Stack needed:** Existing only.
+- `write-file-atomic` for crash-safe trace writes (already used for task mutations)
+- Filesystem layout: `tasks/<status>/TASK-<id>/trace.json` (co-located with task)
+- Zod schema for trace record validation
 
-**What to build (no new deps):**
-
-A dedicated vitest config for upgrade smoke tests:
+**Trace record structure (recommended):**
 
 ```typescript
-// tests/vitest.upgrade.config.ts
-import { defineConfig } from "vitest/config";
-
-export default defineConfig({
-  test: {
-    include: ["tests/upgrade/**/*.test.ts"],
-    testTimeout: 30_000,
-    pool: "forks",
-    poolOptions: { forks: { singleFork: true } },
-    bail: 1,
-  },
+const TraceRecord = z.object({
+  taskId: z.string(),
+  sessionId: z.string(),
+  capturedAt: z.string().datetime(),
+  session: z.object({
+    startedAt: z.string().datetime(),
+    endedAt: z.string().datetime().optional(),
+    durationMs: z.number(),
+    model: z.string(),
+    provider: z.string(),
+  }),
+  turns: z.number(),           // Total conversation turns
+  toolCalls: z.number(),       // Total tool invocations
+  toolBreakdown: z.record(z.string(), z.number()), // tool_name -> count
+  usage: z.object({
+    inputTokens: z.number(),
+    outputTokens: z.number(),
+    cacheReadTokens: z.number(),
+    cacheWriteTokens: z.number(),
+    totalTokens: z.number(),
+    totalCost: z.number(),
+  }),
+  completion: z.object({
+    calledTaskComplete: z.boolean(),
+    outcome: z.string().optional(),
+    summary: z.string().optional(),
+  }),
+  errors: z.array(z.object({
+    turn: z.number(),
+    tool: z.string().optional(),
+    message: z.string(),
+  })),
 });
 ```
 
-**Test strategy using existing patterns:**
+### 3. CLI Trace Viewing (`aof trace <task-id>`)
 
-| Test Category | Pattern | Example |
-|--------------|---------|---------|
-| Config migration roundtrip | tmpdir + writeFile + runMigrations + readFile + assert | Pre-v1.2 project.yaml -> v1.3 with workflowTemplates |
-| Gate-to-DAG preservation | tmpdir + create legacy task + load via TaskStore + assert workflow field | Task with gate fields migrates to DAG on read |
-| DAG default attachment | tmpdir + create task without workflow + assert default workflow attached | New task gets project's defaultWorkflow |
-| Rollback safety | tmpdir + migrate + rollback + assert original state | Config, tasks, state all restored |
-| Tarball integrity | build tarball + extract to tmpdir + assert required files + npm ci + health check | All production files present, dependencies install |
-| Fresh install path | tmpdir + run installer setup logic + assert _inbox created + project.yaml valid | Clean install produces valid state |
-| Upgrade from v1.2 | tmpdir + create v1.2 state + run migrations + assert v1.3 state | v1.2 data preserved, new fields added |
+**What:** Display trace summary (default) or full debug output for a task's session trace.
 
-**Why not add a separate test framework?** vitest already handles everything. The existing e2e test patterns (tmpdir fixtures, sequential execution via forks, bail-on-failure) are exactly what upgrade smoke tests need. Adding a separate framework (like shellspec or bats for shell testing) would add complexity without benefit since the critical upgrade logic runs in Node.js, not in the shell installer.
+**Stack needed:** Existing only.
+- `commander` for command registration (same pattern as all other `aof` commands)
+- Raw ANSI escape codes for colored output (project convention -- see `src/views/renderers.ts`)
 
-**npm test script addition:**
+**Why not add chalk/picocolors:** The project already uses raw ANSI codes everywhere (`\x1b[36m` etc. in `renderers.ts`). Adding a color library now would create inconsistency. Follow the existing pattern.
 
-```json
-"test:upgrade": "./scripts/test-lock.sh run --config tests/vitest.upgrade.config.ts"
-```
+**Output modes:**
+- **Summary (default):** Task ID, session duration, model, total tokens, cost, tool call counts, completion status. Fits in ~15 lines.
+- **Debug (`--debug`):** Full turn-by-turn view with tool calls, token counts per turn, errors, and timing.
 
-### 4. Rollback Safety Mechanisms
+### 4. Completion Enforcement
 
-**Existing infrastructure:**
-- `src/projects/migration.ts` -- full rollback with `rollbackMigration()`: finds backup, restores dirs, handles timestamps
-- `src/packaging/installer.ts` -- `update()` with automatic backup/restore on failure
-- `scripts/install.sh` -- shell-level backup of data dirs before tarball extraction, restore on failure
-- `write-file-atomic` -- atomic file writes (write to temp, rename over original)
-- `src/packaging/migrations.ts` -- migration `down()` for reversible migrations
+**What:** Detect when an agent session ends without calling `aof_task_complete`, and flag/handle it.
 
-**What to build (no new deps):**
+**Stack needed:** Existing only.
+- `AgentRunOutcome` callback (already wired in `OpenClawAdapter.runAgentBackground()`)
+- `EventLogger` for logging enforcement events
+- New event types in `EventType` Zod enum: `"trace.captured"`, `"completion.missing"`, `"completion.enforced"`
 
-The rollback safety for v1.3 is a combination of:
+**Integration point:** The `onRunComplete` callback in `OpenClawAdapter` already fires when an agent run ends. The completion enforcement logic hooks into this:
+1. Agent run completes (callback fires)
+2. Check if `aof_task_complete` was called during the session (check task status)
+3. If not: log `completion.missing` event, optionally force-complete with degraded status
 
-1. **Config backup before migration:** Copy `project.yaml` to `project.yaml.pre-v1.3` before modifying
-2. **Reversible migration with `down()`:** The config migration must implement `down()` to strip `workflowTemplates` and `defaultWorkflow`
-3. **Atomic config writes:** Use `write-file-atomic` (already a dependency) instead of raw `writeFile` for project.yaml updates
-4. **Version gating:** Record the migration in `.aof/migrations.json` so it never re-runs
+### 5. Session Data Access (OpenClaw APIs)
 
-**Why not add a transactional filesystem library (like `fs-jetpack` or `graceful-fs`)?** The existing `write-file-atomic` handles the critical path (atomic rename on POSIX). The backup-then-migrate-then-verify pattern in `projects/migration.ts` is battle-tested within this codebase. A transactional layer adds abstraction without improving safety beyond what atomic rename provides on a single-machine deployment.
+**What:** Locate session transcript files for a given task/session ID.
 
-**Rollback command pattern:**
+**Two access paths (no new dependencies):**
 
-```typescript
-// In migration down():
-async down(ctx: MigrationContext) {
-  // For each project's project.yaml:
-  // 1. Load document with yaml.parseDocument() (preserves comments)
-  // 2. Delete 'workflowTemplates' and 'defaultWorkflow' keys
-  // 3. Write back atomically
-}
-```
+1. **Direct filesystem read** (primary): `resolveSessionFilePath(sessionId)` from OpenClaw's `extensionAPI.js` returns the path to the `.jsonl` file. AOF already loads this module. Path pattern: `~/.openclaw/agents/<agent>/sessions/<sessionId>.jsonl`
 
-### 5. Release Validation Before Publishing
+2. **OpenClaw gateway tools** (alternative): `sessions_list` and `sessions_history` are registered gateway tools (verified in INTEGRATIONS.md). AOF can call these via the plugin API if needed, but direct file read is simpler and doesn't require gateway to be running.
 
-**Existing infrastructure:**
-- `.release-it.json` already has `before:init` hooks: `["npm run typecheck", "npm test"]`
-- `scripts/build-tarball.mjs` validates required files exist before packaging
-- `.github/workflows/release.yml` runs typecheck, build, test before creating tarball
-- `.github/workflows/ci.yml` runs on PRs with Node 22 and 23
+**Recommendation:** Use direct filesystem read. The session file path is deterministic (`resolveSessionFilePath`), the file format is known, and it avoids a dependency on the gateway being active during trace capture.
 
-**What to build (no new deps):**
+## What NOT to Add
 
-Extend the existing release-it hooks and CI workflow:
-
-```jsonc
-// .release-it.json additions
-{
-  "hooks": {
-    "before:init": [
-      "npm run typecheck",
-      "npm test",
-      "npm run test:upgrade"  // NEW: run upgrade smoke tests
-    ],
-    "after:bump": [
-      "npm run build",
-      "node scripts/build-tarball.mjs v${version}",
-      "node scripts/verify-tarball.mjs v${version}"  // NEW: verify tarball contents
-    ]
-  }
-}
-```
-
-**New tarball verification script** (`scripts/verify-tarball.mjs`):
-
-```javascript
-// Extracts tarball to tmpdir, verifies:
-// 1. All required files present (dist/, package.json, etc.)
-// 2. npm ci --production succeeds
-// 3. dist/cli/index.js is executable
-// 4. Version in package.json matches tag
-// 5. No dev-only files leaked (tsconfig, vitest.config, etc.)
-// 6. Tarball size within expected range (catches accidental bloat)
-```
-
-**CI workflow enhancement** (`.github/workflows/release.yml`):
-
-```yaml
-# Add between "Test" and "Build release tarball":
-- name: Run upgrade smoke tests
-  run: npm run test:upgrade
-
-# Add after "Build release tarball":
-- name: Verify tarball
-  run: node scripts/verify-tarball.mjs ${{ steps.version.outputs.version }}
-```
-
-**Why not add a separate release validation tool (like semantic-release)?** release-it is already wired in, has the hook lifecycle needed, and the team is familiar with it. semantic-release has a different philosophy (fully automated releases from commit messages) that conflicts with the explicit `release:minor` / `release:patch` commands already in package.json. Switching would be a lateral move with churn and no benefit.
-
-## Stack: What NOT to Add
-
-| Considered | Why Not |
-|-----------|---------|
-| `semver` npm package | The existing `compareVersions()` in `src/packaging/migrations.ts` handles the simple cases needed (X.Y.Z comparison). Semver's prerelease/range features aren't needed for migration version gating. |
-| `fs-jetpack` / `fs-extra` | `write-file-atomic` + Node's built-in `fs/promises` cover all needs. The codebase is already consistent with these. |
-| `shellspec` / `bats` (shell test frameworks) | The installer's shell portion is thin (download + extract + hand off to Node.js). Testing the Node.js setup logic with vitest is more valuable and already working. |
-| `kyrage` / `umzug` (migration frameworks) | The existing `Migration` framework in `src/packaging/migrations.ts` is purpose-built and lightweight. Adding another creates two migration systems. |
-| `semantic-release` | Already using release-it with conventional-changelog plugin. Switching is churn. |
-| `ajv` (JSON Schema validator) | Zod is the validation layer. Adding JSON Schema validation creates a parallel system. |
-| `deep-diff` / `diff` | Config migration doesn't need diffing -- it's additive (add workflowTemplates key). |
-| `inquirer` (additional prompts) | Already have `@inquirer/prompts`. The upgrade path should be non-interactive (`--auto` flag). |
-
-## Integration Points
-
-### Migration Registration
-
-New v1.3 migrations should be registered in a central registry file and imported by the installer setup:
-
-```
-src/packaging/migrations/
-  index.ts           -- exports all migrations in order
-  001-init-schema.ts -- (existing, if any)
-  002-project-layout.ts -- (existing, from v1.1)
-  003-workflow-templates.ts -- NEW: adds workflowTemplates to project.yaml
-  004-default-workflow.ts -- NEW: sets defaultWorkflow on projects that had workflow.gates
-```
-
-### Schema Changes
-
-```
-src/schemas/project.ts:
-  + defaultWorkflow: z.string().optional()  // references key in workflowTemplates
-
-src/schemas/workflow.ts:
-  - Remove @deprecated tag, replace with full removal
-  - Move any remaining gate types to migration-only code
-```
-
-### Test Suite Organization
-
-```
-tests/
-  upgrade/
-    config-migration.test.ts    -- project.yaml migration roundtrips
-    gate-to-dag-upgrade.test.ts -- legacy task workflows convert correctly
-    dag-default.test.ts         -- new tasks get default workflow
-    rollback.test.ts            -- migration reversal works
-    tarball-integrity.test.ts   -- built tarball contains required files
-    fresh-install.test.ts       -- clean install from scratch
-```
-
-### Release Pipeline Order
-
-```
-1. npm run typecheck           (existing, before:init)
-2. npm test                    (existing, before:init)
-3. npm run test:upgrade        (NEW, before:init)
-4. npm run build               (NEW location, after:bump)
-5. build-tarball.mjs           (NEW location, after:bump)
-6. verify-tarball.mjs          (NEW, after:bump)
-7. git tag + push              (release-it automatic)
-8. GitHub Release + upload     (release-it/GitHub Actions)
-```
+| Library | Why Not |
+|---------|---------|
+| `chalk` / `picocolors` | Project uses raw ANSI codes everywhere; adding a library creates inconsistency |
+| `jsonl-parse` / `ndjson` | Trivial parsing (split + JSON.parse); existing pattern in EventLogger |
+| `@opentelemetry/*` | Explicitly deferred to v2 per PROJECT.md |
+| `cli-table3` / `tty-table` | Summary output is simple enough for manual formatting; `renderers.ts` proves the pattern |
+| `dayjs` / `date-fns` | ISO date handling with built-in `Date` is sufficient for duration calculations |
+| `ora` / spinners | Trace reading is fast (local file, <1MB); no async loading indicator needed |
+| Any JSONL streaming library | Session files are bounded by timeout (5min = ~200 turns max, well under memory limits) |
 
 ## Alternatives Considered
 
 | Category | Recommended | Alternative | Why Not |
 |----------|-------------|-------------|---------|
-| Config migration | Existing Migration framework + yaml parseDocument | New YAML-specific migration tool | Already have a working migration framework; adding another is duplication |
-| Test runner | vitest (existing) | Jest, bats, shellspec | vitest is already configured, familiar, and handles the tmpdir fixture pattern well |
-| Release pipeline | release-it hooks (existing) | GitHub Actions-only validation | release-it hooks run locally too (via `npm run release:dry`), providing faster feedback |
-| Atomic writes | write-file-atomic (existing) | fs-extra, custom rename wrapper | Already a dependency, already used in task-store.ts |
-| YAML handling | yaml@2 parseDocument (existing) | js-yaml, custom parser | yaml@2 already installed, parseDocument preserves comments |
+| JSONL parsing | Built-in split+parse | `ndjson` / `jsonl-parse` | Zero value over 3 lines of code; adds dep |
+| CLI colors | Raw ANSI (existing) | `picocolors` (2.1KB) | Would work but creates inconsistency with 150+ files using raw codes |
+| Trace storage | JSON file per task | SQLite trace table | Filesystem-based principle; trace is per-task, not queryable across tasks |
+| Session access | Direct file read | Gateway API (`sessions_history`) | Requires gateway running; file read is simpler and more reliable |
+| Trace format | Single `trace.json` | Append-only JSONL | Traces are write-once summaries, not event streams; JSON is simpler |
 
-## Installation
+## Integration Points with Existing Stack
 
-No new packages to install. Run existing:
+### EventLogger Extension
+Add new event types to `src/schemas/event.ts`:
+```typescript
+// Add to EventType enum:
+"trace.captured",       // Trace successfully written
+"completion.missing",   // Agent ended without aof_task_complete
+"completion.enforced",  // System force-completed a task
+```
+No schema changes beyond enum extension.
 
-```bash
-npm ci
+### OpenClawAdapter Extension
+The `onRunComplete` callback in `runAgentBackground()` is the hook point. After the callback fires:
+1. Read session file via `resolveSessionFilePath(sessionId)`
+2. Parse JSONL into trace record
+3. Write `trace.json` to task directory
+4. Log `trace.captured` event
+
+### Commander CLI Extension
+Register `aof trace <task-id>` in `src/cli/program.ts` following existing command patterns:
+```typescript
+registerTraceCommands(program);
 ```
 
-## Version Verification Commands
+### Task Store Extension
+Add `getTraceDir(taskId)` method or utility to resolve `tasks/<status>/TASK-<id>/` as the trace storage location. The task's work directory already exists for artifact handoff in DAG workflows.
 
-```bash
-# Verify all required tools are at expected versions
-node -e "console.log('yaml:', require('./node_modules/yaml/package.json').version)"
-# Expected: 2.8.x
+## File Organization (Recommended)
 
-node -e "console.log('vitest:', require('./node_modules/vitest/package.json').version)"
-# Expected: 3.2.x
-
-node -e "console.log('release-it:', require('./node_modules/release-it/package.json').version)"
-# Expected: 19.2.x
-
-node -e "console.log('zod:', require('./node_modules/zod/package.json').version)"
-# Expected: 3.25.x
+```
+src/
+  trace/
+    parser.ts           # Parse OpenClaw session JSONL -> structured data
+    store.ts            # Read/write trace.json files
+    schemas.ts          # Zod schemas for trace records
+    formatter.ts        # CLI output formatting (summary + debug modes)
+    index.ts            # Public API
+    __tests__/
+      parser.test.ts
+      store.test.ts
+      formatter.test.ts
+  cli/
+    commands/
+      trace.ts          # aof trace <task-id> command
 ```
 
 ## Sources
 
-- yaml@2 parseDocument API: verified via installed node_modules (v2.8.2)
-- Existing migration framework: `src/packaging/migrations.ts` (read from codebase)
-- Existing project migration: `src/projects/migration.ts` (read from codebase)
-- Existing gate-to-DAG: `src/migration/gate-to-dag.ts` (read from codebase)
-- release-it hooks: [release-it GitHub](https://github.com/release-it/release-it)
-- release-it hook lifecycle: [release-it docs](https://github.com/release-it/release-it/blob/main/docs/configuration.md)
-- vitest config: [vitest.dev](https://vitest.dev/guide/cli)
-- Existing installer: `scripts/install.sh` (read from codebase)
-- Existing release workflow: `.github/workflows/release.yml` (read from codebase)
-- Existing tarball builder: `scripts/build-tarball.mjs` (read from codebase)
-- write-file-atomic: already in package.json dependencies
-- Existing test patterns: `src/packaging/__tests__/migrations.test.ts`, `src/projects/__tests__/migration.test.ts`
+- OpenClaw session JSONL format: Verified from live session file `~/.openclaw/agents/swe-pm/sessions/927da406-29a0-465a-9267-3a0a1130b3f9.jsonl`
+- Existing ANSI pattern: `src/views/renderers.ts` (raw escape codes, no library)
+- Existing JSONL parsing: `src/events/logger.ts` lines 212-240 (`EventLogger.query()`)
+- Gateway adapter: `src/openclaw/openclaw-executor.ts` (`resolveSessionFilePath`, `onRunComplete`)
+- Event schema: `src/schemas/event.ts` (EventType Zod enum)
+- Package.json: Verified installed dependencies and versions
+- PROJECT.md: v1.5 milestone scope, constraints, out-of-scope items

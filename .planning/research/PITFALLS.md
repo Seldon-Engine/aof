@@ -1,425 +1,324 @@
-# Pitfalls Research: v1.3 Seamless Upgrade
+# Pitfalls Research: v1.5 Event Tracing & Session Observability
 
-**Domain:** CLI tool upgrade/migration/release pipeline for filesystem-based agent orchestration
-**Researched:** 2026-03-03
-**Confidence:** HIGH (based on direct codebase analysis + domain research)
+**Domain:** Agent event tracing, completion enforcement, and session trace capture for filesystem-based orchestration
+**Researched:** 2026-03-06
+**Confidence:** HIGH (based on direct codebase analysis of existing completion, executor, and schema systems)
 
 ---
 
 ## Critical Pitfalls
 
-### Pitfall 1: Migration History Records Success But Filesystem Is Partially Written
+Mistakes that cause rewrites, break existing agents, or lose data.
+
+### Pitfall 1: Completion Enforcement Breaks the Existing Fallback Path
 
 **What goes wrong:**
-The migration framework in `src/packaging/migrations.ts` records each migration to `migrations.json` *after* the `up()` function completes, but the `up()` function itself may perform multiple filesystem operations. If the process crashes mid-migration (after some files are written but before all are), the migration is NOT recorded in history. On next run, the migration re-executes from the top, but now some files already exist in their new format. The migration either fails (file already exists), silently overwrites partial state, or produces duplicated/corrupted data.
+The current system has a deliberate fallback in `assign-executor.ts` (lines 172-226): when an agent finishes without calling `aof_task_complete`, the `onRunComplete` callback detects the task is still `in-progress` and auto-transitions it through `review -> done` (on success) or to `blocked` (on failure). This fallback is the safety net that makes AOF "tasks never get dropped" work today.
 
-This is especially dangerous for AOF because:
-- Task files are YAML frontmatter with markdown bodies -- partial YAML writes corrupt the entire file
-- The `writeFile` calls in `migrations.ts` are NOT atomic (plain `fs.writeFile`, not `write-file-atomic`)
-- Task store uses `writeFileAtomic` but the migration framework does not
+If completion enforcement naively rejects tasks that don't call `aof_task_complete`, the fallback path becomes a punishment loop: agent finishes work successfully -> enforcement rejects it -> task gets blocked or deadlettered -> after 3 failures, task goes to deadletter. The agent did the work but didn't call the tool, and now the completed work is lost.
 
 **Why it happens:**
-Developers test migrations on clean data and assume `up()` is atomic. Filesystem operations are not transactional -- there is no rollback if step 3 of 5 fails.
+The enforcement goal ("require explicit `aof_task_complete`") directly conflicts with the existing resilience goal ("tasks survive agent crashes"). Developers implement enforcement as a hard gate without recognizing that the fallback path handles a real failure mode: agents may not have the `aof_task_complete` tool available (OpenClaw plugin wiring issue), may hit token limits before calling it, or may crash mid-execution.
 
-**How to avoid:**
-1. Use `write-file-atomic` for ALL writes inside migration `up()` functions (the codebase already depends on this package)
-2. Make each migration idempotent: check current state before acting, skip already-applied changes
-3. Add a per-migration checkpoint within `up()` for multi-step migrations: write a breadcrumb file at each step so partial re-runs skip completed steps
-4. Record migration as "in-progress" before starting, then "complete" after -- so a re-run of a partially applied migration knows it needs cleanup, not fresh application
+**Consequences:**
+- Previously-completing tasks start deadlettering
+- Work is done but not recorded
+- Operators see a spike in deadletter tasks after v1.5 upgrade with no code change on agent side
+- Trust in the system erodes ("it worked before the update")
 
-**Warning signs:**
-- Migration `up()` function has more than one `writeFile` call
-- No idempotency checks inside `up()` (e.g., "if file already has new format, skip")
-- Tests only run migrations on clean state, never on partially-migrated state
+**Prevention:**
+1. Enforcement must be graduated, not binary. Phase 1: log a warning event (`completion.enforcement.fallback_used`) when the fallback path fires, but still allow the fallback. Phase 2: add a per-task or per-agent `requireExplicitComplete: true` flag that enables hard enforcement opt-in. Phase 3: make it default after telemetry shows agents reliably call the tool.
+2. The `onRunComplete` callback in `assign-executor.ts` should record WHY the agent didn't call `aof_task_complete` (timeout? error? success without tool call?) as structured metadata on the task. This data feeds the trace.
+3. The SKILL.md prompt already includes a `**CRITICAL:** Before starting work, verify that the \`aof_task_complete\` tool is available` instruction (openclaw-executor.ts line 314). Enforcement should check whether the agent acknowledged this instruction before penalizing.
+4. Never remove the fallback path entirely -- downgrade it to a "fallback with warning event" that is always available as a safety net.
 
-**Phase to address:** Phase 1 (Config Migration) -- harden migration framework before writing any real migrations
+**Detection:**
+- Monitor `dispatch.fallback` events in events.jsonl -- a spike after deployment means enforcement is too aggressive
+- Test the upgrade path: deploy v1.5 with existing agents that do NOT have updated SKILL.md and verify tasks still complete
+- CI test: spawn a mock agent that exits without calling `aof_task_complete` and assert the task still reaches `done` (with a warning event)
+
+**Phase to address:** Must be the first thing implemented -- before any trace capture or CLI work.
 
 ---
 
-### Pitfall 2: Lazy Gate-to-DAG Migration Silently Fails for Tasks Without Workflow Config
+### Pitfall 2: Race Condition Reading OpenClaw Session .jsonl Files
 
 **What goes wrong:**
-The lazy migration in `task-store.ts` (lines 248-254, 328-337) converts gate-format tasks to DAG format on read. It requires a `WorkflowConfig` from `project.yaml` to know the gate definitions. But the migration silently logs a warning and returns the task unchanged when:
-- `project.yaml` does not exist (fresh project directory, moved files)
-- `project.yaml` exists but has no `workflow.gates` field (config was updated to DAG format but old tasks remain)
-- `project.yaml` has a different workflow than the one the task was created with
+OpenClaw writes session transcripts as `.jsonl` files (the `resolveSessionFilePath` function returns paths like `/tmp/s/{sessionId}.jsonl`). AOF's trace capture needs to read these files after the agent session completes. But there is a race condition:
 
-The task retains its gate fields, the scheduler's dual gate/DAG paths continue to diverge, and the deprecated gate evaluator (`@deprecated Since v1.2. Will be removed in v1.3.`) is still being called. When v1.3 removes the gate evaluator as promised, these un-migrated tasks will break silently -- the scheduler will not know how to advance them.
+1. `runEmbeddedPiAgent` returns (the agent is "done")
+2. AOF's `onRunComplete` callback fires
+3. AOF tries to read the session .jsonl file
+4. OpenClaw may still be flushing the final lines to disk (write buffers, fsync not yet called)
+
+The result: truncated traces, missing the final tool calls (including `aof_task_complete` itself), or `ENOENT` if the file hasn't been created yet (short sessions).
 
 **Why it happens:**
-Lazy migration defers work to "whenever the task is next accessed." But the migration depends on external config state (`project.yaml`) that can change independently from the task. If the config is updated first and the tasks are not accessed before the gate code is removed, there is a window where migration becomes impossible.
+The `runEmbeddedPiAgent` promise resolves when the agent's main loop ends, but the session file writer is a separate I/O stream that may flush asynchronously. This is a classic producer-consumer race: the producer (OpenClaw session writer) and the consumer (AOF trace reader) don't share a synchronization primitive.
 
-**How to avoid:**
-1. Before removing gate evaluator code, run an eager scan: iterate ALL tasks across ALL projects and verify none still have `gate` fields
-2. Add a startup health check that counts tasks with `gate` fields and warns/blocks if any remain
-3. The v1.3 upgrade migration should eagerly migrate all remaining gate tasks (not rely on lazy path)
-4. If `project.yaml` lacks workflow config but tasks have gate fields, reconstruct a default config from the gate fields themselves (the gate data is self-describing: `gate.current` tells you which gates exist)
+**Consequences:**
+- Traces missing the completion event (ironic for a tracing feature)
+- Intermittent truncation that only shows up under load (when disk I/O is slow)
+- Flaky tests that pass on fast local disks but fail in CI
 
-**Warning signs:**
-- Tasks in `tasks/in-progress/` or `tasks/blocked/` still have `gate` field after upgrade
-- Console warnings: `[gate-to-dag] Task X has gate fields but no workflow config provided`
-- `getByPrefix()` in task-store.ts (line 276-292) does NOT run the lazy migration -- tasks accessed via prefix search skip migration entirely
+**Prevention:**
+1. Do NOT read the session file in the `onRunComplete` callback. Instead, record the session file path in task metadata (`sessionFilePath`) and read it lazily -- only when `aof trace <task-id>` is called or during a scheduled trace-capture pass.
+2. Add a small delay (500ms-1s) or a file-stable check (stat the file twice, 200ms apart, and verify size hasn't changed) before reading.
+3. Use a streaming JSONL reader that handles truncated final lines gracefully (skip incomplete trailing line instead of throwing a parse error).
+4. Store the captured trace as a separate file in the task's work directory (e.g., `tasks/done/TASK-xxx/trace.jsonl`) rather than depending on the OpenClaw session file remaining available. OpenClaw may clean up session files.
+5. Handle `ENOENT` gracefully -- short sessions or test sessions may not produce a file. The trace output should say "No session transcript available" rather than crashing.
 
-**Phase to address:** Phase 1 (Config Migration) -- eager scan + migration as part of upgrade, not left to lazy path
+**Detection:**
+- Test with a mock session file that is still being written (append lines after the reader starts)
+- Test with an empty/missing session file
+- Test with a session file that has a truncated final JSON line
+
+**Phase to address:** Implement trace capture with defensive I/O from the start. Do not assume the file is complete when you read it.
 
 ---
 
-### Pitfall 3: YAML Config Writes Destroy Comments and Reformat User Files
+### Pitfall 3: CompletionReportPayload Schema Extension Breaks Existing Agents
 
 **What goes wrong:**
-AOF's config manager (`src/config/manager.ts` line 72) uses `stringifyYaml(raw, { lineWidth: 120 })` to write YAML. The `yaml` npm package (eemeli/yaml) does preserve comments when using its `Document` API, but AOF parses with `parseYaml()` (which returns a plain JS object) and then stringifies back. This round-trip through plain objects **destroys all YAML comments, reorders keys, changes quoting style, and normalizes whitespace**.
+The `CompletionReportPayload` schema in `schemas/protocol.ts` has fixed required fields: `outcome`, `summaryRef`, `tests`, `notes`. If v1.5 adds new required fields (e.g., `traceId`, `sessionMetrics`, `toolCallCount`) to capture richer completion data, every existing agent that calls `aof_task_complete` will start failing Zod validation because they don't send the new fields.
 
-For the org chart (`org-chart.yaml`) -- which is the primary human-edited config file in AOF -- this means:
-- Developer comments explaining team configurations are lost
-- Custom formatting/grouping of agents is destroyed
-- String quoting changes (single vs double quotes) make diffs noisy
-- Users who carefully organized their config file find it rewritten into a different style
-
-This is a known problem across the YAML ecosystem. Discourse [sponsored a fix](https://blog.discourse.org/2026/02/how-we-fixed-yaml-comment-preservation-in-ruby-and-why-we-sponsored-it/) for Ruby's Psych library. The `yaml` npm package supports comment preservation via `parseDocument()` + `Document.toString()`, but AOF does not use this API.
+This is particularly dangerous because:
+- The protocol schema is used in the router (`protocol/router.ts`) which validates incoming messages
+- Agents may have cached/stale SKILL.md from before the update
+- OpenClaw subagent sessions use the tool schema from the MCP server, which is wired at gateway startup -- restarting the gateway picks up new schemas, but running sessions don't
 
 **Why it happens:**
-Developers parse YAML to JS objects (the natural API) without realizing the round-trip is lossy. Comment preservation requires using the AST/Document API, which is more complex.
+Schema-first design (a strength of AOF) becomes a hazard when schemas evolve. Zod's `.object()` is strict by default -- extra fields are stripped, missing fields fail validation. Adding required fields is a breaking change.
 
-**How to avoid:**
-1. For config migration, use `yaml.parseDocument()` instead of `yaml.parse()` -- the Document API preserves comments, formatting, and key order
-2. For surgical changes (adding a `workflowTemplates` key), use the Document API to append to the existing AST rather than rebuilding from scratch
-3. Existing `config set` command should also be migrated to Document API (but that is separate from v1.3)
-4. If full Document API migration is too costly, use a "patch" approach: read file as string, locate insertion point via regex/AST, splice in new YAML block, never rewrite the whole file
+**Consequences:**
+- Agents calling `aof_task_complete` get validation errors
+- Tasks pile up in `in-progress` because completion is rejected
+- The fallback path (Pitfall 1) fires for every task, flooding logs
 
-**Warning signs:**
-- `git diff` on `org-chart.yaml` after upgrade shows changes to lines that were not logically modified
-- Users report "my config was reformatted" or "my comments disappeared"
-- Config validation passes but the file looks different
+**Prevention:**
+1. ALL new fields on `CompletionReportPayload` must be `.optional()` with `.default()` values. No exceptions.
+2. If the `aof_task_complete` MCP tool input schema changes, add new fields as optional with defaults. The tool handler should compute/populate missing fields server-side rather than requiring the agent to send them.
+3. Version the completion payload: add a `payloadVersion?: number` field that defaults to `1`. New fields are only expected when `payloadVersion >= 2`. This lets old agents continue working.
+4. Write a migration test: parse a v1.4-era completion report against the v1.5 schema and assert it passes validation.
+5. Use `.passthrough()` on the Zod schema if you need agents to include arbitrary trace metadata without pre-defining every field.
 
-**Phase to address:** Phase 1 (Config Migration) -- use Document API for any config file modifications during upgrade
+**Detection:**
+- CI test: validate sample completion payloads from v1.4 against v1.5 schemas
+- Monitor `protocol.message.rejected` events after deployment
+
+**Phase to address:** Schema changes must happen first, before any code that depends on new fields.
 
 ---
 
-### Pitfall 4: `schemaVersion: 1` Is Hardcoded Everywhere With No Bump Mechanism
+## Moderate Pitfalls
+
+### Pitfall 4: Disk Space Exhaustion from Unbounded Trace Storage
 
 **What goes wrong:**
-The AOF config schema (`src/schemas/config.ts` line 66) uses `z.literal(1)` for `schemaVersion`. The org chart also uses `schemaVersion: 1`. Task frontmatter uses `schemaVersion: 1`. There is no mechanism to:
-- Detect which schema version a file was written with (always 1)
-- Bump the schema version when the schema changes
-- Reject files with an unknown schema version
-- Run version-specific parsing logic
+Each task gets a trace file copied from the OpenClaw session .jsonl. Session files can be large: a 30-minute agent session with verbose tool calls can produce 1-10MB of JSONL. With the scheduler running autonomously and completing dozens of tasks per day, trace storage grows unboundedly. On a single-machine deployment (the only supported mode), this eventually fills the disk.
 
-When v1.3 adds `workflowTemplates` to `project.yaml` or changes task frontmatter to require `workflow` instead of `gate`, the schema version should bump. Without a bump, there is no way to distinguish "pre-v1.3 file that needs migration" from "v1.3 file that is just missing the new field."
+The problem is worse than raw file size because:
+- OpenClaw session files contain full request/response bodies (including file contents the agent read)
+- Tasks in `done/` are never cleaned up automatically
+- The `~/.openclaw/aof/` data directory is on the same partition as the system
 
-**Why it happens:**
-Schema version was introduced as a future-proofing measure but was never actually used for anything. The literal `1` makes it impossible to increment without breaking validation of existing files.
+**Prevention:**
+1. Define a retention policy from day one: traces older than N days (default: 30) are auto-deleted by a scheduler maintenance pass.
+2. Set a maximum trace file size (e.g., 5MB). If the session .jsonl exceeds this, capture only the first and last N lines (head + tail) to preserve the beginning (dispatch context) and end (completion).
+3. Store traces compressed (gzip). JSONL compresses very well (10-20x ratio for repetitive tool call JSON).
+4. Make trace capture opt-in per task or per agent via the org chart config, not always-on. A `trace: true` field on the task or agent config.
+5. Add a `aof trace --cleanup` CLI command for manual cleanup.
+6. Log a warning event when trace storage exceeds a threshold (e.g., 500MB total).
 
-**How to avoid:**
-1. Change `z.literal(1)` to `z.union([z.literal(1), z.literal(2)])` or `z.number().int().min(1)` to allow version progression
-2. Write the new schema version into files during migration
-3. Use schema version to branch parsing logic: version 1 files get lazy migration, version 2 files are parsed directly
-4. The migration itself should bump schema version as its LAST step (so incomplete migrations leave version at 1, signaling "needs re-migration")
+**Detection:**
+- Monitor disk usage of `~/.openclaw/aof/tasks/` over time
+- Add a health check to `aof smoke` that warns if trace storage exceeds threshold
 
-**Warning signs:**
-- Zod validation fails on files that have been upgraded (because `schemaVersion: 2` does not match `z.literal(1)`)
-- All files say `schemaVersion: 1` even after upgrade, making it impossible to audit migration completeness
-
-**Phase to address:** Phase 1 (Config Migration) -- schema version bump should be part of the migration design
+**Phase to address:** Build retention policy and size limits into the trace capture implementation, not as a follow-up.
 
 ---
 
-### Pitfall 5: Release Pipeline Builds Tarball Without Testing the Tarball Itself
+### Pitfall 5: SKILL.md Token Budget Exceeded by Tracing Instructions
 
 **What goes wrong:**
-The release workflow (`.github/workflows/release.yml`) runs typecheck, build, and test BEFORE building the tarball. The tarball is then built by `scripts/build-tarball.mjs` which copies specific files into a staging directory and tars them. But nobody tests the tarball contents:
-- The tarball is not extracted and verified
-- `npm ci --production` is not run against the staged package.json
-- The CLI entry point is not executed from the tarball
-- There is no SHA256 checksum for integrity verification
+v1.4 invested heavily in compressing SKILL.md from 3411 to 1665 tokens (51.2% reduction) with a CI budget gate enforcing a 2150-token ceiling. Adding tracing instructions ("always report your tool calls", "include session metrics in completion", "use structured output for trace data") pushes the SKILL.md over the budget gate, causing CI to fail.
 
-The `build-tarball.mjs` script strips `scripts.prepare` and `simple-git-hooks` from package.json (line 49-50) which is correct, but if a new script or field is added that breaks production install, it will not be caught. The installer (`install.sh`) runs `npm ci --production` on the extracted tarball -- if the tarball's package.json is subtly wrong, every user's install fails.
-
-Additionally, the release-it config (`.release-it.json`) has `before:init` hooks that run typecheck and test, but the GitHub Actions workflow ALSO runs these -- the tarball build happens after both, creating a false sense of security ("tests passed, so the release is good").
+If developers bypass the budget gate to add tracing instructions, the seed tier (563 tokens) bloats, increasing context cost for every dispatched task -- directly undoing v1.4's optimization.
 
 **Why it happens:**
-Testing the artifact (tarball) rather than the source is an often-overlooked step. It is natural to assume "if the source passes tests, the packaged version will work too."
+Tracing requires agent cooperation, and cooperation requires instructions. The tension is between "agents need to know about tracing" and "context budget is fixed."
 
-**How to avoid:**
-1. After `build-tarball.mjs`, extract the tarball to a clean temp directory
-2. Run `npm ci --production` in that temp directory
-3. Run `node dist/cli/index.js --version` to verify the CLI boots
-4. Run a minimal smoke test (e.g., `node dist/cli/index.js config validate` against a fixture)
-5. Generate SHA256 checksum and attach to the GitHub release alongside the tarball
-6. Consider a separate `verify-tarball` job that downloads the release artifact and tests it
+**Prevention:**
+1. Do NOT add tracing instructions to SKILL.md. Tracing should be infrastructure-level: AOF captures the session file and extracts trace data server-side, without requiring the agent to do anything differently.
+2. The one instruction that matters -- "call `aof_task_complete`" -- is already in the prompt (openclaw-executor.ts `formatTaskInstruction`). That prompt is NOT counted against the SKILL.md budget because it's injected at dispatch time, not in the skill file.
+3. If agent-side reporting is absolutely needed, add it to the dispatch prompt in `formatTaskInstruction()` rather than SKILL.md. The dispatch prompt is per-task and doesn't have a shared budget gate.
+4. The `aof_task_complete` tool schema can include optional fields for agent-reported metrics without changing the skill documentation. Agents that know about the fields use them; others don't.
+5. If SKILL.md must change, trade existing content for tracing content (remove something to make room) rather than raising the budget ceiling.
 
-**Warning signs:**
-- Tarball size changes dramatically between releases (missing or extra files)
-- Users report `npm ci` failures after download
-- `install.sh` fails at the `npm ci --production` step
+**Detection:**
+- CI budget gate test (`context/__tests__/budget.test.ts`) will catch this automatically
+- Track seed tier token count across versions
 
-**Phase to address:** Phase 3 (Release Pipeline) -- add tarball verification step before upload
+**Phase to address:** Design tracing as server-side capture from the start. Only add agent-side instructions if server-side capture proves insufficient.
 
 ---
 
-### Pitfall 6: Installer Backup/Restore Does Not Cover All State Directories
+### Pitfall 6: Debug Flag Per-Task Creates Schema Migration Headache
 
 **What goes wrong:**
-The shell installer (`scripts/install.sh` lines 284-295) backs up: `tasks events memory state data logs memory.db memory-hnsw.dat .version`. But AOF's actual state includes:
-- `Projects/` directory (the v1.1 multi-project layout with per-project tasks, events, memory)
-- `org/org-chart.yaml` (the primary config file)
-- `.aof/migrations.json` (migration history)
-- Per-project `project.yaml` files
-- Run artifacts in `state/` (lease files, heartbeat files)
-- Views directory (`views/`)
-
-If a user has migrated to the Projects layout (v1.1+), the installer backs up the old flat `tasks/` directory but NOT the `Projects/` tree. The tarball extraction overwrites the install directory, and the restore step only restores the listed directories -- everything else is lost.
+Adding a `debug: boolean` or `verbosity: "normal" | "verbose" | "debug"` field to the task frontmatter schema (`TaskFrontmatter` in `schemas/task.ts`) means every existing task file on disk fails validation when read by the new code, unless the field has a default value. But even with a default, there's a subtler issue: the task serializer writes the field to every task file going forward, meaning tasks created by v1.5 cannot be read by v1.4 (no forward compatibility).
 
 **Why it happens:**
-The installer was written for v1.0's flat directory structure. The v1.1 Projects migration added a new layout, but the installer's backup list was not updated.
+AOF stores tasks as YAML frontmatter files. Schema changes mean file format changes. There's no migration framework for individual task field additions (the v1.3 migration framework handles structural changes, not additive field additions).
 
-**How to avoid:**
-1. Back up the ENTIRE data directory, not a hardcoded list of subdirectories
-2. Use an exclusion list instead of an inclusion list: back up everything except `node_modules/`, `dist/`, and other build artifacts
-3. Extract the tarball to a SEPARATE staging directory, then selectively copy code files over the existing install (never overwrite the data root)
-4. Add a `--dry-run` flag to the installer that shows what would be backed up and what would be overwritten
+**Prevention:**
+1. Use the existing `metadata: z.record(z.string(), z.unknown())` bag for debug flags. Store as `metadata.debug: true` or `metadata.traceLevel: "verbose"`. The metadata bag is already schema-flexible and survives round-trips.
+2. Do NOT add a top-level frontmatter field for per-task debug flags. Top-level fields are schema-validated and create forward/backward compatibility issues.
+3. If a typed field is needed, add it as `.optional()` with no default (so it's omitted from serialization when not set). Check `schemas/task.ts` line 109: `metadata: z.record(z.string(), z.unknown()).default({})` -- this is the escape hatch.
+4. The CLI flag (`--debug`) should set a metadata flag at task creation or dispatch time, not modify the schema.
 
-**Warning signs:**
-- User reports "my projects disappeared after upgrade"
-- `Projects/` directory is missing after upgrade
-- `org-chart.yaml` reverted to a default template
+**Detection:**
+- Create a task with v1.5, downgrade to v1.4, and verify the task file still parses
+- Zod validation test: parse a v1.4-era task frontmatter against v1.5 schema
 
-**Phase to address:** Phase 2 (Upgrade Path) -- fix installer backup scope before shipping v1.3
+**Phase to address:** Decide on metadata bag vs. schema field before any implementation begins.
 
 ---
 
-### Pitfall 7: DAG-as-Default Breaks Existing Workflows That Rely on No-Workflow Behavior
+### Pitfall 7: `aof trace` CLI Hangs on Large Trace Files
 
 **What goes wrong:**
-Currently, new tasks do NOT get workflows unless explicitly requested (`workflow` parameter in `create()`). Making DAG workflows the default means every new task gets a workflow definition. But existing users have:
-- Agents that create tasks without workflow awareness (they do not know about hop completion)
-- Custom tooling that reads task frontmatter and does not expect a `workflow` field
-- Automation scripts that check task status directly (not hop status)
-- CLI workflows where tasks go `backlog -> ready -> in-progress -> done` without any hop advancement
+Running `aof trace <task-id>` on a task with a 10MB session transcript tries to load the entire file into memory, parse every JSONL line, format it, and dump it to stdout. On a terminal, this produces thousands of lines of output that scroll past instantly, providing no useful information. Worse, the CLI appears to hang during the parsing phase.
 
-If a task has a workflow, the scheduler tries to dispatch hops and expects agents to complete hops via the DAG protocol. An agent that simply marks a task "done" without completing the current hop will leave the workflow in an inconsistent state (task is done, but the DAG says "running" with a dispatched hop).
+**Prevention:**
+1. Default output should be a summary: number of tool calls, duration, outcome, errors -- not the full transcript. A `--full` flag shows everything.
+2. Implement streaming: read the JSONL file line by line (Node readline or transform stream), format each event, and write to stdout incrementally. Never load the entire file into memory.
+3. Add pagination: `--limit N` shows the first N events. `--tail N` shows the last N events (useful for seeing the completion).
+4. Filter flags: `--tools` shows only tool calls, `--errors` shows only errors, `--timing` shows a timeline summary.
+5. Consider using the existing `views/` rendering infrastructure (views/renderers.ts) which already handles formatting for the kanban board.
 
-**Why it happens:**
-"Default on" changes are the most dangerous kind of breaking change because they affect users who take no action. The change is invisible until something breaks.
+**Detection:**
+- Test with a 10MB synthetic .jsonl file and measure time-to-first-output
+- Test with an empty trace file
 
-**How to avoid:**
-1. Make the default workflow opt-in at the project level, not at the task level: `project.yaml` gets a `defaultWorkflow: "standard-sdlc"` field that project owners explicitly set
-2. Tasks created without a workflow continue to work as before (no hops, direct status transitions)
-3. The upgrade documentation explicitly tells users "to enable DAG workflows for new tasks, add `defaultWorkflow` to your project.yaml"
-4. Add a `--no-workflow` flag to task creation for users who want to override the project default
-5. If a task has a workflow and an agent completes it without hop advancement, auto-advance the workflow (graceful degradation) rather than leaving it in an inconsistent state
-
-**Warning signs:**
-- Tasks stuck in `in-progress` with workflow status "running" but no hop ever completing
-- Agents creating tasks and immediately completing them, bypassing the workflow entirely
-- User complaints about "extra steps" in what used to be simple task flows
-
-**Phase to address:** Phase 2 (Upgrade Path) -- define opt-in mechanism, not silent default change
+**Phase to address:** Build the summary view first, add full transcript later.
 
 ---
 
-### Pitfall 8: Rollback Cannot Undo Lazy Migrations That Were Written Back to Disk
+### Pitfall 8: OpenClaw Session File Format Changes Without Warning
 
 **What goes wrong:**
-The lazy gate-to-DAG migration in `task-store.ts` writes the migrated task back to disk atomically (line 252: `await writeFileAtomic(filePath, serializeTask(task))`). Once a task is lazily migrated, the original gate-format data is gone from the task file. If a user needs to roll back to a pre-v1.3 version:
-- The task files now have `workflow` fields that old code does not understand
-- The `gate` field has been set to `undefined` and `gateHistory` cleared to `[]`
-- The old gate evaluator code (which was deprecated) may have been removed in the v1.3 release
-- There is no backup of the pre-migration task content
+AOF treats OpenClaw session .jsonl files as an external data source. The format of these files is defined by OpenClaw, not AOF. If OpenClaw updates and changes the JSONL schema (field renames, new event types, structural changes), AOF's trace parser silently produces wrong or empty output.
 
-The migration module (`src/projects/migration.ts`) creates backups for the vault migration, but the lazy gate-to-DAG migration creates NO backup of individual task files.
+This is an integration boundary issue: AOF calls `resolveSessionFilePath` (from OpenClaw's `extensionAPI.js`) to get the file path, but the file content format is undocumented and may change between OpenClaw versions.
 
 **Why it happens:**
-Lazy migrations are designed for convenience ("migrate on next access") but they make rollback nearly impossible because:
-1. There is no central record of which files were migrated
-2. The migration happens during normal read operations -- no user action triggers it
-3. Each migrated file overwrites its own previous state
+The session file format is an internal implementation detail of OpenClaw, not a public API. AOF is reaching across the integration boundary to read an internal file format.
 
-**How to avoid:**
-1. Before any lazy migration write-back, save the original task content to a `.migration-backup/` directory within the project
-2. Record migrated task IDs in a manifest file (`.aof/migrated-tasks.json`) so rollback knows what to restore
-3. Add a `aof rollback --to-version 1.2` command that:
-   a. Checks the migration backup directory
-   b. Restores original task files from backup
-   c. Updates migration history
-4. Alternatively, make the migration non-destructive: keep `gate` fields alongside `workflow` fields during a transition period, remove them only in v1.4
+**Prevention:**
+1. Build the JSONL parser defensively: use `z.object().passthrough()` for each line type, extract only the fields you need, and ignore unknown fields/types.
+2. Define the minimum required fields for each trace event type and assert only those. If a line doesn't parse, skip it with a warning rather than failing the entire trace.
+3. Pin the expected format version somewhere (e.g., `trace-format-version: 1` in config) so you can detect when OpenClaw's format has diverged.
+4. Write integration tests that parse real (anonymized) session .jsonl files from the current OpenClaw version. Keep these as golden fixtures so format changes are detected by CI.
+5. If possible, request that OpenClaw document or stabilize the session file format. Until then, treat the parser as a best-effort decoder.
 
-**Warning signs:**
-- User rolls back to v1.2 and sees Zod validation errors on task files ("unrecognized key: workflow")
-- Tasks with workflow fields fail to parse in older versions
-- No way to determine which tasks were migrated vs. which were created as DAG-native
+**Detection:**
+- Golden fixture tests that parse real session .jsonl samples
+- If any line in the trace fails to parse, log a `trace.parse_warning` event rather than failing
 
-**Phase to address:** Phase 2 (Upgrade Path) -- add backup mechanism before lazy migration writes
+**Phase to address:** Build parser with defensive/passthrough parsing from day one. Do not model the full OpenClaw event schema -- only extract what you need.
 
 ---
 
-### Pitfall 9: `getByPrefix()` Skips Lazy Migration, Creating Phantom Gate Tasks
+## Minor Pitfalls
+
+### Pitfall 9: Session File Path Changes Between OpenClaw Versions
 
 **What goes wrong:**
-The `get()` method in task-store.ts (line 240) runs the lazy gate-to-DAG migration, but `getByPrefix()` (line 276) does NOT. This means:
-- Tasks accessed via prefix search retain their gate fields
-- The same task can appear as gate-format or DAG-format depending on which method reads it
-- If `getByPrefix()` is used to list tasks for a CLI view, users see stale gate fields
-- If the scheduler uses `get()` to dispatch but the CLI uses `getByPrefix()` to display, the displayed state is inconsistent with actual state
+AOF stores the session file path (returned by `resolveSessionFilePath(sessionId)`) in task metadata for later trace retrieval. If OpenClaw moves session files to a different directory structure in an update, the stored paths become stale. `aof trace` fails with ENOENT for tasks completed before the OpenClaw update.
 
-**Why it happens:**
-`getByPrefix()` was likely a convenience method added before the migration was implemented. The migration code was added to `get()` and `list()` but the prefix search was overlooked.
+**Prevention:**
+1. Store the session ID, not the resolved path. Re-resolve the path at read time by calling `resolveSessionFilePath` again.
+2. Fall back gracefully: if the resolved path doesn't exist, try common alternative locations before giving up.
+3. When capturing traces to the task directory, the captured copy is path-independent. Prioritize reading the captured copy over the original session file.
 
-**How to avoid:**
-1. Add the same lazy migration logic to `getByPrefix()` (simple fix)
-2. Better: extract the migration-on-read logic into a shared `ensureMigrated(task)` helper and call it from all read paths
-3. Add a test that verifies all public read methods produce identical task objects for the same task
-
-**Warning signs:**
-- Task appears differently in `aof task show TASK-xxx` (uses `get()`) vs `aof task show TASK` (uses `getByPrefix()`)
-- Gate fields visible in some views but not others
-
-**Phase to address:** Phase 1 (Config Migration) -- fix before any migration work begins
+**Phase to address:** Store sessionId in metadata (already done in assign-executor.ts line 237), resolve path at trace-read time.
 
 ---
 
-### Pitfall 10: Smoke Tests That Only Test Happy Path Miss the Real Upgrade Failures
+### Pitfall 10: Event Type Enum Exhaustion
 
 **What goes wrong:**
-Smoke tests for the upgrade path typically verify:
-- Fresh install works
-- Clean upgrade works (v1.2 with no tasks -> v1.3)
-- Version file is written correctly
+The `EventType` enum in `schemas/event.ts` already has 60+ entries. Adding trace-related events (trace.captured, trace.parse_warning, trace.cleanup, completion.enforcement.fallback_used, etc.) further bloats the enum. Every new event type is a Zod enum entry that must be added to the schema, and any typo or missing entry causes a runtime validation error that crashes event logging.
 
-But the real failures happen in edge cases:
-- Upgrade from v1.0 (pre-Projects layout) directly to v1.3
-- Upgrade with in-flight tasks (tasks in `in-progress` with active leases)
-- Upgrade with corrupted task files (partial YAML, missing frontmatter)
-- Upgrade when `project.yaml` does not exist
-- Upgrade when daemon is running (PID file exists, Unix socket active)
-- Upgrade on a system where `npm ci` fails (network issues, native module build failures)
-- Upgrade when disk space is low (backup succeeds, extraction fills disk)
+**Prevention:**
+1. Use a namespace prefix consistently: `trace.*` for all trace events. This makes the enum scannable and avoids collisions.
+2. Consider switching to `z.string().startsWith("trace.")` for trace events rather than adding each one to the enum. This is a bigger refactor but prevents enum explosion.
+3. For v1.5, add the minimum set of events needed: `trace.captured`, `trace.capture_failed`, `completion.enforcement.warn`. Add more only when you have concrete consumers.
+4. The existing pattern of `try { await logger.log(...) } catch { /* non-fatal */ }` throughout the codebase means a missing event type won't crash the scheduler, but it will silently drop the event. Add a test that validates all logged event types against the schema.
 
-**Why it happens:**
-Smoke tests are written by developers who know the expected state. Real users have messy state accumulated over months of usage.
-
-**How to avoid:**
-1. Create a fixture set of "dirty" installation states:
-   - v1.0 layout (flat `tasks/`, no `Projects/`)
-   - v1.1 layout with gate-format tasks in every status
-   - Mixed layout (some projects migrated, some not)
-   - Tasks with malformed YAML frontmatter
-   - Active leases and heartbeat files
-2. Test upgrade against each fixture
-3. Test rollback after upgrade against each fixture
-4. Test upgrade with daemon running (should warn and stop, or fail gracefully)
-5. Test upgrade with insufficient disk space (should fail before corrupting state)
-6. Test the installer's `detect_existing_install()` function against all legacy paths
-
-**Warning signs:**
-- All smoke tests pass but first real user upgrade fails
-- Tests use `beforeEach` cleanup that removes the messy state that causes real failures
-- No test covers the v1.0-to-v1.3 skip-version upgrade path
-
-**Phase to address:** Phase 4 (Smoke Tests) -- but fixture design should start in Phase 1
+**Phase to address:** Add events incrementally, not all at once. Start with 3-4 trace events maximum.
 
 ---
 
-## Technical Debt Patterns
+### Pitfall 11: Trace Capture Slows Down the Scheduler Poll Loop
 
-| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
-|----------|-------------------|----------------|-----------------|
-| Lazy-only migration (no eager pass) | Zero-cost upgrade for users who never access old tasks | Orphaned gate-format tasks when gate code is removed | Never acceptable for v1.3 if gate evaluator is being removed |
-| Hardcoded backup directory list in installer | Simple shell script, easy to understand | Every new directory type requires installer update; missed directories lose data | Acceptable for v1.0-v1.1, must be fixed for v1.3 |
-| `schemaVersion: z.literal(1)` | Simple validation, no version branching | Cannot distinguish file versions, cannot drive migration logic | Must be changed before v1.3 ships |
-| Non-atomic config writes in migrations | Simpler migration code, fewer dependencies | Partial config writes on crash leave unrecoverable state | Never -- use `write-file-atomic` always |
-| Migration history as flat JSON | Simple to read/write, human-inspectable | No locking, concurrent migrations can corrupt history file | Acceptable for v1.x (single-machine, single-process upgrades) |
-| Dual gate/DAG code paths in scheduler | Backward compatibility during transition | Doubled maintenance surface, twice the bug surface, harder testing | Must converge to DAG-only in v1.3 |
+**What goes wrong:**
+If trace capture (reading session files, parsing JSONL, writing trace files) is done synchronously in the scheduler's poll loop or `onRunComplete` callback, it adds I/O latency to every task completion. With the scheduler already doing filesystem scans, lease management, DAG evaluation, and SLA checks per poll, adding trace I/O could push poll duration beyond the `pollTimeoutMs` (default 30s), triggering `poll.timeout` events and missed dispatch windows.
 
-## Integration Gotchas
+**Prevention:**
+1. Trace capture must be asynchronous and decoupled from the poll loop. Fire-and-forget from `onRunComplete`, or better yet, run as a separate maintenance pass (like SLA checking or murmur evaluation).
+2. Queue trace captures and process them in a background worker or at the end of the poll cycle, after all dispatch actions are complete.
+3. Set a per-trace timeout: if reading/parsing a session file takes more than 5 seconds, skip it and retry next poll.
+4. Add trace capture duration to poll telemetry so you can monitor the overhead.
 
-| Integration | Common Mistake | Correct Approach |
-|-------------|----------------|------------------|
-| Shell installer + Node.js setup | Installer assumes Node.js setup script exists at fixed path, but tarball layout might change | Pin the setup entry point path in a manifest file inside the tarball; installer reads it |
-| GitHub Actions release + `release-it` | Both `.release-it.json` and `release.yml` have independent quality gates (`before:init` hooks vs. workflow steps) -- they can diverge | Single source of truth: let `release.yml` do all gating, or let `release-it` do all gating, not both |
-| `write-file-atomic` + filesystem backups | Atomic write creates temp file then renames; if backup copies the temp file mid-write, backup contains incomplete data | Backup before upgrade, not during -- take snapshot when system is quiescent |
-| OpenClaw plugin wiring + version upgrade | Plugin entry point path (`dist/plugin.js`) is hardcoded in `openclaw.plugin.json`; if build output structure changes, plugin loading breaks | Verify plugin loading as part of release smoke test |
-| `yaml` npm package + config round-trips | `parse()` returns JS objects that lose comments/formatting; `parseDocument()` preserves them | Use `parseDocument()` for ANY file that users edit manually (org-chart.yaml, project.yaml) |
-| Migration framework + concurrent scheduler | If scheduler is running during migration, it reads tasks via lazy migration while eager migration is also running -- race condition | Stop daemon before upgrade; installer should check for running daemon PID |
+**Phase to address:** Design trace capture as async/background from the start. Never block the dispatch path.
 
-## Performance Traps
+---
 
-| Trap | Symptoms | Prevention | When It Breaks |
-|------|----------|------------|----------------|
-| Eager migration scans all tasks at startup | Upgrade takes minutes on large installations (thousands of tasks) | Show progress bar; allow background migration with "migrating..." task status | >500 tasks |
-| Lazy migration writes back on every read | Each `get()` call for an unmigrated task incurs a write; under scheduler polling this means write-per-poll for each gate task | Mark task as "migration checked" in memory (not disk) to avoid re-checking on subsequent reads within same process | >50 unmigrated gate tasks with frequent scheduler polls |
-| Tarball extraction overwrites entire directory | On systems with slow disk I/O (NFS, remote mounts), extraction + npm install can take 5+ minutes during which the system is in a broken state | Extract to staging directory, then atomic swap via rename; or use rsync-style incremental copy | Any network-attached storage |
-| Migration history JSON grows unbounded | After many versions and many migrations, `migrations.json` becomes large | Not a real concern for AOF (expect <100 migrations over product lifetime) | Never for this project |
+## Phase-Specific Warnings
 
-## Security Mistakes
+| Phase Topic | Likely Pitfall | Mitigation |
+|-------------|---------------|------------|
+| Completion enforcement | Breaking existing fallback path (Pitfall 1) | Graduated enforcement: warn-only first, opt-in hard enforcement later |
+| Schema changes | Breaking existing agents (Pitfall 3) | All new fields optional with defaults; payload versioning |
+| Session file reading | Race condition on file I/O (Pitfall 2) | Lazy read with stability check; streaming parser; handle ENOENT |
+| Trace storage | Disk exhaustion (Pitfall 4) | Retention policy, size limits, compression from day one |
+| SKILL.md changes | Token budget exceeded (Pitfall 5) | Server-side capture only; no SKILL.md changes needed |
+| Debug flag | Schema migration (Pitfall 6) | Use metadata bag, not new frontmatter field |
+| CLI trace output | Hang on large files (Pitfall 7) | Summary default, streaming reader, filter flags |
+| OpenClaw format | Undocumented format changes (Pitfall 8) | Defensive parsing, golden fixtures, passthrough schemas |
+| Scheduler performance | Poll loop slowdown (Pitfall 11) | Async/background trace capture, never block dispatch |
 
-| Mistake | Risk | Prevention |
-|---------|------|------------|
-| Tarball downloaded over HTTP without integrity check | Man-in-the-middle could replace tarball with malicious payload | Add SHA256 checksum to GitHub release; installer verifies checksum before extraction |
-| Migration scripts run with user permissions | If migration script has a bug that `rm -rf` wrong path, user data is destroyed | Migrations should NEVER delete data -- only copy/transform; original data stays in backup |
-| Backup directories accumulate indefinitely | Old backups fill disk; backup names are predictable (`tasks.backup-<timestamp>`) | Auto-prune backups older than N days; limit to K most recent backups |
-| `.version` file is world-readable | Minor: leaks installed version, could help attackers target known vulnerabilities | Not a real concern for local CLI tool; note for future multi-user deployments |
+---
 
-## UX Pitfalls
+## Backward Compatibility Checklist
 
-| Pitfall | User Impact | Better Approach |
-|---------|-------------|-----------------|
-| Silent migration with no user feedback | User runs `aof` after upgrade, sees no confirmation that migration happened; worries about data integrity | Print "Migrated X tasks from gate format to DAG format" on first run after upgrade |
-| Upgrade requires daemon restart but does not prompt | Scheduler still running old code after code is updated; behavior is unpredictable | Installer checks for running daemon, stops it, restarts after upgrade (or warns user) |
-| Rollback documentation exists but rollback command does not | User reads "rollback is safe" but has to manually restore files from backup directory | Provide `aof upgrade rollback` command that automates backup restoration |
-| Version mismatch between CLI and daemon | User upgrades CLI but daemon was installed under OS supervisor (launchd/systemd) pointing to old path | After upgrade, automatically re-register daemon service file with updated paths |
-| Config migration adds new required fields without defaults | `project.yaml` validation fails after upgrade because new field `workflowTemplates` is required | All new fields must have defaults or be optional; migration adds them with sensible defaults |
+These are the specific integration points where v1.5 changes risk breaking existing v1.4 behavior:
 
-## "Looks Done But Isn't" Checklist
+| Integration Point | File | Risk | Test |
+|-------------------|------|------|------|
+| `onRunComplete` fallback | `dispatch/assign-executor.ts:172-226` | Enforcement may suppress fallback | Spawn agent without tool, assert task reaches `done` |
+| `CompletionReportPayload` schema | `schemas/protocol.ts:86-95` | New required fields break agents | Parse v1.4 payload against v1.5 schema |
+| `TaskFrontmatter` schema | `schemas/task.ts:82-133` | New fields break forward compat | Parse v1.5 task with v1.4 code |
+| `EventType` enum | `schemas/event.ts:17-142` | Missing event type drops events | Validate all logged types against schema |
+| SKILL.md budget | `context/__tests__/budget.test.ts` | Exceeding 2150 token ceiling | CI budget gate (already exists) |
+| Session file path | `openclaw/openclaw-executor.ts:107` | Path stale after OC update | Store sessionId, resolve at read time |
+| `formatTaskInstruction` prompt | `openclaw/openclaw-executor.ts:301-317` | Prompt changes affect all agents | Review prompt diff before deployment |
 
-- [ ] **Config migration:** Often missing comment preservation -- verify `org-chart.yaml` diff shows ONLY logical changes, not reformatting
-- [ ] **Gate-to-DAG migration:** Often missing `getByPrefix()` path -- verify all read methods return identical task objects
-- [ ] **Installer backup:** Often missing new directory types -- verify `Projects/` tree is backed up on upgrade
-- [ ] **Release tarball:** Often missing production install test -- verify `npm ci --production` succeeds on extracted tarball
-- [ ] **Rollback:** Often missing lazy-migrated task restoration -- verify tasks can be read by v1.2 code after rollback
-- [ ] **Schema version:** Often missing version bump in migration -- verify files have `schemaVersion: 2` after migration
-- [ ] **Daemon lifecycle:** Often missing service file update -- verify launchd/systemd plist/unit points to new binary path after upgrade
-- [ ] **Smoke tests:** Often missing dirty-state fixtures -- verify tests cover v1.0 layout, in-flight tasks, and corrupted files
-- [ ] **Default workflow:** Often missing opt-in mechanism -- verify tasks created without explicit workflow still work as before
-- [ ] **Migration history:** Often missing atomicity -- verify `migrations.json` is not corrupted if process crashes mid-migration
-
-## Recovery Strategies
-
-| Pitfall | Recovery Cost | Recovery Steps |
-|---------|---------------|----------------|
-| Partial migration (crash mid-`up()`) | MEDIUM | 1. Check migration history for last successful migration. 2. Manually inspect filesystem for partially-written files. 3. Re-run migration (must be idempotent). 4. If not idempotent, restore from backup. |
-| Lost YAML comments after config migration | LOW | 1. Restore `org-chart.yaml` from backup. 2. Re-apply migration using Document API. 3. Comments are recoverable from git history if backup was not taken. |
-| Orphaned gate-format tasks after gate code removal | HIGH | 1. Must re-add gate migration code temporarily. 2. Run eager migration pass. 3. Verify all tasks converted. 4. Remove gate code again. **Prevention is far cheaper than recovery.** |
-| Tarball missing critical files | LOW | 1. Delete extracted files. 2. Download correct tarball. 3. Re-run installer. Only affects time, not data. |
-| Installer overwrites Projects/ directory | HIGH | 1. Check backup directory for Projects/ tree. 2. If not backed up, check OS-level snapshots (Time Machine, etc.). 3. If no backup exists, data is lost. **Prevention is essential.** |
-| DAG-as-default breaks existing agents | MEDIUM | 1. Set `defaultWorkflow: null` in project.yaml to disable. 2. Tasks already created with unwanted workflows: manually remove `workflow` field from frontmatter. 3. Restart daemon. |
-| Daemon running old code after upgrade | LOW | 1. `aof daemon stop`. 2. Re-install service: `aof daemon install`. 3. `aof daemon start`. Installer should automate this. |
-| Migration history corrupted (invalid JSON) | LOW | 1. Delete `.aof/migrations.json`. 2. Manually verify which migrations are applied by inspecting file state. 3. Reconstruct history file. 4. Future: add migration state introspection command. |
-
-## Pitfall-to-Phase Mapping
-
-| Pitfall | Prevention Phase | Verification |
-|---------|------------------|--------------|
-| Partial migration writes | Phase 1 (Config Migration) | Unit test: kill process mid-migration, re-run succeeds without data loss |
-| Lazy migration silent failure | Phase 1 (Config Migration) | Integration test: task with gate fields + missing workflow config -> warning + explicit handling |
-| YAML comment destruction | Phase 1 (Config Migration) | Diff test: migrate config file, verify only expected lines changed |
-| Schema version stagnation | Phase 1 (Config Migration) | Schema test: v1.3 files have schemaVersion >= 2; old files with version 1 trigger migration |
-| Tarball untested | Phase 3 (Release Pipeline) | CI step: extract tarball, `npm ci --production`, run CLI `--version` |
-| Installer backup gaps | Phase 2 (Upgrade Path) | Integration test: create v1.1 layout with Projects/, upgrade, verify Projects/ preserved |
-| DAG-as-default breakage | Phase 2 (Upgrade Path) | Behavior test: task created without workflow param still works with direct status transitions |
-| Rollback impossible for lazy-migrated tasks | Phase 2 (Upgrade Path) | Round-trip test: upgrade, create tasks, rollback, verify v1.2 can read all tasks |
-| `getByPrefix()` migration gap | Phase 1 (Config Migration) | Unit test: gate-format task accessed via prefix returns DAG-format task |
-| Smoke test blind spots | Phase 4 (Smoke Tests) | Fixture matrix: v1.0 layout, v1.1 layout, mixed, corrupted, in-flight tasks |
+---
 
 ## Sources
 
-- Direct codebase analysis of `src/packaging/migrations.ts`, `src/store/task-store.ts`, `src/migration/gate-to-dag.ts`, `src/config/manager.ts`, `scripts/install.sh`, `.github/workflows/release.yml`, `scripts/build-tarball.mjs`
-- [Discourse: How We Fixed YAML Comment Preservation in Ruby](https://blog.discourse.org/2026/02/how-we-fixed-yaml-comment-preservation-in-ruby-and-why-we-sponsored-it/) -- demonstrates YAML comment loss is a widespread, recognized problem
-- [Oh My Posh: Config migration messes up things for YAML](https://github.com/JanDeDobbeleer/oh-my-posh/issues/5862) -- real-world example of YAML config migration destroying user files
-- [Lazy Migration Pattern](https://softwarepatternslexicon.com/102/3/23/) -- tradeoff analysis of lazy vs eager migration strategies
-- [CircleCI: Smoke testing in CI/CD pipelines](https://circleci.com/blog/smoke-tests-in-cicd-pipelines/) -- guidance on where smoke tests fit in release pipelines
-- [The Hard Truth about GitOps and Database Rollbacks](https://atlasgo.io/blog/2024/11/14/the-hard-truth-about-gitops-and-db-rollbacks) -- partial migration failure modes and recovery strategies
-- [The YAML Document from Hell](https://ruudvanasseldonk.com/2023/01/11/the-yaml-document-from-hell) -- YAML type coercion and format pitfalls
-
----
-*Pitfalls research for: AOF v1.3 Seamless Upgrade -- upgrade/migration/release pipeline for filesystem-based CLI tool*
-*Researched: 2026-03-03*
+- Direct codebase analysis of AOF v1.4 source (2826+ tests, TypeScript)
+- `src/dispatch/assign-executor.ts` -- fallback completion path (onRunComplete callback)
+- `src/openclaw/openclaw-executor.ts` -- session file path resolution, embedded agent launch
+- `src/schemas/protocol.ts` -- CompletionReportPayload schema
+- `src/schemas/task.ts` -- TaskFrontmatter schema, metadata bag
+- `src/schemas/event.ts` -- EventType enum (60+ entries)
+- `src/context/budget.ts` -- token estimation and budget evaluation
+- `src/dispatch/scheduler.ts` -- poll loop structure and performance constraints
+- `src/dispatch/failure-tracker.ts` -- deadletter transition logic (3 failures threshold)
+- `skills/aof/SKILL.md` -- agent skill injection (1665 tokens, 2150 ceiling)
+- `skills/aof/SKILL-SEED.md` -- seed tier (563 tokens)
+- OpenClaw test mocks showing `.jsonl` session file format (`resolveSessionFilePath`)

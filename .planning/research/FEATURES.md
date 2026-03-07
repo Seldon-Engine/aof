@@ -1,487 +1,388 @@
-# Feature Landscape: Seamless Upgrade and Release
+# Feature Landscape: Agent Event Tracing & Session Observability
 
-**Domain:** CLI tool upgrade path, config migration, release pipeline, rollback safety
-**Researched:** 2026-03-03
-**Confidence:** HIGH (patterns derived from codebase inspection of existing installer/updater/migration modules plus well-established CLI upgrade practices from rustup, Terraform, Homebrew, Snyk CLI)
+**Domain:** Agent orchestration observability (AOF v1.5)
+**Researched:** 2026-03-06
 
 ## Context
 
-This is a SUBSEQUENT MILESTONE (v1.3). AOF v1.2 shipped per-task workflow DAGs with:
-- `migrateGateToDAG()` lazy migration triggered on task read (converts gate fields to DAG workflow)
-- Scheduler dual-path execution (gate and DAG evaluation independently)
-- `workflowTemplates` optional field in project.yaml
-- `bd create --workflow template-name` for explicit template selection
-- Tag-triggered GitHub Actions release with tarball artifacts
-- curl|sh installer with upgrade detection, data backup, and Node.js setup delegation
+This is a SUBSEQUENT MILESTONE (v1.5). AOF already has:
+- Task lifecycle with completion reports, failure tracking (3 failures -> deadletter)
+- `aof_task_complete` MCP tool for explicit task completion
+- `AgentRunOutcome` callback in `onRunComplete` with success/aborted/error/durationMs
+- JSONL event logging (append-only, daily rotation)
+- OpenClaw session files at `~/.openclaw/agents/<agent>/sessions/<sessionId>.jsonl`
+- SKILL.md context injection (seed and full tiers, 2150-token budget ceiling)
+- `resolveSessionFilePath()` available in OpenClawAdapter (session file path known at spawn time)
 
-v1.3 must make this deployable with confidence: upgrades work end-to-end, DAGs become the default (not opt-in), the release is cut and installable, and users can roll back safely.
-
-**Key existing infrastructure:**
-- `src/packaging/migrations.ts` -- Migration framework with history tracking, up/down direction, version comparison
-- `src/packaging/updater.ts` -- Self-update engine with backup, download, extract, health check, rollback
-- `src/packaging/installer.ts` -- Dependency installer with backup and rollback
-- `src/packaging/integration.ts` -- OpenClaw plugin registration with backup
-- `src/packaging/channels.ts` -- Release channel management (stable/beta)
-- `src/migration/gate-to-dag.ts` -- Lazy per-task gate-to-DAG conversion
-- `scripts/install.sh` -- Shell installer with prerequisite checks, upgrade detection, data backup
-- `src/daemon/health.ts` -- Health status with component checks (scheduler, store, eventLogger)
-- `.github/workflows/release.yml` -- Tag-triggered CI with typecheck, build, test, tarball, changelog
+**The core problem:** Agents can hallucinate task completion. An agent exited cleanly without making meaningful tool calls, and AOF trusted the exit code (via `onRunComplete` callback) to mark the task done. The existing fallback in `assign-executor.ts` lines 191-195 auto-transitions `review -> done` on success -- this IS the hallucination pathway. Zero visibility into what agents actually did.
 
 ---
 
 ## Table Stakes
 
-Features users expect from a seamless CLI upgrade experience. Missing = users cannot upgrade with confidence.
+Features required for this milestone to solve the stated problem. Without these, v1.5 delivers no value.
 
-### 1. Config Migration: Add `defaultWorkflow` to project.yaml
-
-| Aspect | Detail |
-|--------|--------|
-| Why Expected | DAG-as-default requires project config to specify which workflow template applies to new tasks. Without this, "DAG-as-default" means nothing -- there is no mechanism to auto-attach a workflow. |
-| Complexity | MEDIUM |
-| Depends On | Existing `ProjectManifest` schema, existing `workflowTemplates`, existing migration framework |
-
-**What the ecosystem does:**
-
-Config migration in CLI tools follows an "additive merge" pattern:
-- **Terraform**: Minor versions add new optional fields with defaults. Existing configs continue to work. The provider upgrade guide documents new fields and their default values.
-- **ESLint**: The `@eslint/migrate-config` tool transforms old `.eslintrc` to `eslint.config.js`, preserving existing settings while adapting structure.
-- **Airflow 2-to-3**: Backward compatibility layer keeps old config working while new config structure is available. Ruff rules auto-detect deprecated features.
-
-The universal pattern: **new fields must have sensible defaults so existing configs work without modification, but the migration should proactively add them for explicitness.**
-
-**What AOF must do:**
-
-1. Add `defaultWorkflow` optional field to `ProjectManifest` schema (Zod). When present, `bd create` (without `--workflow`) auto-attaches this template to new tasks.
-2. Write a migration (`001-add-default-workflow`) that:
-   - Reads each project's `project.yaml`
-   - If `workflowTemplates` exists and has exactly one template, sets `defaultWorkflow` to that template name
-   - If `workflowTemplates` has multiple templates, leaves `defaultWorkflow` unset (user must choose)
-   - If no `workflowTemplates` exist, skips (no workflows to default to)
-   - If `workflow` (old gate format) exists but no `workflowTemplates`, converts the gate workflow to a DAG template first, then sets `defaultWorkflow`
-3. The migration must preserve all existing fields in project.yaml (additive, not destructive).
-4. The migration must handle YAML comments gracefully (use the `yaml` library's document model, not parse-then-stringify which drops comments).
-
-**The "automatically leveraged" UX in practice:**
-- Before v1.3: `bd create "Fix login bug"` creates a task with no workflow (bare task)
-- After v1.3: `bd create "Fix login bug"` creates a task with the project's default workflow DAG attached, ready for multi-hop execution
-- Override: `bd create "Fix login bug" --workflow custom-pipeline` still works
-- Opt-out: `bd create "Fix login bug" --no-workflow` creates a bare task
-
-**Confidence:** HIGH -- direct schema extension, well-understood additive migration pattern. The existing `resolveWorkflowTemplate()` in `task-create-workflow.ts` already handles template lookup.
-
----
-
-### 2. Eager Gate-to-DAG Migration (Batch, Not Just Lazy)
+### 1. Completion Enforcement (Don't Trust Exit Codes)
 
 | Aspect | Detail |
 |--------|--------|
-| Why Expected | The lazy migration (v1.2) converts tasks one-by-one on read. For v1.3, all tasks should be migrated proactively during upgrade so the gate code path can be deprecated. |
+| Why Expected | Core problem statement. The `onRunComplete` fallback in `assign-executor.ts` currently auto-completes tasks when agent exits successfully without calling `aof_task_complete`. This must stop. |
 | Complexity | LOW |
-| Depends On | Existing `migrateGateToDAG()`, existing migration framework |
+| Depends On | `assign-executor.ts` onRunComplete callback (lines 181-226) |
 
-**What the ecosystem does:**
+**What must change:**
 
-Lazy migration is a transitional pattern. Production-grade upgrades batch-migrate:
-- **Airflow**: Database migrations run at upgrade time via `airflow db upgrade`, not lazily.
-- **Terraform**: State migrations run during `terraform init` after version change.
+The existing fallback at `assign-executor.ts` lines 191-195 does:
+```typescript
+if (outcome.success) {
+  await store.transition(action.taskId, "review", { reason: "dispatch.fallback: agent completed without calling aof_task_complete" });
+  await store.transition(action.taskId, "done", { reason: "dispatch.fallback: auto-completed after successful agent run" });
+}
+```
 
-Lazy migration is a safety net; eager migration is the primary path.
+This must change to:
+```typescript
+if (outcome.success) {
+  await store.transition(action.taskId, "blocked", {
+    reason: "no_explicit_completion: agent exited successfully but did not call aof_task_complete"
+  });
+}
+```
 
-**What AOF must do:**
+The task stays blocked, not done. The operator can inspect via `aof trace` and decide to re-dispatch or manually complete.
 
-1. Write a migration (`002-batch-gate-to-dag`) that:
-   - Walks all task files in all status directories (backlog, ready, in-progress, review, done)
-   - For each task with `gate` field and no `workflow` field, calls `migrateGateToDAG()`
-   - Writes the migrated task atomically (existing pattern: `writeFileAtomic`)
-   - Logs a count of migrated tasks
-   - Skips deadletter tasks (they are historical, not active)
-2. The lazy migration in `task-store.ts` remains as a safety net for tasks that somehow missed the batch migration (edge case: task file created between migration run and scheduler start).
-3. Emit a migration event to JSONL event log for auditability.
-
-**Confidence:** HIGH -- `migrateGateToDAG()` already works and is tested. Wrapping it in a batch walker is straightforward.
+**Confidence:** HIGH -- surgical code change, path is fully identified.
 
 ---
 
-### 3. Project Manifest Migration (Gate Workflow to DAG Template)
+### 2. Session Trace Capture
 
 | Aspect | Detail |
 |--------|--------|
-| Why Expected | Projects using old `workflow` field (gate format) need that converted to `workflowTemplates` with a DAG template. This is the project-level equivalent of task-level gate-to-DAG migration. |
+| Why Expected | Cannot diagnose what agent did without reading its session transcript. OpenClaw writes JSONL session files that contain every tool call, every response, every reasoning block. |
 | Complexity | MEDIUM |
-| Depends On | Existing `WorkflowConfig` schema, existing `WorkflowDefinition` schema, existing migration framework |
+| Depends On | `OpenClawAdapter.resolveSessionFilePath()`, OpenClaw session JSONL format |
+
+**Session JSONL format (verified from real files):**
+
+Each line is a JSON object with a `type` field. Relevant types:
+- `session` -- session metadata (id, timestamp, cwd)
+- `model_change` -- provider/model selection
+- `thinking_level_change` -- reasoning level
+- `message` -- user/assistant messages containing:
+  - `type: "text"` -- plain text
+  - `type: "thinking"` -- reasoning blocks
+  - `type: "toolCall"` -- tool invocations (name, id, arguments)
+  - `type: "toolResult"` -- tool outputs
+- `compaction` -- session was compacted (long sessions get summarized)
+- `custom` -- OpenClaw-specific events (model snapshots, cache TTL)
 
 **What AOF must do:**
 
-1. Write a migration (`003-project-workflow-to-templates`) that:
-   - Reads each project's `project.yaml`
-   - If `workflow` exists (old gate format with `gates[]`):
-     - Converts the gate sequence to a linear DAG (same logic as `migrateGateToDAG` but at the template level)
-     - Creates a `workflowTemplates` entry with key derived from `workflow.name`
-     - Sets `defaultWorkflow` to that template name
-     - Removes the old `workflow` field (or marks it deprecated)
-   - If `workflowTemplates` already exists, no conversion needed
-   - Preserves all other project.yaml fields
-2. The `WorkflowConfig.optional()` field in `ProjectManifest` should be marked as deprecated in code comments, with a Zod `.transform()` that emits a deprecation warning when parsed.
+1. After `onRunComplete` fires, read the session JSONL file using the path from `resolveSessionFilePath(sessionId)`
+2. Parse each line, extract:
+   - Tool calls: name, arguments (truncated), success/error
+   - AOF tool calls specifically: `aof_task_complete`, `aof_task_update`, `aof_status_report`
+   - Timestamps for duration calculation per tool call
+   - Whether reasoning was used (thinking blocks present)
+   - Final assistant message (likely contains completion summary)
+3. Handle edge cases:
+   - Session file may not exist (agent crashed before writing)
+   - Session file may have `.deleted.*` suffix (OpenClaw prunes old sessions)
+   - Session file may be large (100KB-1MB) -- stream line-by-line, don't load entire file into memory
+   - `compaction` events mean earlier messages were summarized
 
-**Confidence:** HIGH -- the conversion logic is a subset of `migrateGateToDAG` (gates to hops without in-flight state tracking).
-
----
-
-### 4. Upgrade Smoke Tests (Post-Install Verification)
-
-| Aspect | Detail |
-|--------|--------|
-| Why Expected | After upgrade, users need confidence the new version actually works. "It installed" is not sufficient -- the system must prove it can schedule, dispatch, and track tasks. |
-| Complexity | MEDIUM |
-| Depends On | Existing health endpoint, existing task store, existing scheduler |
-
-**What the ecosystem does:**
-
-Post-install smoke tests are a standard pattern:
-- **Snyk CLI**: Runs `snyk --version` and `snyk test` on a known fixture after install. Smoke tests verify the binary works, not just that it exists.
-- **Homebrew**: `brew test` runs post-install tests defined in the formula.
-- **Terraform**: `terraform validate` checks configuration syntax after version change.
-
-The key insight from CircleCI's smoke testing guide: smoke tests should be fast (seconds, not minutes), test critical paths (not edge cases), and fail loudly with actionable errors.
-
-**What AOF must do:**
-
-Implement `bd smoke` (or `aof smoke`) command that runs a fast verification suite:
-
-1. **Version check**: Verify `bd --version` returns expected version (catches broken binary/symlink)
-2. **Schema validation**: Parse and validate all project.yaml files with current Zod schemas (catches schema migration failures)
-3. **Task store integrity**: Count tasks by status, verify no corrupt task files (catches data directory damage)
-4. **Org chart validation**: Lint org-chart.yaml (catches config drift from upgrade)
-5. **Migration completeness**: Verify no tasks still have `gate` fields (catches incomplete migration)
-6. **Daemon connectivity**: If daemon running, hit /healthz endpoint (catches daemon version mismatch)
-7. **Workflow template validation**: Validate all `workflowTemplates` DAGs (catches template corruption)
-
-Each check should:
-- Print pass/fail with timing
-- On failure: print specific remediation advice
-- Return nonzero exit code on any failure (for CI/script integration)
-- Complete in under 10 seconds total
-
-**When to run:**
-- Automatically after `run_node_setup()` in install.sh (during upgrade)
-- Manually via `bd smoke` for user verification
-- In CI as post-release gate (release job runs smoke tests against installed tarball)
-
-**Confidence:** HIGH -- the individual checks already exist (health endpoint, lint, validation). Orchestrating them into a single command is straightforward.
+**Confidence:** HIGH -- session JSONL format verified from real data at `~/.openclaw/agents/swe-backend/sessions/`.
 
 ---
 
-### 5. Version-Aware Installer with Migration Triggers
+### 3. Trace File Storage
 
 | Aspect | Detail |
 |--------|--------|
-| Why Expected | The installer must detect which version is upgrading to which, and run the appropriate migrations. Currently, install.sh backs up data but does not run migrations. |
-| Complexity | MEDIUM |
-| Depends On | Existing install.sh, existing migration framework, existing `runMigrations()` |
-
-**What the ecosystem does:**
-
-- **rustup**: Detects current version, downloads target version, runs self-update. Version pinning available via `RUSTUP_VERSION` environment variable.
-- **Terraform**: `terraform init` detects version change and runs provider/state migrations.
-- **Homebrew**: `brew upgrade` handles formula-level migration hooks.
-
-The pattern: **detect version delta, run migrations for that delta, verify result.**
-
-**What AOF must do:**
-
-1. In `run_node_setup()` (install.sh), pass `--from-version $EXISTING_VERSION` to the Node.js setup command
-2. The setup command calls `runMigrations()` with:
-   - `targetVersion`: the new version being installed
-   - `migrations`: all registered migrations
-   - Direction: `up`
-3. Migrations run in version order, skipping already-applied ones (existing behavior from migration framework)
-4. If any migration fails:
-   - Log the failure with specific migration ID
-   - Attempt rollback of applied migrations (call `down` on each in reverse order)
-   - Restore from backup (existing install.sh backup mechanism)
-   - Exit with error code and remediation instructions
-5. Write migration history to `.aof/migrations.json` (existing behavior)
-6. The `.version` file now stores structured version info (not just a version string):
-   ```json
-   { "version": "1.3.0", "migratedFrom": "1.2.0", "migratedAt": "2026-03-03T...", "migrations": ["001-add-default-workflow", "002-batch-gate-to-dag", "003-project-workflow-to-templates"] }
-   ```
-
-**Confidence:** HIGH -- the migration framework already supports version-ordered execution with history tracking. The gap is wiring it into the installer flow.
-
----
-
-### 6. Rollback Safety (Restore Previous Version)
-
-| Aspect | Detail |
-|--------|--------|
-| Why Expected | If the upgrade breaks something, users need to get back to the working version quickly. "Restore from backup" is not enough -- it must be a single command. |
-| Complexity | MEDIUM |
-| Depends On | Existing backup mechanism in install.sh and updater.ts, existing `rollbackUpdate()` |
-
-**What the ecosystem does:**
-
-- **rustup**: `RUSTUP_VERSION=1.28.1 rustup self update` downgrades to a specific version.
-- **AWS Builders Library**: "Ensure rollback safety" -- every deployment must be reversible, rollback must be tested, and data format changes must be backward-compatible for one version.
-- **Kubernetes**: `kubectl rollout undo` reverts to previous deployment.
-- **macOS/Windows**: OS upgrades keep the previous version available for rollback during a grace period.
-
-The universal pattern: **keep the previous version's artifacts and data accessible, provide a single rollback command, and time-limit the rollback window.**
-
-**What AOF must do:**
-
-1. **Backup retention**: install.sh already backs up data directories. Add: backup the entire previous installation directory (not just data), including `dist/`, `node_modules/`, `package.json`, and `.version`.
-2. **Rollback command**: `bd rollback` (or `aof rollback`):
-   - Lists available backups (from `.aof-backup/`)
-   - Restores the most recent backup by default, or a specific backup by timestamp
-   - Re-runs `npm ci --production` (since node_modules may differ between versions)
-   - Runs smoke tests after restore
-   - Prints restored version
-3. **Rollback window**: Keep the last 2 backups. Older backups are pruned automatically during the next upgrade. This prevents unbounded disk usage.
-4. **Migration rollback**: Migrations with `down` functions can be reversed. The rollback command runs `runMigrations()` in `down` direction to the previous version.
-5. **Data format backward compatibility**: v1.3 task format (with `workflow` field) must be readable by v1.2 code. This means:
-   - v1.2 ignores `workflow` field (it is optional in the schema -- Zod `.passthrough()` handles unknown fields)
-   - v1.3 migrations must not delete `gate` fields immediately -- keep them for one version as a rollback safety net
-   - v1.4 can safely remove `gate` fields
-
-**Confidence:** MEDIUM -- the backup/restore mechanism exists but the rollback command and migration reversal need new code. Backward-compatible data format is the riskiest part.
-
----
-
-### 7. Release Pipeline Enhancement (Pre-Flight Checks)
-
-| Aspect | Detail |
-|--------|--------|
-| Why Expected | Before cutting a release tag, CI must verify the build is releasable. The current release workflow runs typecheck/build/test, but needs upgrade-path verification. |
+| Why Expected | Extracted trace data must persist in the task directory alongside existing `run.json`, `run_result.json`, `run_heartbeat.json`. |
 | Complexity | LOW |
-| Depends On | Existing `.github/workflows/release.yml`, existing test infrastructure |
-
-**What the ecosystem does:**
-
-- **npm**: Pre-publish checks include `npm audit`, version bump verification, changelog presence. The `prerelease-checks` npm package automates this.
-- **release-it**: Runs pre-release hooks (lint, test, changelog) before tagging and publishing.
-- **Snyk CLI**: Smoke tests run in CI against the built binary before release.
+| Depends On | Task store path structure, `RunArtifact` schema pattern |
 
 **What AOF must do:**
 
-Add to release.yml (or as a separate pre-release workflow):
+Write `trace.json` to the task work directory with a structured schema:
 
-1. **Upgrade simulation**: Install the previous release tarball, create synthetic tasks with gate format, then install the new build over it. Run smoke tests to verify the upgrade path worked.
-2. **Migration test**: Run all migrations in `up` direction, then `down` direction, then `up` again. Verify idempotency.
-3. **Tarball integrity**: Extract the built tarball to a clean directory, run `npm ci --production`, and verify `bd --version` returns the expected version.
-4. **Schema backward compatibility**: Load task files written by the previous version and verify they parse with the current schema (no breaking changes).
+```typescript
+const TraceFile = z.object({
+  taskId: z.string(),
+  sessionId: z.string(),
+  agentId: z.string(),
+  capturedAt: z.string().datetime(),
+  duration: z.object({
+    totalMs: z.number(),
+    firstToolCallMs: z.number().optional(),  // time to first tool call
+    lastToolCallMs: z.number().optional(),   // time of last tool call
+  }),
+  toolCalls: z.array(z.object({
+    name: z.string(),
+    category: z.enum(["aof", "file_read", "file_write", "shell", "web", "other"]),
+    timestamp: z.string().datetime().optional(),
+    success: z.boolean(),
+    errorSummary: z.string().optional(),
+  })),
+  summary: z.object({
+    totalToolCalls: z.number(),
+    aofToolCalls: z.number(),
+    fileReads: z.number(),
+    fileWrites: z.number(),
+    shellCommands: z.number(),
+    completionCalled: z.boolean(),
+    hasThinking: z.boolean(),
+  }),
+  flags: z.array(z.enum([
+    "no_completion_call",      // agent never called aof_task_complete
+    "no_tool_calls",           // agent made zero tool calls
+    "no_file_modifications",   // agent read files but never wrote
+    "completion_without_work", // agent called aof_task_complete but made no other tool calls
+  ])).default([]),
+  // Debug-only fields (populated when task has debug: true)
+  reasoning: z.array(z.object({
+    timestamp: z.string().datetime().optional(),
+    text: z.string(),
+  })).optional(),
+});
+```
 
-These tests run as a separate CI job (not on every PR, only on release tags or release branches) because they need the built tarball.
+Location: `tasks/<status>/<task-id>/trace.json` -- same directory as `run.json`.
 
-**Confidence:** HIGH -- these are standard CI patterns. The upgrade simulation is the most valuable and novel addition.
+**Confidence:** HIGH -- follows established pattern of run artifacts.
 
 ---
 
-### 8. DAG-as-Default for New Tasks
+### 4. Trace CLI (`aof trace <task-id>`)
 
 | Aspect | Detail |
 |--------|--------|
-| Why Expected | The entire point of v1.3 is making DAGs the default. Without this, DAGs remain opt-in and most tasks are created without workflows. |
-| Complexity | LOW |
-| Depends On | Config migration (table stakes #1), existing `resolveWorkflowTemplate()`, existing `bd create` |
+| Why Expected | Operators need a quick way to see what an agent did. Raw JSONL is unreadable. |
+| Complexity | MEDIUM |
+| Depends On | Trace file storage, Commander.js CLI framework |
 
-**What AOF must do:**
+**Two modes:**
 
-1. Modify `bd create` to check for `defaultWorkflow` in the project manifest:
-   - If `defaultWorkflow` is set and `--workflow` is not specified: auto-attach the default template
-   - If `--workflow template-name` is specified: use that template (existing behavior)
-   - If `--no-workflow` flag is specified: create bare task (no workflow)
-   - If `defaultWorkflow` is not set and `--workflow` is not specified: create bare task (backward-compatible)
-2. Modify the MCP tool `aof_task_create` with the same logic.
-3. Print a message when auto-attaching: `Workflow "standard-review" auto-attached (project default). Use --no-workflow to skip.`
-4. The agent API for ad-hoc workflow composition takes precedence over `defaultWorkflow` (explicit inline workflow overrides the default).
+**Default (summary):**
+```
+$ aof trace TASK-2026-03-06-abc
 
-**Confidence:** HIGH -- the template resolution infrastructure already exists. This is a conditional lookup before task creation.
+Task: TASK-2026-03-06-abc
+Agent: swe-backend | Session: 509ebb91-...
+Duration: 4m 23s | Tool calls: 37
+
+Tool Summary:
+  aof_task_complete  1  (called)
+  file read         12
+  file write         8
+  shell (exec)      14
+  web fetch          2
+
+Flags: (none)
+Status: Completed normally
+```
+
+**Debug (`--debug`):**
+```
+$ aof trace TASK-2026-03-06-abc --debug
+
+[same header as above]
+
+Tool Call Timeline:
+  00:00  exec        git status
+  00:02  read        src/memory/store/vector-store.ts
+  00:05  read        src/memory/store/schema.ts
+  ...
+  04:21  aof_task_complete  taskId=TASK-2026-03-06-abc summary="Fixed integer binding..."
+
+Reasoning Excerpts: (3 blocks)
+  [1] "Investigating primary key type mismatch..."
+  [2] "The error suggests sqlite-vec requires integer..."
+  [3] "Planning to cast the limit parameter..."
+```
+
+**Confidence:** HIGH -- follows existing CLI command patterns (`aof smoke`).
 
 ---
 
-### 9. Upgrade Documentation
+### 5. SKILL.md Completion Guidance
 
 | Aspect | Detail |
 |--------|--------|
-| Why Expected | Users need a clear guide for upgrading from v1.2 to v1.3. What changes, what they need to do, what breaks. |
+| Why Expected | Agents must be instructed to provide meaningful completion reports. Current SKILL.md doesn't mention completion quality expectations. |
 | Complexity | LOW |
-| Depends On | All other features (documents what they do) |
+| Depends On | `skills/aof/SKILL.md`, `skills/aof/SKILL-SEED.md`, context budget gate (2150 token ceiling, current full SKILL.md is 1665 tokens = ~485 tokens headroom) |
 
-**What AOF must do:**
+**What to add to SKILL.md (under "Workflow Patterns" section):**
 
-1. `UPGRADING.md` (or `guide/upgrading-v1.3.md`) covering:
-   - What changed: DAGs are now default, config migration runs automatically
-   - Prerequisites: Node 22, existing v1.2 install
-   - Step-by-step: `curl | sh` (same as fresh install -- installer handles upgrade)
-   - What happens during upgrade: backup, migrations, smoke test
-   - How to verify: `bd smoke` command
-   - How to rollback: `bd rollback` command
-   - Breaking changes: None (additive changes only)
-   - Known issues: (list any)
-2. Changelog generated from conventional commits (existing release.yml behavior)
-3. Migration summary printed at end of installer (what was migrated, counts)
+```markdown
+### Completion Requirements
 
-**Confidence:** HIGH -- documentation, no technical risk.
+When finishing work, call `aof_task_complete` with:
+- `summary`: What you did and why (not just "done"). Include files changed and key decisions.
+- `outputs`: List of files created or modified.
+Your session is traced. Exiting without calling `aof_task_complete` blocks the task for operator review.
+```
+
+~50 tokens. Fits within budget.
+
+**What to add to SKILL-SEED.md:**
+
+Same text, shortened to ~30 tokens:
+```markdown
+**Completion:** Always call `aof_task_complete` with meaningful summary and outputs list. Exiting without it blocks the task.
+```
+
+**Also update `formatTaskInstruction()` in `openclaw-executor.ts`** (already has completion reminder at line 314) to reinforce the "will be blocked" consequence:
+
+Change: `"your work will be lost"` to `"your work will be blocked for operator review and your session will be traced for investigation."`
+
+**Confidence:** HIGH -- small text changes, fits token budget.
 
 ---
 
 ## Differentiators
 
-Features that make the upgrade experience notably better than competitors. Not required for v1.3 MVP, but high value.
+Features that go beyond the minimum viable tracing. Not required for solving the core problem, but significantly increase the value of the tracing infrastructure.
 
-| Feature | Value Proposition | Complexity | Notes |
-|---------|-------------------|------------|-------|
-| **Dry-run upgrade** | `install.sh --dry-run` shows what would change without modifying anything. Users preview the impact before committing. | LOW | Print migration plan, show which tasks would be migrated, show config changes. No file writes. High trust signal. |
-| **Progressive rollout for DAG default** | Instead of all-or-nothing, let projects opt into DAG-as-default individually. `defaultWorkflow` is per-project. | LOW | Already per-project by design (defaultWorkflow is in project.yaml). Document this as a feature. |
-| **Migration audit trail** | After upgrade, `bd migrations` shows which migrations ran, when, and what they changed. Full auditability. | LOW | The `.aof/migrations.json` history already exists. Add a CLI command to display it. |
-| **Canary task creation** | During upgrade, the smoke test creates a real task with the default workflow, verifies it parses and validates, then deletes it. Proves the full task lifecycle works. | MEDIUM | Goes beyond static validation -- actually exercises the task store. |
-| **Automatic daemon restart** | After upgrade, automatically restart the daemon if it was running. Users should not have to manually restart. | LOW | Check if daemon is running (PID file / health endpoint), stop, wait, start. The existing daemon lifecycle commands handle this. |
+| Feature | Value Proposition | Complexity | Dependencies | Notes |
+|---------|-------------------|------------|-------------|-------|
+| **Retry-aware trace accumulation** | When a task fails and retries, store traces as `trace_history[]` so the next agent sees what prior agents tried and failed at. Prevents repeating the same mistakes across retries. | Medium | Trace file storage, failure tracker | High value: the 3-failure deadletter pathway currently loses all diagnostic context. Each retry starts blind. Store previous traces alongside current trace. |
+| **No-op detection** | Automatically flag sessions where agent made zero meaningful tool calls. Emit `trace.suspicious_completion` event. | Low | Tool call extraction (part of trace capture) | Directly addresses the triggering incident. Zero file writes + zero shell commands + `aof_task_complete` called = suspicious. Can integrate with existing notification rules for alerting. |
+| **Prior-failure injection** | When dispatching a retry, include a "Previous attempts" section in the task instruction showing what prior agents tried and why they failed. | Medium | Retry-aware trace accumulation, `formatTaskInstruction()` | Must respect context budget. Include only: tool call summary, error message, duration. NOT full reasoning (too large). |
+| **Trace event emission** | Emit JSONL events for trace lifecycle: `trace.captured`, `trace.suspicious_completion`, `trace.no_completion_call`. | Low | EventLogger, trace capture | Extends existing event types. Enables downstream alerting via existing notification rules. |
+| **Debug flag on tasks** | Per-task `debug: true` metadata flag controls trace verbosity. Debug tasks capture full reasoning; normal tasks get tool-call-only summary. | Low | Task metadata, trace capture | Reasoning extraction produces large data (thinking blocks can be paragraphs). Default to summary-only. Debug flag enables full capture. Operator sets debug when investigating a problem task. |
+| **Trace retention policy** | Auto-prune trace files for done tasks older than N days. Keep traces for deadlettered tasks indefinitely (forensics). | Low | Trace file storage | Prevents unbounded disk usage. Deadletter traces are the most valuable for understanding systemic failures. |
 
 ---
 
 ## Anti-Features
 
-Features that seem related to seamless upgrade but should NOT be built.
+Features to explicitly NOT build for v1.5.
 
-| Anti-Feature | Why Requested | Why Avoid | What to Do Instead |
-|--------------|---------------|-----------|-------------------|
-| **Auto-update mechanism** | "Check for updates and install automatically" | Explicitly deferred to v2 in PROJECT.md. Auto-updating a CLI tool running under OS supervision (launchd/systemd) risks breaking the daemon mid-operation. | Users run `curl \| sh` or `bd update` manually. The channel system can check for updates and notify without auto-installing. |
-| **In-place binary replacement** | "Hot-swap the running binary without restart" | Impossible for a Node.js application. The running process has loaded modules from disk. Replacing them while running causes undefined behavior. | Stop daemon, upgrade, start daemon. The installer already handles this flow. |
-| **Backward migration of task data** | "Convert DAG tasks back to gate format" | Gate code is being deprecated. Maintaining two-way conversion doubles maintenance. The `down` migration for tasks should restore from backup, not reverse-engineer gates from DAGs. | Rollback restores the backup (which has original gate format). No reverse conversion needed. |
-| **Multi-version coexistence** | "Run v1.2 and v1.3 side by side" | Single install directory. Filesystem-based state means one version owns the data directory at a time. | Rollback is the mechanism. If v1.3 has issues, rollback to v1.2. |
-| **OpenClaw version compatibility checks** | "Verify OpenClaw gateway version is compatible" | Explicitly deferred to v2 in PROJECT.md. | AOF uses plugin-sdk export. If the export API is stable, version does not matter. |
-| **Interactive migration wizard** | "Walk the user through each migration decision" | Migrations should be automatic and deterministic. User decisions introduce variability and risk. | Migrations run automatically with sensible defaults. `--dry-run` previews. `bd rollback` undoes. |
+| Anti-Feature | Why Avoid | What to Do Instead |
+|--------------|-----------|-------------------|
+| **OpenTelemetry integration** | Explicitly deferred to v2 in PROJECT.md. Adds external dependency (OTel collector). AOF is a single-machine filesystem-based tool -- OTel is designed for distributed systems. | File-based trace storage with JSONL events is sufficient. |
+| **Real-time session streaming** | The problem is post-hoc investigation ("what did the agent do?"), not live monitoring. Would require WebSocket infrastructure, inter-process communication. | Capture traces after session completes. `aof trace` inspects after the fact. |
+| **Dashboard / web UI** | Already out of scope per PROJECT.md. Would be a separate milestone with its own research. | `aof trace` CLI with formatted terminal output. |
+| **Full session replay** | Storing entire session transcripts (100KB-1MB each) in task directories would bloat the filesystem store rapidly. 244 session files for one agent alone. | Extract structured summary (tool calls, flags, key reasoning snippets). Reference original session file path for full replay if needed. |
+| **Automatic self-healing from traces** | Tempting to auto-resurrect blocked tasks based on trace analysis, but violates "no LLMs in control plane" for any intelligent healing, and "self-healing" is explicitly mentioned as deferred. | Capture and store traces. Surface flags. Let operators decide via `aof trace` + manual action. |
+| **Cross-task trace correlation** | Building a trace graph across DAG workflow hops adds schema complexity without solving the immediate problem. | Store per-task traces independently. DAG workflow already tracks hop-level status. |
+| **Reasoning quality scoring** | Using an LLM to evaluate reasoning quality from traces violates "no LLMs in control plane." | Expose reasoning via `--debug` flag. Let operators judge quality themselves. |
+| **Session file management** | Cleaning up, archiving, or rotating OpenClaw session files. This is OpenClaw's responsibility, not AOF's. | Read session files as needed. Never write to or delete OpenClaw session directories. |
 
 ---
 
 ## Feature Dependencies
 
 ```
-[Config Migration: defaultWorkflow] (table stakes #1)
-    requires -> ProjectManifest schema
-    requires -> existing workflowTemplates
-    enables -> [DAG-as-Default] (table stakes #8)
-    enables -> [Project Manifest Migration] (table stakes #3)
+Completion enforcement ------> (independent, no deps -- change fallback behavior)
+SKILL.md guidance -----------> (independent, no deps -- text changes)
 
-[Batch Gate-to-DAG Migration] (table stakes #2)
-    requires -> existing migrateGateToDAG()
-    requires -> existing migration framework
-    enables -> [Migration Completeness smoke check]
+Session trace capture -------> Trace file storage (need somewhere to write extracted traces)
+Trace file storage ----------> Trace CLI (CLI reads stored trace.json files)
+Trace file storage ----------> No-op detection (needs structured tool call data)
+Trace file storage ----------> Trace event emission (emit events based on trace analysis)
+Trace file storage ----------> Debug flag on tasks (controls what gets stored in trace)
 
-[Project Manifest Migration] (table stakes #3)
-    requires -> existing WorkflowConfig schema
-    requires -> [Config Migration: defaultWorkflow]
-    enables -> [DAG-as-Default] (table stakes #8)
-
-[Upgrade Smoke Tests] (table stakes #4)
-    requires -> existing health endpoint
-    requires -> existing validation/lint
-    validates -> [Config Migration] (table stakes #1)
-    validates -> [Batch Migration] (table stakes #2)
-    validates -> [Project Migration] (table stakes #3)
-
-[Version-Aware Installer] (table stakes #5)
-    requires -> existing install.sh
-    requires -> existing runMigrations()
-    triggers -> [Config Migration] (table stakes #1)
-    triggers -> [Batch Migration] (table stakes #2)
-    triggers -> [Project Migration] (table stakes #3)
-    triggers -> [Smoke Tests] (table stakes #4)
-
-[Rollback Safety] (table stakes #6)
-    requires -> existing backup mechanism
-    requires -> existing rollbackUpdate()
-    requires -> backward-compatible data format
-    validates -> [Smoke Tests] (table stakes #4)
-
-[Release Pipeline] (table stakes #7)
-    requires -> existing release.yml
-    tests -> [Version-Aware Installer] (table stakes #5)
-    tests -> [Smoke Tests] (table stakes #4)
-
-[DAG-as-Default] (table stakes #8)
-    requires -> [Config Migration: defaultWorkflow] (table stakes #1)
-    requires -> existing resolveWorkflowTemplate()
-    requires -> existing bd create
+Trace file storage ----------> Retry-aware trace accumulation (store trace history)
+Retry-aware accumulation ----> Prior-failure injection (inject history into task prompt)
 ```
 
-### Dependency Notes
+### Build Order Implications
 
-- **Config migration is the foundation**: defaultWorkflow field must exist before DAG-as-default can be implemented.
-- **Migrations before smoke tests**: Smoke tests verify migration correctness, so migrations must exist first.
-- **Version-aware installer orchestrates**: The installer triggers migrations, then smoke tests. It is the integration point.
-- **Rollback must be independent**: Rollback cannot depend on the new version working. It must be able to restore from backup without running any v1.3 code paths.
-- **Release pipeline verifies everything**: It exercises the full upgrade path in CI before publishing.
+1. **Completion enforcement and SKILL.md are independent** -- can ship as a quick fix before any trace infrastructure exists. Highest ROI, lowest effort.
+2. **Session trace capture -> Trace file storage is the critical path** -- everything else depends on having structured trace data.
+3. **Trace CLI is the user-visible payoff** -- should come immediately after trace storage works.
+4. **Retry-aware accumulation and prior-failure injection are a paired feature** -- defer together if needed.
 
 ---
 
 ## MVP Recommendation
 
-### Phase Ordering (based on dependencies and risk):
+### Phase 1: Stop the bleeding (completion enforcement)
 
-**Phase 1: Schema and Migration Foundation**
-- Add `defaultWorkflow` optional field to ProjectManifest schema
-- Write migration `001-add-default-workflow` (per-project config update)
-- Write migration `002-batch-gate-to-dag` (eager task migration)
-- Write migration `003-project-workflow-to-templates` (gate workflow conversion)
-- Rationale: All downstream work depends on the schema change and migrations existing.
+1. **Completion enforcement** -- Change `onRunComplete` fallback to block instead of auto-complete.
+2. **SKILL.md completion guidance** -- Add explicit instructions about meaningful completion reports.
+3. **Update `formatTaskInstruction()`** -- Reinforce consequences of not calling `aof_task_complete`.
 
-**Phase 2: Installer Integration**
-- Wire migrations into installer flow (version-aware `run_node_setup`)
-- Enhanced backup (full installation, not just data directories)
-- Implement `bd rollback` command
-- Rationale: The upgrade must actually run migrations. Without installer integration, migrations are dead code.
+Rationale: Immediately stops hallucinated completions. No new infrastructure needed.
 
-**Phase 3: DAG-as-Default + Smoke Tests**
-- Modify `bd create` to auto-attach defaultWorkflow
-- Modify MCP tool with same logic
-- Implement `bd smoke` command with all verification checks
-- Add `--no-workflow` flag to `bd create`
-- Rationale: This is the user-visible outcome. Smoke tests validate everything built in phases 1-2.
+### Phase 2: See what happened (trace infrastructure)
 
-**Phase 4: Release Pipeline + Documentation**
-- Add upgrade simulation to release.yml
-- Add migration roundtrip test to CI
-- Write UPGRADING.md
-- Cut v1.3 release tag
-- Rationale: Final validation and packaging. Must be last because it tests the complete flow.
+4. **Session trace capture** -- Parse OpenClaw session JSONL, extract tool calls.
+5. **Trace file storage** -- Write `trace.json` to task directory.
+6. **No-op detection** -- Flag suspicious sessions automatically.
+7. **Trace event emission** -- Integrate flags with existing event system.
 
-### Prioritize (must have for v1.3):
-1. Schema change (defaultWorkflow) -- enables everything
-2. Batch gate-to-DAG migration -- eliminates dual code path
-3. Version-aware installer with migration triggers -- makes upgrade automatic
-4. DAG-as-default in bd create -- the user-visible feature
-5. Smoke test command -- confidence mechanism
-6. Rollback command -- safety net
+Rationale: Core trace infrastructure. After this phase, every agent session produces structured observability data.
 
-### Defer if time-constrained:
-- Dry-run upgrade (nice but not blocking)
-- Migration audit CLI (history already tracked in JSON, manual inspection sufficient)
-- Canary task creation (static validation is sufficient for v1.3)
-- Automatic daemon restart (documented manual restart is acceptable)
-- Release pipeline upgrade simulation (manual testing of upgrade path is acceptable for v1.3, automate in v1.4)
+### Phase 3: Investigate (CLI + debug)
+
+8. **Trace CLI** -- `aof trace <task-id>` with summary and `--debug` modes.
+9. **Debug flag on tasks** -- Per-task verbosity control for full reasoning capture.
+
+Rationale: Makes trace data accessible to operators. The payoff for phases 1-2.
+
+### Defer to v1.6:
+
+- **Retry-aware trace accumulation** -- Valuable but adds complexity to trace storage schema.
+- **Prior-failure injection** -- Depends on retry-aware accumulation.
+- **Trace retention policy** -- Not urgent until disk usage becomes a concern.
+
+---
+
+## Complexity Budget
+
+| Feature | Estimated Effort | Risk |
+|---------|-----------------|------|
+| Completion enforcement | 1-2 hours | Low -- surgical change in existing callback |
+| SKILL.md updates | 30 min | Low -- must fit token budget (verified: ~485 tokens headroom) |
+| formatTaskInstruction update | 15 min | Low -- one string change |
+| Session trace capture | 4-6 hours | Medium -- JSONL streaming parser, edge cases (missing files, `.deleted` suffix, large files) |
+| Trace file storage (schema + writer) | 2-3 hours | Low -- follows `RunArtifact` pattern |
+| No-op detection | 1 hour | Low -- counting logic on extracted trace data |
+| Trace event emission | 1 hour | Low -- extends existing EventLogger |
+| Trace CLI | 3-4 hours | Low -- follows existing CLI patterns (Commander.js) |
+| Debug flag | 1 hour | Low -- metadata field + conditional in trace capture |
+| **Total MVP (Phases 1-3)** | **~2-3 days** | |
+
+---
+
+## Key Observations from Codebase
+
+1. **The hallucination pathway is exactly identified.** `assign-executor.ts` lines 191-195: `outcome.success` triggers `review -> done` without any verification of what the agent actually did. The fix is a two-line change.
+
+2. **Session file path is available at spawn time.** `OpenClawAdapter` already calls `ext.resolveSessionFilePath(sessionId)` (line 107). The session ID is stored in task metadata (line 236). Path resolution is a solved problem.
+
+3. **Session JSONL is well-structured and parseable.** Verified from real data: `type: "message"` entries contain `toolCall` and `toolResult` content blocks with tool names. Categories can be derived from tool names (`aof_*`, `exec`, `read`, `write`, `web_fetch`, etc.).
+
+4. **Session files vary wildly in size.** From 2KB (quick tasks) to 1MB+ (complex debugging sessions). Must use streaming JSONL parser (readline), not `JSON.parse(readFile())`.
+
+5. **Some session files have `.deleted.*` suffix.** OpenClaw appears to soft-delete sessions by renaming. Trace capture must handle this: try the canonical path first, then glob for `<sessionId>.jsonl.deleted.*`.
+
+6. **Token budget is tight but sufficient.** Full SKILL.md is 1665 tokens. Budget ceiling is 2150. That leaves ~485 tokens for additions. The proposed ~50 token addition fits comfortably.
+
+7. **Existing run artifact pattern is the template.** `run.json`, `run_result.json`, `run_heartbeat.json` already live in task directories with Zod schemas and atomic writes. `trace.json` follows the identical pattern.
+
+8. **The `onRunComplete` callback is the natural hook.** It already fires after agent completion with `AgentRunOutcome`. Adding trace capture here means: agent finishes -> read session JSONL -> extract trace -> write `trace.json` -> check flags -> emit events -> apply completion enforcement logic.
 
 ---
 
 ## Sources
 
-- AOF migration framework: `src/packaging/migrations.ts` -- HIGH confidence (examined directly, supports up/down direction, version ordering, history tracking)
-- AOF self-update engine: `src/packaging/updater.ts` -- HIGH confidence (examined directly, backup/download/extract/rollback with hooks)
-- AOF gate-to-DAG migration: `src/migration/gate-to-dag.ts` -- HIGH confidence (examined directly, lazy per-task conversion with in-flight position mapping)
-- AOF shell installer: `scripts/install.sh` -- HIGH confidence (examined directly, prerequisite checks, upgrade detection, data backup, Node.js setup delegation)
-- AOF task-store lazy migration: `src/store/task-store.ts` lines 245-254 -- HIGH confidence (examined directly, lazy migrateGateToDAG on task read)
-- AOF project schema: `src/schemas/project.ts` -- HIGH confidence (examined directly, workflowTemplates optional field, no defaultWorkflow yet)
-- AOF workflow template resolution: `src/cli/commands/task-create-workflow.ts` -- HIGH confidence (examined directly, resolves template name from manifest)
-- AOF health endpoint: `src/daemon/health.ts` -- HIGH confidence (examined directly, status/components/config checks)
-- AOF release workflow: `.github/workflows/release.yml` -- HIGH confidence (examined directly, tag-triggered with typecheck/build/test/tarball/changelog)
-- [Terraform version management](https://developer.hashicorp.com/terraform/tutorials/configuration-language/versions) -- MEDIUM confidence (additive schema pattern, backward-compatible minor versions)
-- [Snyk CLI smoke tests](https://github.com/snyk/cli/blob/main/test/smoke/README.md) -- MEDIUM confidence (post-install verification pattern: version check, basic operation test, fixture-based validation)
-- [rustup self-update mechanism](https://rust-lang.github.io/rustup/basics.html) -- MEDIUM confidence (version pinning, self-update control, channel management)
-- [AWS Builders Library: Ensuring Rollback Safety](https://aws.amazon.com/builders-library/ensuring-rollback-safety-during-deployments/) -- MEDIUM confidence (backward-compatible data formats, one-version rollback window, tested rollback paths)
-- [Smoke testing in CI/CD](https://circleci.com/blog/smoke-tests-in-cicd-pipelines/) -- MEDIUM confidence (fast critical-path verification, fail-loud with actionable errors)
-- [prerelease-checks npm package](https://www.npmjs.com/package/prerelease-checks) -- LOW confidence (pre-release verification pattern, not directly applicable to tarball releases)
+- Codebase: `src/dispatch/assign-executor.ts` lines 181-226 -- fallback completion logic (HIGH confidence, examined directly)
+- Codebase: `src/openclaw/openclaw-executor.ts` -- session lifecycle, `resolveSessionFilePath`, `runAgentBackground` (HIGH confidence)
+- Codebase: `src/schemas/run.ts`, `src/schemas/run-result.ts` -- existing run artifact schemas (HIGH confidence)
+- Codebase: `src/events/logger.ts` -- JSONL event infrastructure (HIGH confidence)
+- Codebase: `skills/aof/SKILL.md` -- current agent instructions, 1665 tokens (HIGH confidence)
+- Codebase: `skills/aof/SKILL-SEED.md` -- seed tier instructions (HIGH confidence)
+- Codebase: `src/mcp/tools.ts` -- `aof_task_complete` tool registration and schema (HIGH confidence)
+- Real data: `~/.openclaw/agents/swe-backend/sessions/*.jsonl` -- verified JSONL format, message types, tool call structure (HIGH confidence)
+- Real data: 244 session files observed for swe-backend agent, sizes 2KB-1MB (HIGH confidence)
 
 ---
-*Feature research for: AOF v1.3 Seamless Upgrade and Release*
-*Researched: 2026-03-03*
+*Feature research for: AOF v1.5 Event Tracing & Session Observability*
+*Researched: 2026-03-06*
