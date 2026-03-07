@@ -191,3 +191,9 @@ Agent `id` values must match OpenClaw agent names. Run `aof init` to auto-sync f
 - Tasks with a `project` field are scoped to that project's directory; without it, global store
 - Memory is scoped per-project via the `project` parameter
 - If participants are listed, only those agents receive tasks from that project
+
+---
+
+## Completion Protocol
+
+Always call `aof_task_complete` with a brief summary when done. Exiting without this call fails the task and triggers retry.
