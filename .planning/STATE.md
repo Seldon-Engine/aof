@@ -1,32 +1,33 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.4
-milestone_name: Context Optimization
-status: milestone_complete
-stopped_at: Milestone v1.4 archived
-last_updated: "2026-03-04T17:00:00.000Z"
-last_activity: 2026-03-04 -- Milestone v1.4 archived and tagged
+milestone: v1.5
+milestone_name: Event Tracing
+status: defining_requirements
+stopped_at: null
+last_updated: "2026-03-06T00:00:00.000Z"
+last_activity: 2026-03-06 -- Milestone v1.5 started
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 6
-  completed_plans: 6
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-04)
+See: .planning/PROJECT.md (updated 2026-03-06)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** Planning next milestone
+**Current focus:** Defining requirements for v1.5 Event Tracing
 
 ## Current Position
 
-Milestone: v1.4 Context Optimization — SHIPPED 2026-03-04
-Status: Archived to .planning/milestones/
-Next: /gsd:new-milestone
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-03-06 — Milestone v1.5 started
 
 ## Performance Metrics
 

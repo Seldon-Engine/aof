@@ -69,7 +69,15 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 
 ### Active
 
-(None — planning next milestone)
+## Current Milestone: v1.5 Event Tracing
+
+**Goal:** Make agent work visible and trustworthy — enforce explicit completion, capture session traces, and surface what agents actually did (or didn't do).
+
+**Target features:**
+- Completion enforcement (require explicit `aof_task_complete`, don't trust exit codes)
+- Session trace capture (pull OpenClaw transcripts, write structured trace to task directory)
+- Trace CLI (`aof trace <task-id>` with summary and `--debug` verbosity)
+- SKILL.md updates (instruct agents to report meaningful completion data)
 
 ### Validated (v1.2)
 
@@ -155,4 +163,4 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 | Seed tier default for dispatched tasks | Simple tasks shouldn't pay full context cost | ✓ Good (82.5% reduction for seed) |
 
 ---
-*Last updated: 2026-03-04 after v1.4 milestone completion*
+*Last updated: 2026-03-06 after v1.5 milestone start*
