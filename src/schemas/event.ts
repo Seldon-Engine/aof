@@ -48,6 +48,9 @@ export const EventType = z.enum([
   "dispatch.fallback",
   "dispatch.error",
 
+  // Completion enforcement (Phase 25)
+  "completion.enforcement",
+
   // Dependencies
   "dependency.cascaded",  // A dependency status change cascaded to dependents
   

@@ -21,7 +21,7 @@ import writeFileAtomic from "write-file-atomic";
 import { ProjectManifest } from "../schemas/project.js";
 import type { TaskContext } from "./executor.js";
 import { classifySpawnError } from "./scheduler-helpers.js";
-import { transitionToDeadletter } from "./failure-tracker.js";
+import { trackDispatchFailure, shouldTransitionToDeadletter, transitionToDeadletter } from "./failure-tracker.js";
 
 /**
  * Load project manifest from disk.
@@ -180,46 +180,62 @@ export async function executeAssignAction(
         // If agent already transitioned the task (called aof_task_complete), nothing to do
         if (currentTask.frontmatter.status !== "in-progress") return;
 
-        // Agent finished without calling aof_task_complete — fallback handling
+        // Agent finished without calling aof_task_complete — enforcement
+        const enforcementReason = outcome.success
+          ? `Task failed: agent exited without calling aof_task_complete. Session lasted ${(outcome.durationMs / 1000).toFixed(1)}s. Run \`aof trace ${action.taskId}\` for session details.`
+          : outcome.error
+            ? `Agent error: ${outcome.error.kind}: ${outcome.error.message}`
+            : outcome.aborted
+              ? "Agent run was aborted"
+              : "Agent run failed (unknown reason)";
+
         console.error(
           `[AOF] Task ${action.taskId} still in-progress after agent completed. ` +
-          `Agent likely could not access aof_task_complete tool. ` +
-          `Run \`aof setup\` to fix tool visibility config.`,
+          enforcementReason,
         );
 
         try {
-          if (outcome.success) {
-            // Agent succeeded but didn't transition — move through review → done
-            await store.transition(action.taskId, "review", {
-              reason: "dispatch.fallback: agent completed without calling aof_task_complete",
-            });
-            await store.transition(action.taskId, "done", {
-              reason: "dispatch.fallback: auto-completed after successful agent run",
-            });
+          // Store enforcement metadata on task
+          const taskForMeta = await store.get(action.taskId);
+          if (taskForMeta) {
+            taskForMeta.frontmatter.metadata = {
+              ...taskForMeta.frontmatter.metadata,
+              enforcementReason,
+              enforcementAt: new Date().toISOString(),
+            };
+            const serialized = serializeTask(taskForMeta);
+            const metaPath = taskForMeta.path ?? join(store.tasksDir, "in-progress", `${action.taskId}.md`);
+            await writeFileAtomic(metaPath, serialized);
+          }
+
+          // Track dispatch failure (increments counter)
+          await trackDispatchFailure(store, action.taskId, enforcementReason);
+
+          // Check deadletter threshold
+          const updatedTask = await store.get(action.taskId);
+          if (updatedTask && shouldTransitionToDeadletter(updatedTask)) {
+            await transitionToDeadletter(store, logger, action.taskId, enforcementReason);
           } else {
-            // Agent errored or was aborted — block the task
-            const reason = outcome.error
-              ? `Agent error: ${outcome.error.kind}: ${outcome.error.message}`
-              : outcome.aborted
-                ? "Agent run was aborted"
-                : "Agent run failed (unknown reason)";
-            await store.transition(action.taskId, "blocked", { reason });
+            await store.transition(action.taskId, "blocked", { reason: enforcementReason });
           }
         } catch (transitionErr) {
           const msg = transitionErr instanceof Error ? transitionErr.message : String(transitionErr);
-          console.error(`[AOF] Fallback transition failed for ${action.taskId}: ${msg}`);
+          console.error(`[AOF] Enforcement transition failed for ${action.taskId}: ${msg}`);
         }
 
-        // Log fallback event (non-fatal)
+        // Log enforcement event (non-fatal)
         try {
-          await logger.logDispatch("dispatch.fallback", "scheduler", action.taskId, {
-            agent: action.agent,
-            sessionId: outcome.sessionId,
-            success: outcome.success,
-            aborted: outcome.aborted,
-            durationMs: outcome.durationMs,
-            error: outcome.error?.message,
-            correlationId,
+          const updatedTask = await store.get(action.taskId);
+          await logger.log("completion.enforcement", "scheduler", {
+            taskId: action.taskId,
+            payload: {
+              agent: action.agent,
+              sessionId: outcome.sessionId,
+              durationMs: outcome.durationMs,
+              correlationId,
+              reason: "agent_exited_without_completion",
+              dispatchFailures: updatedTask?.frontmatter.metadata.dispatchFailures,
+            },
           });
         } catch {
           // Logging errors should not crash the scheduler
