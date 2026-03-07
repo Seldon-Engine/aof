@@ -338,6 +338,66 @@ describe("OpenClawAdapter", () => {
     expect(params.prompt).toContain("verify that the `aof_task_complete` tool is available");
   });
 
+  it("formatTaskInstruction includes FAILED consequence warning", async () => {
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
+      meta: { durationMs: 1000, agentMeta: { sessionId: "s-enf1", provider: "a", model: "m" } },
+    });
+
+    const context: TaskContext = {
+      taskId: "TASK-ENF-001",
+      taskPath: "/path/to/task.md",
+      agent: "swe-backend",
+      priority: "normal",
+      routing: {},
+    };
+
+    await executor.spawnSession(context);
+
+    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
+    const params = mockRunEmbeddedPiAgent.mock.calls[0][0];
+    expect(params.prompt).toContain("FAILED");
+  });
+
+  it("formatTaskInstruction includes retried-by-another-agent language", async () => {
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
+      meta: { durationMs: 1000, agentMeta: { sessionId: "s-enf2", provider: "a", model: "m" } },
+    });
+
+    const context: TaskContext = {
+      taskId: "TASK-ENF-002",
+      taskPath: "/path/to/task.md",
+      agent: "swe-backend",
+      priority: "normal",
+      routing: {},
+    };
+
+    await executor.spawnSession(context);
+
+    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
+    const params = mockRunEmbeddedPiAgent.mock.calls[0][0];
+    expect(params.prompt).toContain("retried by another agent");
+  });
+
+  it("formatTaskInstruction includes summary-of-actions instruction", async () => {
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
+      meta: { durationMs: 1000, agentMeta: { sessionId: "s-enf3", provider: "a", model: "m" } },
+    });
+
+    const context: TaskContext = {
+      taskId: "TASK-ENF-003",
+      taskPath: "/path/to/task.md",
+      agent: "swe-backend",
+      priority: "normal",
+      routing: {},
+    };
+
+    await executor.spawnSession(context);
+
+    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
+    const params = mockRunEmbeddedPiAgent.mock.calls[0][0];
+    expect(params.prompt).toContain("summary of actions");
+  });
+
   it("handles onRunComplete callback errors gracefully", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockRunEmbeddedPiAgent.mockResolvedValueOnce({
