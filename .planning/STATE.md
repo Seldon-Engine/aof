@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Event Tracing
-status: ready_to_plan
-stopped_at: null
-last_updated: "2026-03-07T00:00:00.000Z"
-last_activity: 2026-03-07 -- Roadmap created for v1.5 Event Tracing
+status: executing
+stopped_at: "Completed 25-01-PLAN.md"
+last_updated: "2026-03-07T20:03:00.000Z"
+last_activity: 2026-03-07 -- Completed Phase 25 Plan 01 (Completion Enforcement)
 progress:
   total_phases: 3
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 2
+  completed_plans: 1
 ---
 
 # Project State
@@ -25,11 +25,11 @@ See: .planning/PROJECT.md (updated 2026-03-06)
 ## Current Position
 
 Phase: 25 (1 of 3 in v1.5 Event Tracing)
-Plan: Not yet planned
-Status: Ready to plan
-Last activity: 2026-03-07 -- Roadmap created for v1.5 Event Tracing
+Plan: 1 of 2 complete
+Status: Executing
+Last activity: 2026-03-07 -- Completed Phase 25 Plan 01 (Completion Enforcement)
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
@@ -44,6 +44,9 @@ Recent decisions affecting current work:
 
 - [v1.5 Roadmap]: GUID requirements grouped with completion enforcement (Phase 25) -- agent guidance about completion is part of the enforcement feature
 - [v1.5 Roadmap]: 3 phases (not 4) -- dropped standalone integration/polish phase since all 16 requirements map to Phases 25-27
+- [25-01]: Block-only enforcement, no warn mode -- agents that skip aof_task_complete are always blocked
+- [25-01]: Enforcement metadata stored directly on task (enforcementReason, enforcementAt) for next retry agent visibility
+- [25-01]: Both success and failure branches in onRunComplete trigger enforcement events
 
 ### Roadmap Evolution
 
@@ -61,4 +64,4 @@ None.
 ### Blockers/Concerns
 
 - OpenClaw session JSONL format is undocumented -- parser must be defensive (Phase 26 concern)
-- Enforcement rollout risk -- must start in warn-only mode to avoid deadletter pileup (Phase 25 concern)
+- Enforcement rollout risk resolved -- block-only mode chosen per user decision (no warn mode)

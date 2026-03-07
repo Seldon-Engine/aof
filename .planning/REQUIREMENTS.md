@@ -9,10 +9,10 @@ Requirements for event tracing milestone. Each maps to roadmap phases.
 
 ### Completion Enforcement
 
-- [ ] **ENFC-01**: Task is marked failed (not done) when agent exits without calling `aof_task_complete`
-- [ ] **ENFC-02**: Enforcement mode is configurable (warn-only logs but allows fallback, block prevents auto-completion)
-- [ ] **ENFC-03**: No-op detection flags sessions with zero meaningful tool calls as suspicious
-- [ ] **ENFC-04**: Enforcement events (`completion.enforcement`, `completion.noop_detected`) emitted to JSONL event log
+- [x] **ENFC-01**: Task is marked failed (not done) when agent exits without calling `aof_task_complete`
+- [x] **ENFC-02**: Enforcement mode is configurable (warn-only logs but allows fallback, block prevents auto-completion)
+- [x] **ENFC-03**: No-op detection flags sessions with zero meaningful tool calls as suspicious
+- [x] **ENFC-04**: Enforcement events (`completion.enforcement`, `completion.noop_detected`) emitted to JSONL event log
 
 ### Trace Capture
 
@@ -67,10 +67,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ENFC-01 | Phase 25 | Pending |
-| ENFC-02 | Phase 25 | Pending |
-| ENFC-03 | Phase 25 | Pending |
-| ENFC-04 | Phase 25 | Pending |
+| ENFC-01 | Phase 25 | Complete |
+| ENFC-02 | Phase 25 | Complete |
+| ENFC-03 | Phase 25 | Complete |
+| ENFC-04 | Phase 25 | Complete |
 | TRAC-01 | Phase 26 | Pending |
 | TRAC-02 | Phase 26 | Pending |
 | TRAC-03 | Phase 26 | Pending |
