@@ -95,7 +95,10 @@ See: `.planning/milestones/v1.4-ROADMAP.md` for full details
   3. Sessions with zero meaningful tool calls are flagged as suspicious in the event log
   4. SKILL.md and dispatch-time instructions tell agents that exiting without `aof_task_complete` blocks the task
   5. All enforcement actions emit structured events to the JSONL event log
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 25-01-PLAN.md — Enforcement logic for top-level tasks and DAG hops (ENFC-01, ENFC-04)
+- [ ] 25-02-PLAN.md — Agent guidance in SKILL.md and formatTaskInstruction (GUID-01, GUID-02)
 
 ### Phase 26: Trace Infrastructure
 **Goal**: Every completed agent session produces a structured trace record that captures what the agent did
@@ -151,6 +154,6 @@ Phases execute in numeric order: 25 → 26 → 27
 | 22. Compressed Skill | v1.4 | 1/1 | Complete | 2026-03-04 |
 | 23. Tiered Context Delivery | v1.4 | 2/2 | Complete | 2026-03-04 |
 | 24. Verification & Budget Gate | v1.4 | 1/1 | Complete | 2026-03-04 |
-| 25. Completion Enforcement | v1.5 | 0/? | Not started | - |
+| 25. Completion Enforcement | v1.5 | 0/2 | Not started | - |
 | 26. Trace Infrastructure | v1.5 | 0/? | Not started | - |
 | 27. Trace CLI | v1.5 | 0/? | Not started | - |
