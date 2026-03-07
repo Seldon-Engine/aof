@@ -27,13 +27,14 @@ describe("context budget gate", () => {
   let skillTokens: number;
   let toolDescTokens: number;
   let totalTokens: number;
+  let skillContent: string;
 
   // Measure current values from disk before tests run
   beforeAll(async () => {
     const root = process.cwd();
 
     // 1. Read SKILL.md
-    const skillContent = await fs.readFile(
+    skillContent = await fs.readFile(
       path.join(root, "skills", "aof", "SKILL.md"),
       "utf-8",
     );
@@ -67,5 +68,11 @@ describe("context budget gate", () => {
     // Compare SKILL.md tokens only — tool descriptions were already one-liners
     // pre-v1.4 and are unchanged, so only SKILL.md reduction is meaningful.
     expect(skillTokens).toBeLessThan(PRE_V14_SKILL_BASELINE_TOKENS * 0.5);
+  });
+
+  it("SKILL.md contains completion protocol with aof_task_complete instruction", () => {
+    expect(skillContent).toContain("Completion Protocol");
+    expect(skillContent).toContain("aof_task_complete");
+    expect(skillContent).toMatch(/exiting without.*fails the task/i);
   });
 });
