@@ -120,11 +120,14 @@ Plans:
 **Depends on**: Phase 26
 **Requirements**: PRES-01, PRES-02, PRES-03, PRES-04
 **Success Criteria** (what must be TRUE):
-  1. `aof trace <task-id>` shows a human-readable summary including tool calls made, outcome, duration, and token usage
+  1. `aof trace <task-id>` shows a human-readable summary including tool calls made, outcome, duration, and model info
   2. `aof trace <task-id> --debug` shows the full tool call details and reasoning text
   3. `aof trace <task-id> --json` outputs structured trace data suitable for piping to jq or other tools
   4. For DAG workflow tasks, `aof trace <task-id>` shows per-hop traces with hop identification so operators can see what each stage did
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 27-01-PLAN.md — Trace reader and formatter with TDD (PRES-01, PRES-02, PRES-03, PRES-04)
+- [ ] 27-02-PLAN.md — CLI command wiring and program registration (PRES-01, PRES-02, PRES-03, PRES-04)
 
 ## Progress
 
@@ -158,5 +161,5 @@ Phases execute in numeric order: 25 → 26 → 27
 | 23. Tiered Context Delivery | v1.4 | 2/2 | Complete | 2026-03-04 |
 | 24. Verification & Budget Gate | v1.4 | 1/1 | Complete | 2026-03-04 |
 | 25. Completion Enforcement | v1.5 | 2/2 | Complete | 2026-03-07 |
-| 26. Trace Infrastructure | 2/2 | Complete    | 2026-03-08 | - |
-| 27. Trace CLI | v1.5 | 0/? | Not started | - |
+| 26. Trace Infrastructure | v1.5 | 2/2 | Complete | 2026-03-08 |
+| 27. Trace CLI | v1.5 | 0/2 | Not started | - |
