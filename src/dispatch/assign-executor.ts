@@ -182,16 +182,20 @@ export async function executeAssignAction(
         if (currentTask.frontmatter.status !== "in-progress") {
           // --- Trace capture (Phase 26) --- best-effort, never blocks transitions
           try {
-            const traceDebug = currentTask.frontmatter.metadata?.debug === true;
-            await captureTrace({
-              taskId: action.taskId,
-              sessionId: outcome.sessionId,
-              agentId: action.agent,
-              durationMs: outcome.durationMs,
-              store,
-              logger,
-              debug: traceDebug,
-            });
+            const sid1 = outcome.sessionId;
+            const aid1 = action.agent;
+            if (sid1 && aid1) {
+              const traceDebug = currentTask.frontmatter.metadata?.debug === true;
+              await captureTrace({
+                taskId: action.taskId,
+                sessionId: sid1,
+                agentId: aid1,
+                durationMs: outcome.durationMs,
+                store,
+                logger,
+                debug: traceDebug,
+              });
+            }
           } catch {
             // Trace capture must never crash the scheduler
           }
@@ -261,17 +265,21 @@ export async function executeAssignAction(
 
         // --- Trace capture (Phase 26) --- best-effort, never blocks transitions
         try {
-          const taskForTrace = await store.get(action.taskId);
-          const traceDebug = taskForTrace?.frontmatter.metadata?.debug === true;
-          await captureTrace({
-            taskId: action.taskId,
-            sessionId: outcome.sessionId,
-            agentId: action.agent,
-            durationMs: outcome.durationMs,
-            store,
-            logger,
-            debug: traceDebug,
-          });
+          const sid = outcome.sessionId;
+          const aid = action.agent;
+          if (sid && aid) {
+            const taskForTrace = await store.get(action.taskId);
+            const traceDebug = taskForTrace?.frontmatter.metadata?.debug === true;
+            await captureTrace({
+              taskId: action.taskId,
+              sessionId: sid,
+              agentId: aid,
+              durationMs: outcome.durationMs,
+              store,
+              logger,
+              debug: traceDebug,
+            });
+          }
         } catch {
           // Trace capture must never crash the scheduler
         }

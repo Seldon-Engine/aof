@@ -136,8 +136,9 @@ export async function captureTrace(
     if (opts.debug && Buffer.byteLength(serialized) > MAX_TRACE_BYTES) {
       // Truncate tool outputs from the end until under cap
       for (let i = trace.toolCalls.length - 1; i >= 0; i--) {
-        if (trace.toolCalls[i].output !== undefined) {
-          trace.toolCalls[i].output = "";
+        const tc = trace.toolCalls[i];
+        if (tc && tc.output !== undefined) {
+          tc.output = "";
           trace.meta.truncated = true;
           serialized = JSON.stringify(trace, null, 2);
           if (Buffer.byteLength(serialized) <= MAX_TRACE_BYTES) break;
