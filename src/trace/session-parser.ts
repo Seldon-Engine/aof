@@ -269,10 +269,7 @@ function processToolResult(
     }
   }
 
-  if (outputParts.length > 0) {
-    result.toolCalls[idx] = {
-      ...result.toolCalls[idx],
-      output: outputParts.join("\n"),
-    };
+  if (outputParts.length > 0 && result.toolCalls[idx]) {
+    result.toolCalls[idx].output = outputParts.join("\n");
   }
 }
