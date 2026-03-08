@@ -37,7 +37,7 @@ export async function readTraceFiles(
   for (const entry of entries) {
     const m = TRACE_FILE_RE.exec(entry);
     if (m) {
-      traceFiles.push({ name: entry, num: parseInt(m[1], 10) });
+      traceFiles.push({ name: entry, num: parseInt(m[1]!, 10) });
     }
   }
 
