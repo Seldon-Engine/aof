@@ -22,6 +22,7 @@ import { ProjectManifest } from "../schemas/project.js";
 import type { TaskContext } from "./executor.js";
 import { classifySpawnError } from "./scheduler-helpers.js";
 import { trackDispatchFailure, shouldTransitionToDeadletter, transitionToDeadletter } from "./failure-tracker.js";
+import { captureTrace } from "../trace/trace-writer.js";
 
 /**
  * Load project manifest from disk.
@@ -177,8 +178,25 @@ export async function executeAssignAction(
         const currentTask = await store.get(action.taskId);
         if (!currentTask) return;
 
-        // If agent already transitioned the task (called aof_task_complete), nothing to do
-        if (currentTask.frontmatter.status !== "in-progress") return;
+        // If agent already transitioned the task (called aof_task_complete), capture trace and return
+        if (currentTask.frontmatter.status !== "in-progress") {
+          // --- Trace capture (Phase 26) --- best-effort, never blocks transitions
+          try {
+            const traceDebug = currentTask.frontmatter.metadata?.debug === true;
+            await captureTrace({
+              taskId: action.taskId,
+              sessionId: outcome.sessionId,
+              agentId: action.agent,
+              durationMs: outcome.durationMs,
+              store,
+              logger,
+              debug: traceDebug,
+            });
+          } catch {
+            // Trace capture must never crash the scheduler
+          }
+          return;
+        }
 
         // Agent finished without calling aof_task_complete — enforcement
         const enforcementReason = outcome.success
@@ -239,6 +257,23 @@ export async function executeAssignAction(
           });
         } catch {
           // Logging errors should not crash the scheduler
+        }
+
+        // --- Trace capture (Phase 26) --- best-effort, never blocks transitions
+        try {
+          const taskForTrace = await store.get(action.taskId);
+          const traceDebug = taskForTrace?.frontmatter.metadata?.debug === true;
+          await captureTrace({
+            taskId: action.taskId,
+            sessionId: outcome.sessionId,
+            agentId: action.agent,
+            durationMs: outcome.durationMs,
+            store,
+            logger,
+            debug: traceDebug,
+          });
+        } catch {
+          // Trace capture must never crash the scheduler
         }
       },
     });

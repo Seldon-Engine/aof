@@ -40,6 +40,7 @@ import type { EventLogger } from "../events/logger.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import type { RunResult } from "../schemas/run-result.js";
 import { trackDispatchFailure, shouldTransitionToDeadletter, transitionToDeadletter } from "./failure-tracker.js";
+import { captureTrace } from "../trace/trace-writer.js";
 
 // ---------------------------------------------------------------------------
 // Result Types
@@ -328,7 +329,24 @@ export async function dispatchDAGHop(
 
       // Check if hop is still "dispatched" — if not, agent already completed via protocol
       const hopState = freshTask.frontmatter.workflow?.state.hops[hopId];
-      if (!hopState || hopState.status !== "dispatched") return;
+      if (!hopState || hopState.status !== "dispatched") {
+        // --- Trace capture (Phase 26) --- best-effort, never blocks transitions
+        try {
+          const traceDebug = freshTask.frontmatter.metadata?.debug === true;
+          await captureTrace({
+            taskId: task.frontmatter.id,
+            sessionId: outcome.sessionId,
+            agentId: hop.role,
+            durationMs: outcome.durationMs,
+            store,
+            logger,
+            debug: traceDebug,
+          });
+        } catch {
+          // Trace capture must never crash the scheduler
+        }
+        return;
+      }
 
       // Hop agent exited without calling aof_task_complete — enforcement
       const enforcementReason =
@@ -372,6 +390,23 @@ export async function dispatchDAGHop(
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`[AOF] DAG enforcement failed for hop ${hopId} on task ${task.frontmatter.id}: ${msg}`);
+      }
+
+      // --- Trace capture (Phase 26) --- best-effort, never blocks transitions
+      try {
+        const freshTaskForTrace = await store.get(task.frontmatter.id);
+        const traceDebug = freshTaskForTrace?.frontmatter.metadata?.debug === true;
+        await captureTrace({
+          taskId: task.frontmatter.id,
+          sessionId: outcome.sessionId,
+          agentId: hop.role,
+          durationMs: outcome.durationMs,
+          store,
+          logger,
+          debug: traceDebug,
+        });
+      } catch {
+        // Trace capture must never crash the scheduler
       }
     },
   });
