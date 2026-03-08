@@ -11,7 +11,7 @@ Requirements for event tracing milestone. Each maps to roadmap phases.
 
 - [x] **ENFC-01**: Task is marked failed (not done) when agent exits without calling `aof_task_complete`
 - [ ] **ENFC-02**: ~~Enforcement mode is configurable~~ — DROPPED (block-only, no warn mode per user decision)
-- [ ] **ENFC-03**: No-op detection flags sessions with zero meaningful tool calls as suspicious — DEFERRED to Phase 26
+- [x] **ENFC-03**: No-op detection flags sessions with zero meaningful tool calls as suspicious — implemented in Phase 26 (noop-detector.ts + completion.noop_detected event)
 - [x] **ENFC-04**: Enforcement events (`completion.enforcement`, `completion.noop_detected`) emitted to JSONL event log
 
 ### Trace Capture
@@ -69,7 +69,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 |-------------|-------|--------|
 | ENFC-01 | Phase 25 | Complete |
 | ENFC-02 | Phase 25 | Dropped |
-| ENFC-03 | Phase 26 | Deferred |
+| ENFC-03 | Phase 26 | Complete |
 | ENFC-04 | Phase 25 | Complete |
 | TRAC-01 | Phase 26 | Complete |
 | TRAC-02 | Phase 26 | Complete |
