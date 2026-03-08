@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Event Tracing
 status: in-progress
-last_updated: "2026-03-08T03:49:46Z"
-last_activity: 2026-03-07 -- Completed Phase 27 Plan 01 (Trace Reader and Formatter)
+last_updated: "2026-03-08T03:57:13Z"
+last_activity: 2026-03-07 -- Completed Phase 27 Plan 02 (Trace CLI Command)
 progress:
   total_phases: 3
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 6
-  completed_plans: 5
-  percent: 83
+  completed_plans: 6
+  percent: 100
 ---
 
 # Project State
@@ -25,11 +25,11 @@ See: .planning/PROJECT.md (updated 2026-03-06)
 ## Current Position
 
 Phase: 27 (3 of 3 in v1.5 Event Tracing)
-Plan: 1 of 2 complete
-Status: In progress
-Last activity: 2026-03-07 -- Completed Phase 27 Plan 01 (Trace Reader and Formatter)
+Plan: 2 of 2 complete
+Status: Complete
+Last activity: 2026-03-07 -- Completed Phase 27 Plan 02 (Trace CLI Command)
 
-Progress: [████████░░] 83%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -57,6 +57,8 @@ Recent decisions affecting current work:
 - [Phase 27-01]: Reader and formatter fully separated -- reader handles I/O, formatter is pure functions
 - [Phase 27-01]: Corrupted trace files silently skipped rather than thrown (defensive read)
 - [Phase 27-01]: Single trace in JSON mode returns object; multiple returns array
+- [Phase 27-02]: Static imports for pure trace modules, dynamic only for project-utils (store dependency)
+- [Phase 27-02]: buildHopMap uses correlationId-first with sequential fallback; unmatched traces in "unassigned" group
 
 ### Roadmap Evolution
 

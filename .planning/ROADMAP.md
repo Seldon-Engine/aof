@@ -81,7 +81,7 @@ See: `.planning/milestones/v1.4-ROADMAP.md` for full details
 
 - [x] **Phase 25: Completion Enforcement** - Stop trusting exit codes; require explicit aof_task_complete and update agent guidance (completed 2026-03-07)
 - [x] **Phase 26: Trace Infrastructure** - Capture and store structured session traces from OpenClaw transcripts (completed 2026-03-08)
-- [ ] **Phase 27: Trace CLI** - Operator-facing trace presentation with summary, debug, and DAG views
+- [x] **Phase 27: Trace CLI** - Operator-facing trace presentation with summary, debug, and DAG views (completed 2026-03-08)
 
 ## Phase Details
 
@@ -162,4 +162,4 @@ Phases execute in numeric order: 25 → 26 → 27
 | 24. Verification & Budget Gate | v1.4 | 1/1 | Complete | 2026-03-04 |
 | 25. Completion Enforcement | v1.5 | 2/2 | Complete | 2026-03-07 |
 | 26. Trace Infrastructure | v1.5 | 2/2 | Complete | 2026-03-08 |
-| 27. Trace CLI | v1.5 | 1/2 | In progress | - |
+| 27. Trace CLI | 2/2 | Complete   | 2026-03-08 | - |

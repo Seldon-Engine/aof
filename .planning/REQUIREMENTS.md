@@ -25,10 +25,10 @@ Requirements for event tracing milestone. Each maps to roadmap phases.
 
 ### Trace Presentation
 
-- [ ] **PRES-01**: `aof trace <task-id>` CLI command shows trace summary (tool calls, outcome, duration, token usage)
-- [ ] **PRES-02**: `--debug` flag shows full tool calls and reasoning text
-- [ ] **PRES-03**: `--json` flag outputs structured trace data for programmatic consumption
-- [ ] **PRES-04**: DAG workflow tasks show per-hop traces with hop identification
+- [x] **PRES-01**: `aof trace <task-id>` CLI command shows trace summary (tool calls, outcome, duration, token usage)
+- [x] **PRES-02**: `--debug` flag shows full tool calls and reasoning text
+- [x] **PRES-03**: `--json` flag outputs structured trace data for programmatic consumption
+- [x] **PRES-04**: DAG workflow tasks show per-hop traces with hop identification
 
 ### Agent Guidance
 
@@ -77,10 +77,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TRAC-04 | Phase 26 | Complete |
 | TRAC-05 | Phase 26 | Complete |
 | TRAC-06 | Phase 26 | Complete |
-| PRES-01 | Phase 27 | Pending |
-| PRES-02 | Phase 27 | Pending |
-| PRES-03 | Phase 27 | Pending |
-| PRES-04 | Phase 27 | Pending |
+| PRES-01 | Phase 27 | Complete |
+| PRES-02 | Phase 27 | Complete |
+| PRES-03 | Phase 27 | Complete |
+| PRES-04 | Phase 27 | Complete |
 | GUID-01 | Phase 25 | Complete |
 | GUID-02 | Phase 25 | Complete |
 
