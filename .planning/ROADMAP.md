@@ -110,7 +110,10 @@ Plans:
   3. Trace lifecycle events (`trace.captured`, `trace.capture_failed`) are emitted to the JSONL event log
   4. When a task is retried, subsequent traces accumulate alongside prior attempt traces so the full history is preserved
   5. The per-task `metadata.debug` flag controls whether traces store full detail or summary-only
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 26-01-PLAN.md — Trace schema, session parser, and no-op detector (TRAC-01, TRAC-06)
+- [ ] 26-02-PLAN.md — Trace writer, event types, and onRunComplete integration (TRAC-02, TRAC-03, TRAC-04, TRAC-05)
 
 ### Phase 27: Trace CLI
 **Goal**: Operators can inspect what any agent did on any task through a CLI command
@@ -154,6 +157,6 @@ Phases execute in numeric order: 25 → 26 → 27
 | 22. Compressed Skill | v1.4 | 1/1 | Complete | 2026-03-04 |
 | 23. Tiered Context Delivery | v1.4 | 2/2 | Complete | 2026-03-04 |
 | 24. Verification & Budget Gate | v1.4 | 1/1 | Complete | 2026-03-04 |
-| 25. Completion Enforcement | 2/2 | Complete    | 2026-03-07 | - |
-| 26. Trace Infrastructure | v1.5 | 0/? | Not started | - |
+| 25. Completion Enforcement | v1.5 | 2/2 | Complete | 2026-03-07 |
+| 26. Trace Infrastructure | v1.5 | 0/2 | Not started | - |
 | 27. Trace CLI | v1.5 | 0/? | Not started | - |
