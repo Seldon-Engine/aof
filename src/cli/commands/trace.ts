@@ -41,7 +41,7 @@ export function buildHopMap(
   // Build sessionId -> trace index map for O(1) lookup
   const sessionToIndex = new Map<string, number[]>();
   for (let i = 0; i < traces.length; i++) {
-    const sid = traces[i].sessionId;
+    const sid = traces[i]!.sessionId;
     const indices = sessionToIndex.get(sid) ?? [];
     indices.push(i);
     sessionToIndex.set(sid, indices);
@@ -69,7 +69,7 @@ export function buildHopMap(
   // If no correlationIds found at all, fall back to sequential ordering
   if (!hasAnyCorrelation) {
     for (let i = 0; i < result.length && i < traces.length; i++) {
-      result[i].traceIndices = [i];
+      result[i]!.traceIndices = [i];
       assignedTraceIndices.add(i);
     }
   }

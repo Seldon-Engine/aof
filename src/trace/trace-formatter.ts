@@ -141,7 +141,7 @@ export function formatTraceSummary(
       lines.push("");
       for (const idx of hop.traceIndices) {
         if (idx < traces.length) {
-          lines.push(formatAttemptSummary(traces[idx]));
+          lines.push(formatAttemptSummary(traces[idx]!));
           lines.push("");
         }
       }
@@ -180,7 +180,7 @@ export function formatTraceDebug(
       lines.push("");
       for (const idx of hop.traceIndices) {
         if (idx < traces.length) {
-          lines.push(formatAttemptDebug(traces[idx]));
+          lines.push(formatAttemptDebug(traces[idx]!));
           lines.push("");
         }
       }

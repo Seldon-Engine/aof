@@ -88,7 +88,7 @@ describe("trace command action", () => {
 
     consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    originalExitCode = process.exitCode;
+    originalExitCode = process.exitCode as number | undefined;
     process.exitCode = undefined;
 
     // Set mock return values fresh each test
