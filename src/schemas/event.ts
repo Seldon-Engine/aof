@@ -51,6 +51,11 @@ export const EventType = z.enum([
   // Completion enforcement (Phase 25)
   "completion.enforcement",
 
+  // Trace lifecycle (Phase 26)
+  "trace.captured",
+  "trace.capture_failed",
+  "completion.noop_detected",
+
   // Dependencies
   "dependency.cascaded",  // A dependency status change cascaded to dependents
   
