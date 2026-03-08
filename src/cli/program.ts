@@ -35,6 +35,7 @@ import { registerOrgCommands } from "./commands/org.js";
 import { registerViewCommands } from "./commands/views.js";
 import { registerSystemCommands } from "./commands/system.js";
 import { registerSetupCommand } from "./commands/setup.js";
+import { registerTraceCommand } from "./commands/trace.js";
 import { DEFAULT_AOF_ROOT } from "../projects/resolver.js";
 
 const AOF_ROOT = process.env["AOF_ROOT"] ?? DEFAULT_AOF_ROOT;
@@ -172,6 +173,9 @@ scheduler
 
 // --- task ---
 registerTaskCommands(program);
+
+// --- trace ---
+registerTraceCommand(program);
 
 // --- org ---
 registerOrgCommands(program);
