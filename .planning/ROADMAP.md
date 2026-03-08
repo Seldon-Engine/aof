@@ -162,4 +162,4 @@ Phases execute in numeric order: 25 → 26 → 27
 | 24. Verification & Budget Gate | v1.4 | 1/1 | Complete | 2026-03-04 |
 | 25. Completion Enforcement | v1.5 | 2/2 | Complete | 2026-03-07 |
 | 26. Trace Infrastructure | v1.5 | 2/2 | Complete | 2026-03-08 |
-| 27. Trace CLI | v1.5 | 0/2 | Not started | - |
+| 27. Trace CLI | v1.5 | 1/2 | In progress | - |

@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Event Tracing
-status: completed
-last_updated: "2026-03-08T01:17:53.706Z"
-last_activity: 2026-03-07 -- Completed Phase 26 Plan 02 (Trace Writer and Integration Hooks)
+status: in-progress
+last_updated: "2026-03-08T03:49:46Z"
+last_activity: 2026-03-07 -- Completed Phase 27 Plan 01 (Trace Reader and Formatter)
 progress:
   total_phases: 3
   completed_phases: 2
-  total_plans: 4
-  completed_plans: 4
-  percent: 75
+  total_plans: 6
+  completed_plans: 5
+  percent: 83
 ---
 
 # Project State
@@ -20,16 +20,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-06)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** Phase 26 -- Trace Infrastructure
+**Current focus:** Phase 27 -- Trace CLI
 
 ## Current Position
 
-Phase: 26 (2 of 3 in v1.5 Event Tracing)
-Plan: 2 of 2 complete
-Status: Phase 26 complete
-Last activity: 2026-03-07 -- Completed Phase 26 Plan 02 (Trace Writer and Integration Hooks)
+Phase: 27 (3 of 3 in v1.5 Event Tracing)
+Plan: 1 of 2 complete
+Status: In progress
+Last activity: 2026-03-07 -- Completed Phase 27 Plan 01 (Trace Reader and Formatter)
 
-Progress: [███████░░░] 75%
+Progress: [████████░░] 83%
 
 ## Performance Metrics
 
@@ -54,6 +54,9 @@ Recent decisions affecting current work:
 - [Phase 26-02]: Session file existence checked before parsing to distinguish missing-file from empty-session
 - [Phase 26-02]: Trace capture placed after enforcement logic -- purely observational, never interferes with transitions
 - [Phase 26-02]: No-op enhanced diagnostic via event and trace flag rather than modifying inline enforcement message
+- [Phase 27-01]: Reader and formatter fully separated -- reader handles I/O, formatter is pure functions
+- [Phase 27-01]: Corrupted trace files silently skipped rather than thrown (defensive read)
+- [Phase 27-01]: Single trace in JSON mode returns object; multiple returns array
 
 ### Roadmap Evolution
 
