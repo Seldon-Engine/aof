@@ -80,7 +80,7 @@ See: `.planning/milestones/v1.4-ROADMAP.md` for full details
 **Milestone Goal:** Make agent work visible and trustworthy — enforce explicit completion, capture session traces, and surface what agents actually did (or didn't do).
 
 - [x] **Phase 25: Completion Enforcement** - Stop trusting exit codes; require explicit aof_task_complete and update agent guidance (completed 2026-03-07)
-- [ ] **Phase 26: Trace Infrastructure** - Capture and store structured session traces from OpenClaw transcripts
+- [x] **Phase 26: Trace Infrastructure** - Capture and store structured session traces from OpenClaw transcripts (completed 2026-03-08)
 - [ ] **Phase 27: Trace CLI** - Operator-facing trace presentation with summary, debug, and DAG views
 
 ## Phase Details
@@ -158,5 +158,5 @@ Phases execute in numeric order: 25 → 26 → 27
 | 23. Tiered Context Delivery | v1.4 | 2/2 | Complete | 2026-03-04 |
 | 24. Verification & Budget Gate | v1.4 | 1/1 | Complete | 2026-03-04 |
 | 25. Completion Enforcement | v1.5 | 2/2 | Complete | 2026-03-07 |
-| 26. Trace Infrastructure | 1/2 | In Progress|  | - |
+| 26. Trace Infrastructure | 2/2 | Complete   | 2026-03-08 | - |
 | 27. Trace CLI | v1.5 | 0/? | Not started | - |
