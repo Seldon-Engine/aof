@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Event Tracing
 status: executing
-last_updated: "2026-03-07T20:13:32.471Z"
-last_activity: 2026-03-07 -- Completed Phase 25 Plan 02 (Agent Guidance)
+last_updated: "2026-03-08T01:06:35.014Z"
+last_activity: 2026-03-07 -- Completed Phase 26 Plan 01 (Trace Schema and Core Parsers)
 progress:
   total_phases: 3
   completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
-  percent: 33
+  total_plans: 4
+  completed_plans: 3
+  percent: 50
 ---
 
 # Project State
@@ -20,16 +20,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-06)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** Phase 25 -- Completion Enforcement
+**Current focus:** Phase 26 -- Trace Infrastructure
 
 ## Current Position
 
-Phase: 25 (1 of 3 in v1.5 Event Tracing)
-Plan: 2 of 2 complete (Phase 25 done)
+Phase: 26 (2 of 3 in v1.5 Event Tracing)
+Plan: 1 of 2 complete
 Status: Executing
-Last activity: 2026-03-07 -- Completed Phase 25 Plan 02 (Agent Guidance)
+Last activity: 2026-03-07 -- Completed Phase 26 Plan 01 (Trace Schema and Core Parsers)
 
-Progress: [███░░░░░░░] 33%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
@@ -49,6 +49,8 @@ Recent decisions affecting current work:
 - [25-01]: Both success and failure branches in onRunComplete trigger enforcement events
 - [25-02]: Trimmed SKILL.md completion protocol to stay within 50% reduction threshold; full summary instruction delivered via formatTaskInstruction channel
 - [25-02]: Dual-channel agent guidance: SKILL.md (standing context) + formatTaskInstruction (per-dispatch reinforcement with consequences)
+- [Phase 26-01]: Streaming JSONL parsing via node:readline createInterface for memory-efficient line-by-line processing
+- [Phase 26-01]: Both toolCall and tool_use content types handled with unified extraction logic
 
 ### Roadmap Evolution
 

@@ -16,12 +16,12 @@ Requirements for event tracing milestone. Each maps to roadmap phases.
 
 ### Trace Capture
 
-- [ ] **TRAC-01**: OpenClaw session JSONL is parsed after agent completion to extract tool calls, token usage, and output
+- [x] **TRAC-01**: OpenClaw session JSONL is parsed after agent completion to extract tool calls, token usage, and output
 - [ ] **TRAC-02**: Structured `trace.json` is written to task artifact directory alongside `run_result.json`
 - [ ] **TRAC-03**: Trace capture is best-effort and never blocks task state transitions
 - [ ] **TRAC-04**: Trace events (`trace.captured`, `trace.capture_failed`) emitted to JSONL event log
 - [ ] **TRAC-05**: Traces accumulate across retries so subsequent agents can see prior attempt history
-- [ ] **TRAC-06**: Per-task `metadata.debug` flag controls full vs summary trace verbosity
+- [x] **TRAC-06**: Per-task `metadata.debug` flag controls full vs summary trace verbosity
 
 ### Trace Presentation
 
@@ -71,12 +71,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ENFC-02 | Phase 25 | Dropped |
 | ENFC-03 | Phase 26 | Deferred |
 | ENFC-04 | Phase 25 | Complete |
-| TRAC-01 | Phase 26 | Pending |
+| TRAC-01 | Phase 26 | Complete |
 | TRAC-02 | Phase 26 | Pending |
 | TRAC-03 | Phase 26 | Pending |
 | TRAC-04 | Phase 26 | Pending |
 | TRAC-05 | Phase 26 | Pending |
-| TRAC-06 | Phase 26 | Pending |
+| TRAC-06 | Phase 26 | Complete |
 | PRES-01 | Phase 27 | Pending |
 | PRES-02 | Phase 27 | Pending |
 | PRES-03 | Phase 27 | Pending |
