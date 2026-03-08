@@ -1,64 +1,40 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.5
-milestone_name: Event Tracing
-status: completed
-last_updated: "2026-03-08T04:01:32.956Z"
-last_activity: 2026-03-07 -- Completed Phase 27 Plan 02 (Trace CLI Command)
+milestone: null
+milestone_name: null
+status: between_milestones
+last_updated: "2026-03-08T07:40:00.000Z"
+last_activity: 2026-03-08 -- Completed v1.5 Event Tracing milestone
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 6
-  completed_plans: 6
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-06)
+See: .planning/PROJECT.md (updated 2026-03-08)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** Phase 27 -- Trace CLI
+**Current focus:** Planning next milestone
 
 ## Current Position
 
-Phase: 27 (3 of 3 in v1.5 Event Tracing)
-Plan: 2 of 2 complete
-Status: Complete
-Last activity: 2026-03-07 -- Completed Phase 27 Plan 02 (Trace CLI Command)
-
-Progress: [██████████] 100%
+Between milestones. v1.5 Event Tracing shipped 2026-03-08.
 
 ## Performance Metrics
 
-**All milestones:** v1.0 (7 plans), v1.1 (16 plans), v1.2 (16 plans), v1.3 (7 plans), v1.4 (6 plans) -- 52 plans total across 24 phases
+**All milestones:** v1.0 (7 plans), v1.1 (16 plans), v1.2 (16 plans), v1.3 (7 plans), v1.4 (6 plans), v1.5 (6 plans) -- 58 plans total across 27 phases
 
 ## Accumulated Context
 
 ### Decisions
 
 All decisions logged in PROJECT.md Key Decisions table.
-Recent decisions affecting current work:
-
-- [v1.5 Roadmap]: GUID requirements grouped with completion enforcement (Phase 25) -- agent guidance about completion is part of the enforcement feature
-- [v1.5 Roadmap]: 3 phases (not 4) -- dropped standalone integration/polish phase since all 16 requirements map to Phases 25-27
-- [25-01]: Block-only enforcement, no warn mode -- agents that skip aof_task_complete are always blocked
-- [25-01]: Enforcement metadata stored directly on task (enforcementReason, enforcementAt) for next retry agent visibility
-- [25-01]: Both success and failure branches in onRunComplete trigger enforcement events
-- [25-02]: Trimmed SKILL.md completion protocol to stay within 50% reduction threshold; full summary instruction delivered via formatTaskInstruction channel
-- [25-02]: Dual-channel agent guidance: SKILL.md (standing context) + formatTaskInstruction (per-dispatch reinforcement with consequences)
-- [Phase 26-01]: Streaming JSONL parsing via node:readline createInterface for memory-efficient line-by-line processing
-- [Phase 26-01]: Both toolCall and tool_use content types handled with unified extraction logic
-- [Phase 26-02]: Session file existence checked before parsing to distinguish missing-file from empty-session
-- [Phase 26-02]: Trace capture placed after enforcement logic -- purely observational, never interferes with transitions
-- [Phase 26-02]: No-op enhanced diagnostic via event and trace flag rather than modifying inline enforcement message
-- [Phase 27-01]: Reader and formatter fully separated -- reader handles I/O, formatter is pure functions
-- [Phase 27-01]: Corrupted trace files silently skipped rather than thrown (defensive read)
-- [Phase 27-01]: Single trace in JSON mode returns object; multiple returns array
-- [Phase 27-02]: Static imports for pure trace modules, dynamic only for project-utils (store dependency)
-- [Phase 27-02]: buildHopMap uses correlationId-first with sequential fallback; unmatched traces in "unassigned" group
 
 ### Roadmap Evolution
 
@@ -75,5 +51,4 @@ None.
 
 ### Blockers/Concerns
 
-- OpenClaw session JSONL format is undocumented -- parser must be defensive (Phase 26 concern)
-- Enforcement rollout risk resolved -- block-only mode chosen per user decision (no warn mode)
+None.

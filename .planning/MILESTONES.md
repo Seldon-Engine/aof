@@ -1,5 +1,23 @@
 # Milestones
 
+## v1.5 Event Tracing (Shipped: 2026-03-08)
+
+**Phases completed:** 3 phases (25-27), 6 plans
+**Timeline:** 2026-03-07 → 2026-03-08 (2 days)
+**Code:** +6,600 / -88 lines across 47 files
+
+**Key accomplishments:**
+- Completion enforcement — agents exiting without `aof_task_complete` are caught, marked failed, and deadlettered after 3 strikes
+- Dual-channel agent guidance — SKILL.md (standing context) + formatTaskInstruction (per-dispatch reinforcement with consequences)
+- Streaming JSONL session parser extracts tool calls, reasoning, and output from OpenClaw transcripts
+- No-op detection flags zero-tool-call sessions as suspicious via `completion.noop_detected` events
+- Structured trace capture — `trace-N.json` files written atomically to task artifacts with retry accumulation
+- `aof trace <task-id>` CLI with summary, `--debug`, `--json` modes and DAG hop correlation via `buildHopMap()`
+
+**Git range:** feat(25-01) → docs(phase-27)
+
+---
+
 ## v1.4 Context Optimization (Shipped: 2026-03-04)
 
 **Phases completed:** 4 phases (21-24), 6 plans, 39 commits

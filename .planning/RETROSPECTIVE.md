@@ -86,22 +86,66 @@
 
 ---
 
+## Milestone: v1.5 — Event Tracing
+
+**Shipped:** 2026-03-08
+**Phases:** 3 | **Plans:** 6 | **Sessions:** ~8
+
+### What Was Built
+- Completion enforcement — agents exiting without `aof_task_complete` caught, marked failed, deadlettered after 3 strikes
+- Dual-channel agent guidance: SKILL.md (standing) + formatTaskInstruction (per-dispatch with consequences)
+- Streaming JSONL session parser extracting tool calls, reasoning, and output from OpenClaw transcripts
+- No-op detector flagging zero-tool-call sessions via `completion.noop_detected` events
+- Structured trace capture with retry accumulation (trace-N.json, atomic writes)
+- `aof trace <task-id>` CLI with summary, --debug, --json modes and DAG hop correlation
+
+### What Worked
+- Linear dependency chain (25→26→27) with clean phase boundaries — each phase consumed exactly what the prior phase provided
+- TDD approach in Phase 27 (trace reader/formatter) produced pure functions that were trivial to wire into the CLI
+- Enforcement + tracing split (Phases 25 vs 26) was the right boundary — enforcement is a state machine concern, tracing is observational
+- ENFC-03 (no-op detection) naturally fit into Phase 26 trace infrastructure despite being originally assigned to Phase 25
+- Integration checker verified all 12 cross-phase exports were properly wired — zero orphans
+
+### What Was Inefficient
+- SUMMARY.md frontmatter overclaimed ENFC-02 (dropped) and ENFC-03 (deferred) as completed in Plan 25-01 — traceability mismatch caught only at milestone audit
+- TypeScript strict null errors in array indexing (`traces[i]`, `result[i]`) required post-execution fixes in all 3 phases — pattern should be anticipated
+- Nyquist validation files created as drafts but never completed for any phase — process step consistently skipped
+
+### Patterns Established
+- Observational systems (tracing) placed after control flow (enforcement) — never interfere with state transitions
+- CorrelationId-first with sequential fallback for DAG hop mapping — graceful degradation pattern
+- Streaming JSONL parsing via node:readline for memory-efficient processing of large session files
+- Reader/formatter separation (I/O separated from pure presentation functions) for testability
+
+### Key Lessons
+1. Requirement reassignment across phases (ENFC-03 moving from Phase 25 to 26) should be updated in REQUIREMENTS.md immediately — catching it at audit is too late
+2. TypeScript strict null checks on array indexing are a predictable friction point — add `!` assertions proactively when bounds are already checked
+3. Three-phase milestones with linear dependencies execute cleanly — the smallest milestone scope yet (3 phases, 6 plans) with zero blocked phases
+
+### Cost Observations
+- Sessions: ~8 (context capture + plan + execute per phase, plus audit and completion)
+- Total execution time: ~35 min for 6 plans (avg ~5.8 min/plan)
+- Notable: Slightly slower per-plan than v1.4 due to larger test suites (68 trace tests + 13 CLI tests written via TDD)
+
+---
+
 ## Cross-Milestone Trends
 
-| Metric | v1.0 | v1.1 | v1.2 | v1.3 | v1.4 |
-|--------|------|------|------|------|------|
-| Phases | 3 | 6 | 7 | 4 | 4 |
-| Plans | 7 | 16 | 16 | 7 | 6 |
-| Commits | 15 | 40 | — | — | 39 |
-| Files changed | 64 | 148 | — | — | 47 |
-| Lines added | +3,527 | +7,583 | — | — | +3,767 |
-| Lines removed | -584 | -4,865 | — | — | -580 |
-| Avg plan duration | ~4 min | ~4.3 min | — | — | ~3.2 min |
-| Total execution | ~30 min | ~1.7 hrs | — | — | ~19 min |
+| Metric | v1.0 | v1.1 | v1.2 | v1.3 | v1.4 | v1.5 |
+|--------|------|------|------|------|------|------|
+| Phases | 3 | 6 | 7 | 4 | 4 | 3 |
+| Plans | 7 | 16 | 16 | 7 | 6 | 6 |
+| Commits | 15 | 40 | — | — | 39 | ~30 |
+| Files changed | 64 | 148 | — | — | 47 | 47 |
+| Lines added | +3,527 | +7,583 | — | — | +3,767 | +6,600 |
+| Lines removed | -584 | -4,865 | — | — | -580 | -88 |
+| Avg plan duration | ~4 min | ~4.3 min | — | — | ~3.2 min | ~5.8 min |
+| Total execution | ~30 min | ~1.7 hrs | — | — | ~19 min | ~35 min |
 
 **Observations:**
-- Plan execution time is consistent (~3-4 min avg) regardless of phase complexity
-- v1.4 was the fastest milestone: 4 phases in a single day, avg 3.2 min/plan
-- Context optimization work is lower-risk than infrastructure changes — fewer files, more targeted edits
+- Plan execution time is consistent (~3-5 min avg) regardless of phase complexity
+- v1.5 had highest lines-added per plan (+1,100/plan) due to TDD approach generating substantial test code
+- Three-phase milestones (v1.5) with linear dependencies execute most cleanly — zero blocked phases, zero rework
 - Audit-driven hotfix phases (Phase 8 in v1.1) work well for closing audit gaps without replanning
 - Budget gate pattern (CI test asserting ceiling) is reusable for other measurable constraints
+- Nyquist validation consistently skipped across v1.4 and v1.5 — consider dropping or making it non-blocking

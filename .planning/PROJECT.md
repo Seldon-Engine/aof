@@ -67,17 +67,18 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 - ✓ Budget gate CI test enforces 2150-token ceiling on context injection — v1.4
 - ✓ Before/after token measurement proving 50%+ reduction — v1.4
 
+### Validated (v1.5)
+
+- ✓ Completion enforcement — agents exiting without `aof_task_complete` are caught, marked failed, deadlettered — v1.5
+- ✓ Dual-channel agent guidance (SKILL.md standing context + formatTaskInstruction per-dispatch reinforcement) — v1.5
+- ✓ Streaming JSONL session parser for OpenClaw transcripts — v1.5
+- ✓ No-op detection for zero-tool-call sessions — v1.5
+- ✓ Structured trace capture with retry accumulation (`trace-N.json`) — v1.5
+- ✓ `aof trace <task-id>` CLI with summary, `--debug`, `--json`, and DAG hop correlation — v1.5
+
 ### Active
 
-## Current Milestone: v1.5 Event Tracing
-
-**Goal:** Make agent work visible and trustworthy — enforce explicit completion, capture session traces, and surface what agents actually did (or didn't do).
-
-**Target features:**
-- Completion enforcement (require explicit `aof_task_complete`, don't trust exit codes)
-- Session trace capture (pull OpenClaw transcripts, write structured trace to task directory)
-- Trace CLI (`aof trace <task-id>` with summary and `--debug` verbosity)
-- SKILL.md updates (instruct agents to report meaningful completion data)
+(Next milestone requirements to be defined via `/gsd:new-milestone`)
 
 ### Validated (v1.2)
 
@@ -98,10 +99,10 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 - Multi-host distribution — single-machine deployment for now
 - Non-OpenClaw runtimes — AOF is an OpenClaw plugin specifically
 - OpenTelemetry integration — deferred to v2
-- Self-healing (circuit breaker, dead-letter resurrection, stuck session recovery) — deferred to v1.5
+- Self-healing (circuit breaker, dead-letter resurrection, stuck session recovery) — deferred to v2
 - Agent-guided org chart setup — addressed in v1.4 (org chart guidance in compressed skill, agent-led provisioning)
-- Standalone daemon executor wiring — deferred to v1.5
-- Memory search reranker — deferred to v1.5
+- Standalone daemon executor wiring — deferred to v2
+- Memory search reranker — deferred to v2
 - Memory tier auto compaction — deferred to v2
 - Autoupdate mechanism — deferred to v2
 - OpenClaw version compat checks — deferred to v2
@@ -114,7 +115,7 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 
 - AOF lives at `~/Projects/AOF/` — TypeScript project with src/, tests/, dist/
 - Source structure: cli/, dispatch/, store/, protocol/, events/, org/, memory/, schemas/, daemon/, recovery/, gateway/, plugins/
-- Builds with tsdown, tests with vitest (~101k LOC, 2824+ tests)
+- Builds with tsdown, tests with vitest (~486k LOC, 2975+ tests)
 - Runtime data lands in `~/.openclaw/aof/` (events/, tasks/, state/, memory/)
 - OpenClaw gateway is at `~/.openclaw/workspace/package/` — AOF uses its plugin-sdk export
 - The org chart (`org/org-chart.yaml`) drives all routing, memory, and agent configuration
@@ -123,6 +124,7 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 - v1.2 shipped: per-task workflow DAGs — tasks carry pipeline definitions (hops), scheduler executes DAG mechanically, replaces linear gate system
 - v1.3 shipped: seamless upgrade — migration framework, DAG-as-default, smoke tests, release pipeline, legacy gate removal
 - v1.4 shipped: context optimization — compressed SKILL.md (51% reduction), tiered delivery (seed/full), workflow API on aof_dispatch, CI budget gate
+- v1.5 shipped: event tracing — completion enforcement, session trace capture, `aof trace` CLI with DAG hop correlation
 - OpenClaw constraint: no nested agent sessions — scheduler must advance hops between independent sessions
 - Node 22 pinned as prerequisite (Node 24/25 have better-sqlite3 build failures)
 
@@ -161,6 +163,11 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 | Static tier selection (not LLM-decided) | Deterministic, no overhead — caller specifies seed or full | ✓ Good |
 | Budget gate CI test (not manual measurement) | Automated regression prevention for context size | ✓ Good |
 | Seed tier default for dispatched tasks | Simple tasks shouldn't pay full context cost | ✓ Good (82.5% reduction for seed) |
+| Block-only enforcement (no warn mode) | Agents that skip aof_task_complete are always blocked — simplicity over configurability | ✓ Good |
+| Dual-channel agent guidance (SKILL.md + formatTaskInstruction) | Standing context for general rules, per-dispatch reinforcement with consequences | ✓ Good |
+| Streaming JSONL parsing (node:readline) | Memory-efficient line-by-line processing for potentially large session files | ✓ Good |
+| Trace capture after enforcement (observational) | Tracing never interferes with task state transitions — purely diagnostic | ✓ Good |
+| DAG hop correlation via correlationId with sequential fallback | Graceful degradation when correlation IDs are missing | ✓ Good |
 
 ---
-*Last updated: 2026-03-06 after v1.5 milestone start*
+*Last updated: 2026-03-08 after v1.5 milestone*
