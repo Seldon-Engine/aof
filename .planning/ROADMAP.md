@@ -91,7 +91,7 @@ See: `.planning/milestones/v1.5-ROADMAP.md` for full details
 
 **Milestone Goal:** Let agents subscribe to task outcomes and receive callbacks, eliminating the dependent-task polling workaround.
 
-- [ ] **Phase 28: Schema and Storage** - Subscription data model, Zod schema, and co-located filesystem persistence
+- [x] **Phase 28: Schema and Storage** - Subscription data model, Zod schema, and co-located filesystem persistence (completed 2026-03-09)
 - [ ] **Phase 29: Subscription API** - MCP tools for creating and canceling subscriptions (dispatch-time and standalone)
 - [ ] **Phase 30: Callback Delivery** - Scheduler-driven callback dispatch with retry and tracing
 - [ ] **Phase 31: Granularity, Safety, and Hardening** - All-transitions granularity, loop prevention, and restart durability
@@ -190,7 +190,7 @@ Phases execute in numeric order: 28 -> 29 -> 30 -> 31 -> 32
 | 25. Completion Enforcement | v1.5 | 2/2 | Complete | 2026-03-07 |
 | 26. Trace Infrastructure | v1.5 | 2/2 | Complete | 2026-03-08 |
 | 27. Trace CLI | v1.5 | 2/2 | Complete | 2026-03-08 |
-| 28. Schema and Storage | v1.8 | 0/1 | Not started | - |
+| 28. Schema and Storage | 1/1 | Complete   | 2026-03-09 | - |
 | 29. Subscription API | v1.8 | 0/? | Not started | - |
 | 30. Callback Delivery | v1.8 | 0/? | Not started | - |
 | 31. Granularity, Safety, and Hardening | v1.8 | 0/? | Not started | - |

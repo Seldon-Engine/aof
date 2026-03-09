@@ -12,7 +12,7 @@ Requirements for task notification subscriptions and callback delivery.
 - [ ] **SUB-01**: Agent can subscribe to task outcomes at dispatch time via `notify` param on `aof_dispatch`
 - [ ] **SUB-02**: Agent can subscribe to an existing task's outcomes via `aof_subscribe` tool
 - [ ] **SUB-03**: Agent can cancel a subscription via `aof_unsubscribe` tool
-- [ ] **SUB-04**: Subscription data persists in task frontmatter with Zod schema validation
+- [x] **SUB-04**: Subscription data persists in task frontmatter with Zod schema validation
 
 ### Callback Delivery
 
@@ -70,7 +70,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SUB-01 | Phase 29 | Pending |
 | SUB-02 | Phase 29 | Pending |
 | SUB-03 | Phase 29 | Pending |
-| SUB-04 | Phase 28 | Pending |
+| SUB-04 | Phase 28 | Complete |
 | DLVR-01 | Phase 30 | Pending |
 | DLVR-02 | Phase 30 | Pending |
 | DLVR-03 | Phase 30 | Pending |
