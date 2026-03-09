@@ -1,10 +1,10 @@
 ---
 gsd_state_version: 1.0
-milestone: null
-milestone_name: null
-status: between_milestones
-last_updated: "2026-03-08T07:40:00.000Z"
-last_activity: 2026-03-08 -- Completed v1.5 Event Tracing milestone
+milestone: v1.8
+milestone_name: Task Notifications
+status: defining_requirements
+last_updated: "2026-03-09T00:00:00.000Z"
+last_activity: 2026-03-09 -- Milestone v1.8 started
 progress:
   total_phases: 0
   completed_phases: 0
@@ -17,14 +17,17 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-08)
+See: .planning/PROJECT.md (updated 2026-03-09)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** Planning next milestone
+**Current focus:** Defining requirements for v1.8 Task Notifications
 
 ## Current Position
 
-Between milestones. v1.5 Event Tracing shipped 2026-03-08.
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-03-09 — Milestone v1.8 started
 
 ## Performance Metrics
 

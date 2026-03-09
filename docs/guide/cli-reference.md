@@ -39,6 +39,7 @@ Complete command reference for the `aof` CLI, auto-generated from the Commander 
     - [`aof task dep remove`](#aof-task-dep-remove)
   - [`aof task block`](#aof-task-block)
   - [`aof task unblock`](#aof-task-unblock)
+- [`aof trace`](#aof-trace)
 - [`aof org`](#aof-org)
   - [`aof org validate`](#aof-org-validate)
   - [`aof org show`](#aof-org-show)
@@ -532,6 +533,26 @@ Unblock a task
 
 | Flag | Description | Default |
 |------|-------------|---------|
+| `--project <id>` | Project ID | `"_inbox"` |
+
+---
+
+### `aof trace`
+
+Show trace of agent activity for a task
+
+**Arguments:**
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `task-id` | Yes |  |
+
+**Options:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--debug` | Show full tool call details and reasoning text |  |
+| `--json` | Output structured trace data as JSON |  |
 | `--project <id>` | Project ID | `"_inbox"` |
 
 ---

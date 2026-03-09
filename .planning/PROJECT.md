@@ -78,7 +78,14 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 
 ### Active
 
-(Next milestone requirements to be defined via `/gsd:new-milestone`)
+## Current Milestone: v1.8 Task Notifications
+
+**Goal:** Let agents subscribe to task outcomes and receive callbacks, eliminating the dependent-task polling workaround.
+
+**Target features:**
+- Task notification subscriptions (subscribe on create or after)
+- Two granularity levels: `"completion"` (success/failure) or `"all"` (state transitions)
+- Scheduler-driven notification delivery (likely new session dispatch to subscribing agent with results as context)
 
 ### Validated (v1.2)
 
@@ -170,4 +177,4 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 | DAG hop correlation via correlationId with sequential fallback | Graceful degradation when correlation IDs are missing | ✓ Good |
 
 ---
-*Last updated: 2026-03-08 after v1.5 milestone*
+*Last updated: 2026-03-09 after v1.8 milestone start*
