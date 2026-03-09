@@ -87,7 +87,7 @@ See: `.planning/milestones/v1.5-ROADMAP.md` for full details
 
 </details>
 
-### 🚧 v1.8 Task Notifications (In Progress)
+### v1.8 Task Notifications (In Progress)
 
 **Milestone Goal:** Let agents subscribe to task outcomes and receive callbacks, eliminating the dependent-task polling workaround.
 
@@ -108,7 +108,9 @@ See: `.planning/milestones/v1.5-ROADMAP.md` for full details
   2. Subscriptions are persisted as co-located `subscriptions.json` files in task artifact directories
   3. Subscription writes are atomic (crash during write does not corrupt existing data)
   4. Subscription CRUD operations (create, read, list, delete) work via a `SubscriptionStore` class
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [ ] 28-01-PLAN.md — Subscription schema and SubscriptionStore CRUD with TDD
 
 ### Phase 29: Subscription API
 **Goal**: Agents can subscribe to task outcomes through MCP tools -- at dispatch time or after
@@ -188,7 +190,7 @@ Phases execute in numeric order: 28 -> 29 -> 30 -> 31 -> 32
 | 25. Completion Enforcement | v1.5 | 2/2 | Complete | 2026-03-07 |
 | 26. Trace Infrastructure | v1.5 | 2/2 | Complete | 2026-03-08 |
 | 27. Trace CLI | v1.5 | 2/2 | Complete | 2026-03-08 |
-| 28. Schema and Storage | v1.8 | 0/? | Not started | - |
+| 28. Schema and Storage | v1.8 | 0/1 | Not started | - |
 | 29. Subscription API | v1.8 | 0/? | Not started | - |
 | 30. Callback Delivery | v1.8 | 0/? | Not started | - |
 | 31. Granularity, Safety, and Hardening | v1.8 | 0/? | Not started | - |
