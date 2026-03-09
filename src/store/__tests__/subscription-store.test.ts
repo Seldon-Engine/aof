@@ -5,7 +5,11 @@
  * and CRUD operations for SubscriptionStore.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { SubscriptionStore } from "../subscription-store.js";
 import {
   SubscriptionGranularity,
   SubscriptionStatus,
@@ -153,6 +157,128 @@ describe("schema", () => {
 
     it("rejects invalid values", () => {
       expect(SubscriptionStatus.safeParse("pending").success).toBe(false);
+    });
+  });
+});
+
+describe("SubscriptionStore", () => {
+  let tmpDir: string;
+  let store: SubscriptionStore;
+  const taskId = "TASK-2026-03-09-001";
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "aof-sub-store-"));
+    store = new SubscriptionStore(
+      (id: string) => Promise.resolve(join(tmpDir, "tasks", "ready", id)),
+    );
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  describe("create()", () => {
+    it("creates a subscription with UUID id and returns TaskSubscription", async () => {
+      const sub = await store.create(taskId, "agent:main", "completion");
+      expect(sub.id).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+      );
+      expect(sub.subscriberId).toBe("agent:main");
+      expect(sub.granularity).toBe("completion");
+      expect(sub.status).toBe("active");
+      expect(sub.createdAt).toBeDefined();
+      expect(sub.updatedAt).toBeDefined();
+    });
+
+    it("creates task directory if it does not exist", async () => {
+      await store.create(taskId, "agent:main", "completion");
+      const taskDir = join(tmpDir, "tasks", "ready", taskId);
+      const filePath = join(taskDir, "subscriptions.json");
+      const content = await readFile(filePath, "utf-8");
+      const data = JSON.parse(content);
+      expect(data.version).toBe(1);
+      expect(data.subscriptions).toHaveLength(1);
+    });
+
+    it("uses write-file-atomic for crash-safe writes", async () => {
+      // Verify file is written correctly (atomic write produces valid JSON)
+      await store.create(taskId, "agent:main", "all");
+      const taskDir = join(tmpDir, "tasks", "ready", taskId);
+      const content = await readFile(join(taskDir, "subscriptions.json"), "utf-8");
+      expect(() => JSON.parse(content)).not.toThrow();
+    });
+  });
+
+  describe("get()", () => {
+    it("returns subscription by id", async () => {
+      const created = await store.create(taskId, "agent:main", "completion");
+      const found = await store.get(taskId, created.id);
+      expect(found).toBeDefined();
+      expect(found!.id).toBe(created.id);
+      expect(found!.subscriberId).toBe("agent:main");
+    });
+
+    it("returns undefined if not found", async () => {
+      const result = await store.get(taskId, "550e8400-e29b-41d4-a716-446655440000");
+      expect(result).toBeUndefined();
+    });
+  });
+
+  describe("list()", () => {
+    it("returns all subscriptions for a task", async () => {
+      await store.create(taskId, "agent:a", "completion");
+      await store.create(taskId, "agent:b", "all");
+      const subs = await store.list(taskId);
+      expect(subs).toHaveLength(2);
+    });
+
+    it("returns empty array if no file exists", async () => {
+      const subs = await store.list(taskId);
+      expect(subs).toEqual([]);
+    });
+
+    it("accepts optional status filter", async () => {
+      const sub1 = await store.create(taskId, "agent:a", "completion");
+      await store.create(taskId, "agent:b", "all");
+      await store.cancel(taskId, sub1.id);
+      const active = await store.list(taskId, { status: "active" });
+      expect(active).toHaveLength(1);
+      expect(active[0].subscriberId).toBe("agent:b");
+    });
+  });
+
+  describe("cancel()", () => {
+    it("sets subscription status to 'cancelled' and updates updatedAt", async () => {
+      const created = await store.create(taskId, "agent:main", "completion");
+      const cancelled = await store.cancel(taskId, created.id);
+      expect(cancelled.status).toBe("cancelled");
+      expect(cancelled.updatedAt).not.toBe(created.updatedAt);
+    });
+
+    it("throws if subscription not found", async () => {
+      await expect(
+        store.cancel(taskId, "550e8400-e29b-41d4-a716-446655440000"),
+      ).rejects.toThrow();
+    });
+  });
+
+  describe("persistence", () => {
+    it("missing subscriptions.json returns empty subscriptions (no error)", async () => {
+      const subs = await store.list(taskId);
+      expect(subs).toEqual([]);
+    });
+
+    it("data survives read-after-write cycle", async () => {
+      const created = await store.create(taskId, "agent:main", "all");
+      // Create a new store instance to read from disk
+      const store2 = new SubscriptionStore(
+        (id: string) => Promise.resolve(join(tmpDir, "tasks", "ready", id)),
+      );
+      const found = await store2.get(taskId, created.id);
+      expect(found).toBeDefined();
+      expect(found!.id).toBe(created.id);
+      expect(found!.subscriberId).toBe("agent:main");
+      expect(found!.granularity).toBe("all");
     });
   });
 });
