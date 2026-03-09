@@ -108,14 +108,15 @@ export class SubscriptionStore {
     }
 
     const now = new Date().toISOString();
-    data.subscriptions[index] = {
-      ...data.subscriptions[index],
-      status: "cancelled",
+    const updated: TaskSubscription = {
+      ...data.subscriptions[index]!,
+      status: "cancelled" as const,
       updatedAt: now,
     };
+    data.subscriptions[index] = updated;
 
     await this.writeSubscriptionsFile(filePath, data);
-    return data.subscriptions[index];
+    return updated;
   }
 
   /**
