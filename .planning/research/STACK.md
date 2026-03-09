@@ -1,235 +1,292 @@
 # Technology Stack
 
-**Project:** AOF v1.5 Event Tracing & Session Observability
-**Researched:** 2026-03-06
-**Scope:** Stack additions/changes for session transcript parsing, structured trace storage, CLI trace viewing, and completion enforcement
+**Project:** AOF v1.8 Task Notification Subscriptions & Callback Delivery
+**Researched:** 2026-03-09
+**Scope:** Stack additions/changes for task completion/failure callbacks, agent notification delivery, subscription storage, and event integration
 
 ## Executive Assessment
 
-**No new runtime dependencies required.** The existing stack covers all needs for v1.5. Session transcript parsing is line-by-line JSONL (Node.js built-in `readline` or manual split), structured trace storage uses the same filesystem patterns as the task store, and CLI output uses the project's existing raw ANSI code approach (no library). Zod validates trace schemas. Vitest tests everything.
+**No new runtime dependencies required.** The existing stack covers all needs for v1.8. Task notification subscriptions are stored as metadata on task frontmatter (filesystem-native). Callback delivery reuses the existing `GatewayAdapter.spawnSession()` mechanism to dispatch a notification session to the subscribing agent. Event integration hooks into the existing `EventLogger.onEvent` callback and `NotificationPolicyEngine` pipeline.
 
-The one area that warrants attention is the OpenClaw session JSONL format -- it is an internal format without a published schema, so AOF must parse it defensively with version detection.
+The key architectural insight: "notification delivery" in AOF means "spawn a new agent session with the completion/failure result as context." There is no push channel, no WebSocket, no HTTP callback -- the scheduler dispatches a session to the subscribing agent, exactly like it dispatches any other task hop. This keeps the design within AOF's existing patterns and constraints (no nested sessions, deterministic control plane, filesystem-based).
 
-**Confidence:** HIGH -- all capabilities verified against installed packages and existing codebase patterns.
+**Confidence:** HIGH -- all capabilities verified against installed packages, existing codebase patterns, and AOF constraints.
 
-## Existing Stack (Confirmed Current)
+## Existing Stack (Confirmed Sufficient)
 
-| Technology | Installed | Purpose for v1.5 | Status |
+| Technology | Installed | Purpose for v1.8 | Status |
 |------------|-----------|-------------------|--------|
-| Node.js | 22 (pinned) | `readline` for streaming JSONL parse, `fs/promises` for trace I/O | Sufficient |
-| TypeScript | 5.7.x | Type-safe trace schemas and parsers | Sufficient |
-| zod | 3.24.x | Session transcript schemas, trace record validation | Sufficient |
-| commander | 14.0.x | `aof trace <task-id>` command registration | Sufficient |
-| vitest | 3.0.x | Unit/integration tests for parser, trace store, CLI output | Sufficient |
-| write-file-atomic | 7.x | Atomic trace file writes | Sufficient |
-| yaml | 2.7.x | Reading task frontmatter to locate session IDs | Sufficient |
-| gray-matter | 4.0.3 | Task file parsing for trace correlation | Sufficient |
+| Node.js | 22 (pinned) | `fs/promises` for subscription storage, `crypto.randomUUID` for subscription IDs | Sufficient |
+| TypeScript | 5.7.x | Type-safe subscription schemas, callback context types | Sufficient |
+| zod | 3.24.x | Subscription schema validation, callback payload schemas | Sufficient |
+| write-file-atomic | 7.x | Atomic task file writes when adding/removing subscriptions | Sufficient |
+| yaml | 2.7.x | Task frontmatter serialization (subscriptions live in frontmatter metadata) | Sufficient |
+| gray-matter | 4.0.3 | Task file parsing for subscription reads | Sufficient |
+| commander | 14.0.x | `aof subscribe` / `aof unsubscribe` CLI commands (if needed) | Sufficient |
+| vitest | 3.0.x | Unit/integration tests for subscription lifecycle, delivery, integration | Sufficient |
+| @modelcontextprotocol/sdk | 1.26.x | MCP tool registration for `aof_subscribe` / `aof_unsubscribe` | Sufficient |
 
-## What Each v1.5 Feature Needs
+## What Each v1.8 Feature Needs
 
-### 1. Session Transcript Parsing
+### 1. Subscription Storage
 
-**What:** Parse OpenClaw session `.jsonl` files into structured trace records. Each line is a JSON object with a `type` field.
-
-**OpenClaw Session JSONL Format (verified from live files):**
-
-```
-Line types:
-  session        - Session metadata (version, id, timestamp, cwd)
-  model_change   - Provider/model switch (provider, modelId)
-  thinking_level_change - Thinking level adjustment
-  custom         - Custom events (e.g., model-snapshot)
-  message        - Conversation turn (role: user|assistant|toolResult)
-
-Assistant message fields:
-  message.role       = "assistant"
-  message.content[]  = [{type: "thinking"}, {type: "text"}, {type: "toolCall"}]
-  message.usage      = {input, output, cacheRead, cacheWrite, totalTokens, cost: {input, output, cacheRead, cacheWrite, total}}
-  message.model      = "claude-sonnet-4-5"
-  message.provider   = "anthropic-api"
-  message.stopReason = "toolUse" | "endTurn"
-
-Tool call content block:
-  {type: "toolCall", id, name, arguments: {...}}
-
-Tool result message:
-  message.role       = "toolResult"
-  message.toolCallId = <matches toolCall.id>
-  message.toolName   = <tool name>
-  message.isError    = boolean
-```
-
-**Stack needed:** Node.js built-in only.
-- `fs/promises.readFile()` for small-to-medium session files (typical: 30-200 lines, <1MB)
-- `String.split('\n')` + `JSON.parse()` per line (same pattern as `EventLogger.query()`)
-- No streaming needed -- session files are bounded by agent timeout (5min default)
-
-**Why not use a JSONL library:** The parsing is trivial (split + JSON.parse), the project already does it in `EventLogger.query()`, and adding a dependency for one function call adds maintenance burden with zero value.
-
-**Schema approach:** Use Zod with `.passthrough()` for forward compatibility. Parse only the fields AOF needs; ignore unknown fields so future OpenClaw versions don't break AOF.
-
-### 2. Structured Trace Storage
-
-**What:** Write a trace summary file alongside task artifacts after session completion.
+**What:** Store which agents want to be notified about which task outcomes. Two granularity levels: `"completion"` (success/failure only) and `"all"` (every state transition).
 
 **Stack needed:** Existing only.
-- `write-file-atomic` for crash-safe trace writes (already used for task mutations)
-- Filesystem layout: `tasks/<status>/TASK-<id>/trace.json` (co-located with task)
-- Zod schema for trace record validation
 
-**Trace record structure (recommended):**
+**Storage approach -- task frontmatter metadata:**
+
+Subscriptions are stored as a `subscriptions` array in the watched task's frontmatter metadata. This is the natural choice because:
+- Subscriptions are per-task data (co-located with the task they watch)
+- No new storage system needed (no SQLite table, no separate JSON file)
+- Atomic with task state transitions (write-file-atomic)
+- Survives restarts (filesystem-based, same as all AOF state)
+- Cleaned up automatically when tasks reach terminal states
 
 ```typescript
-const TraceRecord = z.object({
-  taskId: z.string(),
-  sessionId: z.string(),
-  capturedAt: z.string().datetime(),
-  session: z.object({
-    startedAt: z.string().datetime(),
-    endedAt: z.string().datetime().optional(),
-    durationMs: z.number(),
-    model: z.string(),
-    provider: z.string(),
-  }),
-  turns: z.number(),           // Total conversation turns
-  toolCalls: z.number(),       // Total tool invocations
-  toolBreakdown: z.record(z.string(), z.number()), // tool_name -> count
-  usage: z.object({
-    inputTokens: z.number(),
-    outputTokens: z.number(),
-    cacheReadTokens: z.number(),
-    cacheWriteTokens: z.number(),
-    totalTokens: z.number(),
-    totalCost: z.number(),
-  }),
-  completion: z.object({
-    calledTaskComplete: z.boolean(),
-    outcome: z.string().optional(),
-    summary: z.string().optional(),
-  }),
-  errors: z.array(z.object({
-    turn: z.number(),
-    tool: z.string().optional(),
-    message: z.string(),
-  })),
+// New Zod schema for subscription records
+const TaskSubscription = z.object({
+  id: z.string().uuid(),
+  subscriberAgent: z.string().min(1),       // Agent ID to notify
+  subscriberTaskId: z.string().optional(),   // Task that triggered the subscription (for context)
+  granularity: z.enum(["completion", "all"]),
+  createdAt: z.string().datetime(),
+  createdBy: z.string(),                     // Agent that created the subscription
 });
 ```
 
-### 3. CLI Trace Viewing (`aof trace <task-id>`)
+**Why NOT a separate subscription store:**
+- A separate `subscriptions.json` or SQLite table introduces a second source of truth
+- Subscriptions must survive task moves between status directories -- frontmatter moves with the file
+- The task file is already atomically written on every state change via `write-file-atomic`
+- No cross-task subscription queries are needed (subscriptions fire when the watched task changes)
 
-**What:** Display trace summary (default) or full debug output for a task's session trace.
+**Why NOT the MCP SubscriptionManager:**
+- The existing `src/mcp/subscriptions.ts` handles MCP resource subscriptions (real-time, in-session, protocol-level)
+- Task notification subscriptions are durable (persist across restarts) and trigger agent sessions
+- These are fundamentally different: MCP subscriptions = protocol notification within an active session; task subscriptions = spawn a new session when a task completes
 
-**Stack needed:** Existing only.
-- `commander` for command registration (same pattern as all other `aof` commands)
-- Raw ANSI escape codes for colored output (project convention -- see `src/views/renderers.ts`)
+### 2. Subscription Registration (MCP Tool)
 
-**Why not add chalk/picocolors:** The project already uses raw ANSI codes everywhere (`\x1b[36m` etc. in `renderers.ts`). Adding a color library now would create inconsistency. Follow the existing pattern.
-
-**Output modes:**
-- **Summary (default):** Task ID, session duration, model, total tokens, cost, tool call counts, completion status. Fits in ~15 lines.
-- **Debug (`--debug`):** Full turn-by-turn view with tool calls, token counts per turn, errors, and timing.
-
-### 4. Completion Enforcement
-
-**What:** Detect when an agent session ends without calling `aof_task_complete`, and flag/handle it.
+**What:** Let agents subscribe to task outcomes via `aof_subscribe` and unsubscribe via `aof_unsubscribe`.
 
 **Stack needed:** Existing only.
-- `AgentRunOutcome` callback (already wired in `OpenClawAdapter.runAgentBackground()`)
-- `EventLogger` for logging enforcement events
-- New event types in `EventType` Zod enum: `"trace.captured"`, `"completion.missing"`, `"completion.enforced"`
+- `@modelcontextprotocol/sdk` for tool registration (same pattern as `aof_dispatch`, `aof_task_complete`)
+- `zod` for input validation
+- `write-file-atomic` for atomic task file update
 
-**Integration point:** The `onRunComplete` callback in `OpenClawAdapter` already fires when an agent run ends. The completion enforcement logic hooks into this:
-1. Agent run completes (callback fires)
-2. Check if `aof_task_complete` was called during the session (check task status)
-3. If not: log `completion.missing` event, optionally force-complete with degraded status
+**Tool signatures:**
 
-### 5. Session Data Access (OpenClaw APIs)
+```typescript
+// aof_subscribe
+const subscribeInput = z.object({
+  taskId: z.string(),                          // Task to watch
+  granularity: z.enum(["completion", "all"]).default("completion"),
+  actor: z.string().optional(),                // Subscribing agent (auto-detected from session)
+});
 
-**What:** Locate session transcript files for a given task/session ID.
+// aof_unsubscribe
+const unsubscribeInput = z.object({
+  taskId: z.string(),                          // Task being watched
+  subscriptionId: z.string().optional(),       // Specific subscription (or remove all for this agent)
+  actor: z.string().optional(),
+});
+```
 
-**Two access paths (no new dependencies):**
+**Integration:** Follows exact pattern of `aof_task_dep_add` / `aof_task_dep_remove` -- read task, mutate metadata, write atomically.
 
-1. **Direct filesystem read** (primary): `resolveSessionFilePath(sessionId)` from OpenClaw's `extensionAPI.js` returns the path to the `.jsonl` file. AOF already loads this module. Path pattern: `~/.openclaw/agents/<agent>/sessions/<sessionId>.jsonl`
+### 3. Notification Delivery (Session Dispatch)
 
-2. **OpenClaw gateway tools** (alternative): `sessions_list` and `sessions_history` are registered gateway tools (verified in INTEGRATIONS.md). AOF can call these via the plugin API if needed, but direct file read is simpler and doesn't require gateway to be running.
+**What:** When a watched task reaches a notifiable state, spawn a new agent session to the subscribing agent with the outcome as context.
 
-**Recommendation:** Use direct filesystem read. The session file path is deterministic (`resolveSessionFilePath`), the file format is known, and it avoids a dependency on the gateway being active during trace capture.
+**Stack needed:** Existing only.
+- `GatewayAdapter.spawnSession()` -- the same mechanism used for task dispatch and DAG hop dispatch
+- `EventLogger` -- for logging delivery events
+- Task context builder -- formats the notification payload as task instructions
+
+**Delivery mechanism:**
+
+The scheduler already has the `onRunComplete` callback pattern (used in `dag-transition-handler.ts` and `assign-executor.ts`). When a task transitions to a notifiable state:
+
+1. Read the task's `subscriptions` from frontmatter metadata
+2. For each subscription matching the granularity:
+   a. Build a `TaskContext` with the outcome as context (task ID, final status, summary, outputs)
+   b. Call `executor.spawnSession()` to dispatch a notification session to the subscribing agent
+   c. Log a `notification.delivered` event
+   d. Remove the subscription (one-shot for `"completion"`, keep for `"all"`)
+
+**Why spawn a session (not a push notification):**
+- OpenClaw constraint: no nested sessions. The subscribing agent cannot receive a callback during an active session.
+- Spawning a session IS the callback. The agent wakes up, gets the notification context, and can act on it.
+- This reuses 100% of existing dispatch infrastructure (lease management, timeout handling, failure tracking).
+- The subscribing agent gets the same environment it would for any other task -- tools, memory, org chart access.
+
+**Notification context (passed as task instructions):**
+
+```typescript
+const notificationContext = {
+  type: "task_notification",
+  watchedTaskId: string,
+  watchedTaskStatus: TaskStatus,
+  watchedTaskTitle: string,
+  outcome: "completed" | "failed" | "transitioned",
+  summary?: string,           // From aof_task_complete summary
+  outputs?: string[],         // Task output artifacts
+  transition?: { from: string; to: string },  // For "all" granularity
+  subscriberTaskId?: string,  // The subscriber's own task context
+};
+```
+
+### 4. Event Integration
+
+**What:** Hook notification delivery into the existing event pipeline so subscriptions fire at the right time.
+
+**Stack needed:** Existing only.
+- `EventLogger.onEvent` callback -- already used for notification dispatch
+- New event types in `EventType` Zod enum
+- `NotificationPolicyEngine` -- can route subscription delivery events for operator visibility
+
+**Integration points:**
+
+**A. Task state transition hook (primary trigger):**
+The `TaskStore.transition()` method emits `task.transitioned` events. The scheduler's `action-executor.ts` handles completion transitions. The notification check hooks in at the same point where `cascadeOnCompletion()` runs in `dep-cascader.ts` -- after a task reaches a terminal or notifiable state.
+
+**B. DAG hop completion hook:**
+For DAG workflows, `handleDAGHopCompletion()` in `dag-transition-handler.ts` processes hop completions. Subscriptions should also fire when the entire DAG completes (not per-hop).
+
+**C. New event types:**
+
+```typescript
+// Add to EventType enum in schemas/event.ts:
+"notification.subscription_created",   // Agent subscribed to a task
+"notification.subscription_removed",   // Subscription removed (manual or one-shot consumed)
+"notification.delivered",              // Notification session dispatched
+"notification.delivery_failed",        // Notification dispatch failed
+```
+
+**D. Notification policy rules:**
+Add rules to `DEFAULT_RULES` for the new event types so operators see subscription activity in their notification channels.
+
+### 5. Scheduler Integration
+
+**What:** The scheduler must check for pending notification deliveries during each poll cycle.
+
+**Stack needed:** Existing only.
+
+**Approach:** Add a notification delivery step to the scheduler's `poll()` function, after the existing action execution and DAG hop dispatch steps. This follows the same pattern as murmur evaluation (step 9 in `scheduler.ts`).
+
+The scheduler already lists all tasks each poll. For tasks that just transitioned to a notifiable state, check for subscriptions and queue delivery actions.
+
+**Trigger detection:** Use the `task.transitioned` events logged during the current poll cycle (available in the `actions` array) to identify which tasks just changed state. For each, check the task's `subscriptions` metadata.
 
 ## What NOT to Add
 
 | Library | Why Not |
 |---------|---------|
-| `chalk` / `picocolors` | Project uses raw ANSI codes everywhere; adding a library creates inconsistency |
-| `jsonl-parse` / `ndjson` | Trivial parsing (split + JSON.parse); existing pattern in EventLogger |
-| `@opentelemetry/*` | Explicitly deferred to v2 per PROJECT.md |
-| `cli-table3` / `tty-table` | Summary output is simple enough for manual formatting; `renderers.ts` proves the pattern |
-| `dayjs` / `date-fns` | ISO date handling with built-in `Date` is sufficient for duration calculations |
-| `ora` / spinners | Trace reading is fast (local file, <1MB); no async loading indicator needed |
-| Any JSONL streaming library | Session files are bounded by timeout (5min = ~200 turns max, well under memory limits) |
+| `bullmq` / `bee-queue` | No Redis, no external queue -- filesystem-based constraint. Notification delivery IS session dispatch. |
+| `node-cron` / `agenda` | Scheduler already polls on interval. No separate scheduling system needed. |
+| `ws` / `socket.io` | No WebSocket push. Agents receive notifications as spawned sessions. |
+| `nodemailer` / `sendgrid` | Notifications go to agents (session dispatch), not humans (email). |
+| `eventemitter3` | Node.js built-in `EventEmitter` sufficient, but not even needed -- the EventLogger's `onEvent` callback is the hook. |
+| `uuid` | Node.js 22 has `crypto.randomUUID()` built-in. |
+| `rxjs` | Reactive patterns add complexity. The poll-based scheduler is the right delivery loop. |
+| Any pub/sub library | AOF is single-machine, single-process. No inter-process messaging needed. |
 
 ## Alternatives Considered
 
 | Category | Recommended | Alternative | Why Not |
 |----------|-------------|-------------|---------|
-| JSONL parsing | Built-in split+parse | `ndjson` / `jsonl-parse` | Zero value over 3 lines of code; adds dep |
-| CLI colors | Raw ANSI (existing) | `picocolors` (2.1KB) | Would work but creates inconsistency with 150+ files using raw codes |
-| Trace storage | JSON file per task | SQLite trace table | Filesystem-based principle; trace is per-task, not queryable across tasks |
-| Session access | Direct file read | Gateway API (`sessions_history`) | Requires gateway running; file read is simpler and more reliable |
-| Trace format | Single `trace.json` | Append-only JSONL | Traces are write-once summaries, not event streams; JSON is simpler |
+| Subscription storage | Task frontmatter metadata | Separate subscriptions.json | Second source of truth; doesn't move with task file |
+| Subscription storage | Task frontmatter metadata | SQLite table | Violates filesystem-based principle; adds query complexity for simple per-task data |
+| Delivery mechanism | Session dispatch via `spawnSession()` | MCP notification (`sendNotification`) | MCP notifications only work within active sessions; subscriptions need to wake agents |
+| Delivery mechanism | Session dispatch via `spawnSession()` | Write to agent's "inbox" directory | Agent would need to poll; session dispatch is immediate and reuses existing infra |
+| Trigger mechanism | Scheduler poll cycle check | `EventLogger.onEvent` callback | Callback fires synchronously during event logging; dispatch should be in scheduler's async context |
+| Trigger mechanism | Scheduler poll cycle check | Filesystem watcher (like MCP SubscriptionManager) | Adds another watcher; scheduler already scans all tasks every poll |
+| Subscription scope | Per-task (frontmatter) | Global registry | Per-task is simpler; no cross-referencing needed; cleaned up with task lifecycle |
 
 ## Integration Points with Existing Stack
 
-### EventLogger Extension
-Add new event types to `src/schemas/event.ts`:
-```typescript
-// Add to EventType enum:
-"trace.captured",       // Trace successfully written
-"completion.missing",   // Agent ended without aof_task_complete
-"completion.enforced",  // System force-completed a task
-```
-No schema changes beyond enum extension.
+### TaskFrontmatter Schema Extension
 
-### OpenClawAdapter Extension
-The `onRunComplete` callback in `runAgentBackground()` is the hook point. After the callback fires:
-1. Read session file via `resolveSessionFilePath(sessionId)`
-2. Parse JSONL into trace record
-3. Write `trace.json` to task directory
-4. Log `trace.captured` event
+Add `subscriptions` field to task frontmatter metadata (not a top-level field -- use the existing `metadata` bag to avoid schema migration):
 
-### Commander CLI Extension
-Register `aof trace <task-id>` in `src/cli/program.ts` following existing command patterns:
 ```typescript
-registerTraceCommands(program);
+// In task metadata (no schema migration needed):
+metadata: {
+  subscriptions: TaskSubscription[],
+  // ... existing metadata fields
+}
 ```
 
-### Task Store Extension
-Add `getTraceDir(taskId)` method or utility to resolve `tasks/<status>/TASK-<id>/` as the trace storage location. The task's work directory already exists for artifact handoff in DAG workflows.
+**Why metadata, not a top-level field:** Adding a top-level frontmatter field would require a schema version bump (v2 -> v3), migration logic, and backward compatibility handling. The `metadata` bag is `z.record(z.string(), z.unknown())` -- it accepts arbitrary keys with no migration needed.
+
+### EventType Enum Extension
+
+Add four new event types to `src/schemas/event.ts`. No schema changes beyond enum extension.
+
+### Scheduler Extension
+
+Add a new step after DAG hop dispatch (step 6.5) and before murmur evaluation (step 9). Pattern mirrors `evaluateMurmurTriggers()`:
+
+```
+Step 6.7: Notification delivery
+  - For each task that transitioned this poll cycle:
+    - Read task subscriptions from metadata
+    - For each matching subscription:
+      - Build notification TaskContext
+      - Call executor.spawnSession() (respects concurrency limits)
+      - Log notification.delivered event
+      - Remove subscription if one-shot (completion granularity)
+```
+
+### MCP Tool Registration
+
+Register `aof_subscribe` and `aof_unsubscribe` in `src/mcp/tools.ts` following the exact pattern of `aof_task_dep_add` / `aof_task_dep_remove`.
+
+### NotificationPolicyEngine Rules
+
+Add four new rules to `DEFAULT_RULES` in `src/events/notification-policy/rules.ts` for operator visibility of subscription activity.
+
+### SKILL.md Update
+
+Add `aof_subscribe` and `aof_unsubscribe` tool descriptions to the compressed SKILL.md. Budget impact: ~50-80 tokens (two one-liner tool descriptions). Well within the 2150-token ceiling.
 
 ## File Organization (Recommended)
 
 ```
 src/
-  trace/
-    parser.ts           # Parse OpenClaw session JSONL -> structured data
-    store.ts            # Read/write trace.json files
-    schemas.ts          # Zod schemas for trace records
-    formatter.ts        # CLI output formatting (summary + debug modes)
-    index.ts            # Public API
+  notifications/
+    schemas.ts            # TaskSubscription Zod schema
+    subscription-store.ts # Read/write subscriptions in task metadata
+    delivery.ts           # Build notification context, dispatch sessions
+    index.ts              # Public API
     __tests__/
-      parser.test.ts
-      store.test.ts
-      formatter.test.ts
-  cli/
-    commands/
-      trace.ts          # aof trace <task-id> command
+      schemas.test.ts
+      subscription-store.test.ts
+      delivery.test.ts
+      integration.test.ts
 ```
+
+## Concurrency and Edge Cases
+
+**Concurrency limit awareness:** Notification deliveries must respect the same `maxConcurrentDispatches` limit as regular task dispatch. If the scheduler is at capacity, notifications queue for the next poll cycle (subscriptions persist in frontmatter, so nothing is lost).
+
+**Terminal state cleanup:** When a task reaches `done` or `cancelled`, all `"all"` granularity subscriptions should be removed. `"completion"` subscriptions are consumed on delivery.
+
+**Self-subscription prevention:** An agent should not be able to subscribe to its own currently-dispatched task (it will get the completion result via `aof_task_complete`). Validate at subscription time.
+
+**Delivery failure handling:** If `spawnSession()` fails for a notification, the subscription persists (not consumed). The scheduler retries on the next poll cycle, same as failed task dispatches. After N failures, log `notification.delivery_failed` and remove the subscription to prevent infinite retries.
 
 ## Sources
 
-- OpenClaw session JSONL format: Verified from live session file `~/.openclaw/agents/swe-pm/sessions/927da406-29a0-465a-9267-3a0a1130b3f9.jsonl`
-- Existing ANSI pattern: `src/views/renderers.ts` (raw escape codes, no library)
-- Existing JSONL parsing: `src/events/logger.ts` lines 212-240 (`EventLogger.query()`)
-- Gateway adapter: `src/openclaw/openclaw-executor.ts` (`resolveSessionFilePath`, `onRunComplete`)
-- Event schema: `src/schemas/event.ts` (EventType Zod enum)
+- Task schema: `src/schemas/task.ts` -- TaskFrontmatter with `metadata: z.record(z.string(), z.unknown())`
+- Event schema: `src/schemas/event.ts` -- EventType Zod enum
+- Scheduler: `src/dispatch/scheduler.ts` -- poll cycle structure, murmur evaluation pattern
+- DAG transition handler: `src/dispatch/dag-transition-handler.ts` -- `handleDAGHopCompletion()`, `dispatchDAGHop()`
+- Action executor: `src/dispatch/action-executor.ts` -- `executeActions()`, completion cascade
+- GatewayAdapter: `src/dispatch/executor.ts` -- `spawnSession()` contract
+- MCP subscriptions (different purpose): `src/mcp/subscriptions.ts` -- protocol-level resource subscriptions
+- Notification policy: `src/events/notification-policy/rules.ts` -- DEFAULT_RULES pattern
+- Existing MCP tools: `src/mcp/tools.ts` -- tool registration pattern
+- PROJECT.md: v1.8 milestone scope, constraints
 - Package.json: Verified installed dependencies and versions
-- PROJECT.md: v1.5 milestone scope, constraints, out-of-scope items

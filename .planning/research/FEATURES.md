@@ -1,388 +1,327 @@
-# Feature Landscape: Agent Event Tracing & Session Observability
+# Feature Landscape: Task Notification Subscriptions & Callback Delivery
 
-**Domain:** Agent orchestration observability (AOF v1.5)
-**Researched:** 2026-03-06
+**Domain:** Task-to-agent callback system for agent orchestration platform (AOF v1.8)
+**Researched:** 2026-03-09
 
 ## Context
 
-This is a SUBSEQUENT MILESTONE (v1.5). AOF already has:
-- Task lifecycle with completion reports, failure tracking (3 failures -> deadletter)
-- `aof_task_complete` MCP tool for explicit task completion
-- `AgentRunOutcome` callback in `onRunComplete` with success/aborted/error/durationMs
-- JSONL event logging (append-only, daily rotation)
-- OpenClaw session files at `~/.openclaw/agents/<agent>/sessions/<sessionId>.jsonl`
-- SKILL.md context injection (seed and full tiers, 2150-token budget ceiling)
-- `resolveSessionFilePath()` available in OpenClawAdapter (session file path known at spawn time)
+This is a SUBSEQUENT MILESTONE (v1.8). AOF already has:
+- Task CRUD via `aof_dispatch` MCP tool with workflow params, context tiers, routing
+- Task lifecycle with state transitions (`backlog -> ready -> in-progress -> review -> done -> deadletter`)
+- DAG workflows with hop-based execution — scheduler dispatches each hop independently
+- Completion enforcement — agents exiting without `aof_task_complete` are caught and blocked
+- `GatewayAdapter.spawnSession()` for dispatching agent sessions with context
+- `NotificationService` for system-level alerts (channel routing, deduplication) — NOT agent callbacks
+- `SubscriptionManager` for MCP resource subscriptions (file-watch based, for MCP clients) — NOT task outcome callbacks
+- JSONL event logging with `EventLogger` for all state transitions
+- Filesystem-based task store with atomic `write-file-atomic` persistence
+- OpenClaw constraint: no nested agent sessions
 
-**The core problem:** Agents can hallucinate task completion. An agent exited cleanly without making meaningful tool calls, and AOF trusted the exit code (via `onRunComplete` callback) to mark the task done. The existing fallback in `assign-executor.ts` lines 191-195 auto-transitions `review -> done` on success -- this IS the hallucination pathway. Zero visibility into what agents actually did.
+**The core problem:** Agents creating tasks must currently poll for results or use DAG workflows to chain work. There is no way for an agent to say "notify me when task X finishes" and receive a callback with the results. The subscription/callback mechanism must fit AOF's existing patterns: filesystem persistence, scheduler-driven dispatch, deterministic control plane.
 
 ---
 
 ## Table Stakes
 
-Features required for this milestone to solve the stated problem. Without these, v1.5 delivers no value.
+Features that agents and operators expect from a task notification system. Missing any of these makes the feature feel incomplete compared to the DAG workaround.
 
-### 1. Completion Enforcement (Don't Trust Exit Codes)
+### 1. Subscribe on Dispatch (`notify` parameter on `aof_dispatch`)
 
 | Aspect | Detail |
 |--------|--------|
-| Why Expected | Core problem statement. The `onRunComplete` fallback in `assign-executor.ts` currently auto-completes tasks when agent exits successfully without calling `aof_task_complete`. This must stop. |
+| Why Expected | The primary use case. Agent A dispatches a task to Agent B and wants to know when it finishes. Adding `notify` to `aof_dispatch` follows the existing pattern of optional params like `workflow`, `contextTier`. |
 | Complexity | LOW |
-| Depends On | `assign-executor.ts` onRunComplete callback (lines 181-226) |
+| Depends On | `aof_dispatch` input schema (`src/mcp/tools.ts`), `TaskFrontmatter` schema (`src/schemas/task.ts`) |
 
 **What must change:**
 
-The existing fallback at `assign-executor.ts` lines 191-195 does:
+Add `notify` parameter to dispatch input schema:
 ```typescript
-if (outcome.success) {
-  await store.transition(action.taskId, "review", { reason: "dispatch.fallback: agent completed without calling aof_task_complete" });
-  await store.transition(action.taskId, "done", { reason: "dispatch.fallback: auto-completed after successful agent run" });
-}
+notify: z.object({
+  subscriberId: z.string(),       // agent ID to notify
+  granularity: z.enum(["completion", "all"]).default("completion"),
+}).optional()
 ```
 
-This must change to:
+On dispatch, write subscription to created task's frontmatter:
 ```typescript
-if (outcome.success) {
-  await store.transition(action.taskId, "blocked", {
-    reason: "no_explicit_completion: agent exited successfully but did not call aof_task_complete"
-  });
-}
+subscriptions: [{
+  subscriberId: "agent-a",
+  granularity: "completion",
+  createdAt: "2026-03-09T...",
+  status: "pending",           // pending | delivered | failed
+}]
 ```
 
-The task stays blocked, not done. The operator can inspect via `aof trace` and decide to re-dispatch or manually complete.
-
-**Confidence:** HIGH -- surgical code change, path is fully identified.
+**Confidence:** HIGH — follows established pattern of extending `aof_dispatch`.
 
 ---
 
-### 2. Session Trace Capture
+### 2. Subscription Schema in Task Frontmatter
 
 | Aspect | Detail |
 |--------|--------|
-| Why Expected | Cannot diagnose what agent did without reading its session transcript. OpenClaw writes JSONL session files that contain every tool call, every response, every reasoning block. |
-| Complexity | MEDIUM |
-| Depends On | `OpenClawAdapter.resolveSessionFilePath()`, OpenClaw session JSONL format |
-
-**Session JSONL format (verified from real files):**
-
-Each line is a JSON object with a `type` field. Relevant types:
-- `session` -- session metadata (id, timestamp, cwd)
-- `model_change` -- provider/model selection
-- `thinking_level_change` -- reasoning level
-- `message` -- user/assistant messages containing:
-  - `type: "text"` -- plain text
-  - `type: "thinking"` -- reasoning blocks
-  - `type: "toolCall"` -- tool invocations (name, id, arguments)
-  - `type: "toolResult"` -- tool outputs
-- `compaction` -- session was compacted (long sessions get summarized)
-- `custom` -- OpenClaw-specific events (model snapshots, cache TTL)
-
-**What AOF must do:**
-
-1. After `onRunComplete` fires, read the session JSONL file using the path from `resolveSessionFilePath(sessionId)`
-2. Parse each line, extract:
-   - Tool calls: name, arguments (truncated), success/error
-   - AOF tool calls specifically: `aof_task_complete`, `aof_task_update`, `aof_status_report`
-   - Timestamps for duration calculation per tool call
-   - Whether reasoning was used (thinking blocks present)
-   - Final assistant message (likely contains completion summary)
-3. Handle edge cases:
-   - Session file may not exist (agent crashed before writing)
-   - Session file may have `.deleted.*` suffix (OpenClaw prunes old sessions)
-   - Session file may be large (100KB-1MB) -- stream line-by-line, don't load entire file into memory
-   - `compaction` events mean earlier messages were summarized
-
-**Confidence:** HIGH -- session JSONL format verified from real data at `~/.openclaw/agents/swe-backend/sessions/`.
-
----
-
-### 3. Trace File Storage
-
-| Aspect | Detail |
-|--------|--------|
-| Why Expected | Extracted trace data must persist in the task directory alongside existing `run.json`, `run_result.json`, `run_heartbeat.json`. |
+| Why Expected | Subscriptions must persist with the task. If the scheduler crashes, pending subscriptions must survive restart. Task frontmatter is the single source of truth. |
 | Complexity | LOW |
-| Depends On | Task store path structure, `RunArtifact` schema pattern |
+| Depends On | `TaskFrontmatter` Zod schema, `schemaVersion` bump, migration framework |
 
-**What AOF must do:**
-
-Write `trace.json` to the task work directory with a structured schema:
-
+**Schema addition to `TaskFrontmatter`:**
 ```typescript
-const TraceFile = z.object({
-  taskId: z.string(),
-  sessionId: z.string(),
-  agentId: z.string(),
-  capturedAt: z.string().datetime(),
-  duration: z.object({
-    totalMs: z.number(),
-    firstToolCallMs: z.number().optional(),  // time to first tool call
-    lastToolCallMs: z.number().optional(),   // time of last tool call
-  }),
-  toolCalls: z.array(z.object({
-    name: z.string(),
-    category: z.enum(["aof", "file_read", "file_write", "shell", "web", "other"]),
-    timestamp: z.string().datetime().optional(),
-    success: z.boolean(),
-    errorSummary: z.string().optional(),
-  })),
-  summary: z.object({
-    totalToolCalls: z.number(),
-    aofToolCalls: z.number(),
-    fileReads: z.number(),
-    fileWrites: z.number(),
-    shellCommands: z.number(),
-    completionCalled: z.boolean(),
-    hasThinking: z.boolean(),
-  }),
-  flags: z.array(z.enum([
-    "no_completion_call",      // agent never called aof_task_complete
-    "no_tool_calls",           // agent made zero tool calls
-    "no_file_modifications",   // agent read files but never wrote
-    "completion_without_work", // agent called aof_task_complete but made no other tool calls
-  ])).default([]),
-  // Debug-only fields (populated when task has debug: true)
-  reasoning: z.array(z.object({
-    timestamp: z.string().datetime().optional(),
-    text: z.string(),
-  })).optional(),
+const TaskSubscription = z.object({
+  subscriberId: z.string(),                              // agent to notify
+  granularity: z.enum(["completion", "all"]),             // what to watch
+  createdAt: z.string().datetime(),                      // when subscribed
+  status: z.enum(["pending", "delivered", "failed"]),    // delivery state
+  deliveredAt: z.string().datetime().optional(),         // when callback dispatched
+  deliverySessionId: z.string().optional(),              // callback session ID
 });
+
+// Add to TaskFrontmatter:
+subscriptions: z.array(TaskSubscription).default([]),
 ```
 
-Location: `tasks/<status>/<task-id>/trace.json` -- same directory as `run.json`.
+Subscriptions stored directly in task YAML. No separate registry. One source of truth per task.
 
-**Confidence:** HIGH -- follows established pattern of run artifacts.
+**Confidence:** HIGH — extends existing schema pattern, follows filesystem-only constraint.
 
 ---
 
-### 4. Trace CLI (`aof trace <task-id>`)
+### 3. Completion-Only Granularity (`"completion"`)
 
 | Aspect | Detail |
 |--------|--------|
-| Why Expected | Operators need a quick way to see what an agent did. Raw JSONL is unreadable. |
-| Complexity | MEDIUM |
-| Depends On | Trace file storage, Commander.js CLI framework |
-
-**Two modes:**
-
-**Default (summary):**
-```
-$ aof trace TASK-2026-03-06-abc
-
-Task: TASK-2026-03-06-abc
-Agent: swe-backend | Session: 509ebb91-...
-Duration: 4m 23s | Tool calls: 37
-
-Tool Summary:
-  aof_task_complete  1  (called)
-  file read         12
-  file write         8
-  shell (exec)      14
-  web fetch          2
-
-Flags: (none)
-Status: Completed normally
-```
-
-**Debug (`--debug`):**
-```
-$ aof trace TASK-2026-03-06-abc --debug
-
-[same header as above]
-
-Tool Call Timeline:
-  00:00  exec        git status
-  00:02  read        src/memory/store/vector-store.ts
-  00:05  read        src/memory/store/schema.ts
-  ...
-  04:21  aof_task_complete  taskId=TASK-2026-03-06-abc summary="Fixed integer binding..."
-
-Reasoning Excerpts: (3 blocks)
-  [1] "Investigating primary key type mismatch..."
-  [2] "The error suggests sqlite-vec requires integer..."
-  [3] "Planning to cast the limit parameter..."
-```
-
-**Confidence:** HIGH -- follows existing CLI command patterns (`aof smoke`).
-
----
-
-### 5. SKILL.md Completion Guidance
-
-| Aspect | Detail |
-|--------|--------|
-| Why Expected | Agents must be instructed to provide meaningful completion reports. Current SKILL.md doesn't mention completion quality expectations. |
+| Why Expected | The 90% use case. "Tell me when this task reaches done, cancelled, or deadletter." Agent dispatches work and wants the result. |
 | Complexity | LOW |
-| Depends On | `skills/aof/SKILL.md`, `skills/aof/SKILL-SEED.md`, context budget gate (2150 token ceiling, current full SKILL.md is 1665 tokens = ~485 tokens headroom) |
+| Depends On | State transition hooks in task store |
 
-**What to add to SKILL.md (under "Workflow Patterns" section):**
+**Trigger conditions:** Task status transitions to one of: `done`, `cancelled`, `deadletter`.
 
-```markdown
-### Completion Requirements
+These are terminal states (no further transitions possible per `VALID_TRANSITIONS`). The subscription fires once and is done.
 
-When finishing work, call `aof_task_complete` with:
-- `summary`: What you did and why (not just "done"). Include files changed and key decisions.
-- `outputs`: List of files created or modified.
-Your session is traced. Exiting without calling `aof_task_complete` blocks the task for operator review.
-```
+**Confidence:** HIGH — terminal states are well-defined in existing schema.
 
-~50 tokens. Fits within budget.
+---
 
-**What to add to SKILL-SEED.md:**
+### 4. All-Transitions Granularity (`"all"`)
 
-Same text, shortened to ~30 tokens:
-```markdown
-**Completion:** Always call `aof_task_complete` with meaningful summary and outputs list. Exiting without it blocks the task.
-```
+| Aspect | Detail |
+|--------|--------|
+| Why Expected | Monitoring agents or manager agents tracking subordinate progress. Less common but expected as an option. |
+| Complexity | MED |
+| Depends On | State transition hooks, delivery queue |
 
-**Also update `formatTaskInstruction()` in `openclaw-executor.ts`** (already has completion reminder at line 314) to reinforce the "will be blocked" consequence:
+**Key difference from completion:** Fires on every `task.transitioned` event. Must deliver multiple callbacks over the task lifecycle. Each delivery is a separate session dispatch.
 
-Change: `"your work will be lost"` to `"your work will be blocked for operator review and your session will be traced for investigation."`
+**Edge case:** If a task transitions rapidly (`ready -> in-progress -> review -> done` within one poll cycle), should all transitions be delivered? Yes — batch them into one callback with transition history, not four separate sessions. This prevents session spawn storms.
 
-**Confidence:** HIGH -- small text changes, fits token budget.
+**Confidence:** MEDIUM — the batching decision needs design attention.
+
+---
+
+### 5. Callback Delivery via Session Dispatch
+
+| Aspect | Detail |
+|--------|--------|
+| Why Expected | OpenClaw has no nested sessions, no persistent agent connections, no message queues. The only way to "call back" an agent is to spawn a new session for them with results as context. This is how DAG hops already work. |
+| Complexity | MED |
+| Depends On | `GatewayAdapter.spawnSession()`, scheduler poll loop, `NotificationContext` builder |
+
+**Delivery mechanism:** The scheduler, during its poll loop, checks for tasks with pending subscriptions that have reached their trigger condition. For each pending subscription, it spawns a new session to the subscriber agent with a `NotificationContext` payload.
+
+This mirrors `dispatchDAGHop()` in `dag-transition-handler.ts` — build context, spawn session, update state on success.
+
+**Callback session context must include:**
+- Source task ID and title
+- Final status (or transition history for `"all"` granularity)
+- Completion summary (from `run_result.json` if available)
+- Output files list (from task metadata)
+- The subscriber's own identity (so it knows why it was spawned)
+
+**Confidence:** HIGH — follows established dispatch pattern exactly.
+
+---
+
+### 6. At-Least-Once Delivery with Idempotency
+
+| Aspect | Detail |
+|--------|--------|
+| Why Expected | If the scheduler crashes between detecting a trigger and delivering the callback, the subscription must retry on next poll. Exactly-once is impossible without distributed transactions. At-least-once with idempotent consumers is the industry standard. |
+| Complexity | MED |
+| Depends On | Subscription `status` field in task frontmatter, atomic write persistence |
+
+**How it works:**
+
+1. Task transitions to terminal state -> subscription `status` stays `"pending"`
+2. Scheduler poll detects pending subscription on completed task -> attempts delivery
+3. On successful spawn -> atomically update subscription `status` to `"delivered"` with `deliveredAt` timestamp and `deliverySessionId`
+4. On spawn failure -> subscription stays `"pending"`, retried next poll
+5. If scheduler crashes before step 3 -> subscription stays `"pending"`, retried after restart
+
+**Agent-side idempotency:** Agents receiving a callback should check if they already processed the result (e.g., check if they already created a follow-up task for the source task ID). This is the agent's responsibility, documented in SKILL.md.
+
+**Confidence:** HIGH — at-least-once with filesystem state is a well-understood pattern.
+
+---
+
+### 7. Subscription Cleanup and Audit Trail
+
+| Aspect | Detail |
+|--------|--------|
+| Why Expected | Delivered subscriptions must not re-fire. Failed deliveries must not retry forever. The subscription record serves as an audit trail. |
+| Complexity | LOW |
+| Depends On | Subscription schema, delivery tracking |
+
+**Rules:**
+- Delivered subscriptions: `status: "delivered"`, `deliveredAt` set. Never re-fired.
+- Failed deliveries: Retry up to 3 times (matching existing `maxDispatchRetries`). After 3 failures, set `status: "failed"`. Emit event.
+- Audit: Subscriptions stay in task frontmatter permanently. Visible via `aof trace` or direct task file inspection.
+
+**Confidence:** HIGH — mirrors existing failure tracking pattern in `failure-tracker.ts`.
 
 ---
 
 ## Differentiators
 
-Features that go beyond the minimum viable tracing. Not required for solving the core problem, but significantly increase the value of the tracing infrastructure.
+Features that go beyond basic expectations. Not required for MVP but add meaningful value.
 
 | Feature | Value Proposition | Complexity | Dependencies | Notes |
-|---------|-------------------|------------|-------------|-------|
-| **Retry-aware trace accumulation** | When a task fails and retries, store traces as `trace_history[]` so the next agent sees what prior agents tried and failed at. Prevents repeating the same mistakes across retries. | Medium | Trace file storage, failure tracker | High value: the 3-failure deadletter pathway currently loses all diagnostic context. Each retry starts blind. Store previous traces alongside current trace. |
-| **No-op detection** | Automatically flag sessions where agent made zero meaningful tool calls. Emit `trace.suspicious_completion` event. | Low | Tool call extraction (part of trace capture) | Directly addresses the triggering incident. Zero file writes + zero shell commands + `aof_task_complete` called = suspicious. Can integrate with existing notification rules for alerting. |
-| **Prior-failure injection** | When dispatching a retry, include a "Previous attempts" section in the task instruction showing what prior agents tried and why they failed. | Medium | Retry-aware trace accumulation, `formatTaskInstruction()` | Must respect context budget. Include only: tool call summary, error message, duration. NOT full reasoning (too large). |
-| **Trace event emission** | Emit JSONL events for trace lifecycle: `trace.captured`, `trace.suspicious_completion`, `trace.no_completion_call`. | Low | EventLogger, trace capture | Extends existing event types. Enables downstream alerting via existing notification rules. |
-| **Debug flag on tasks** | Per-task `debug: true` metadata flag controls trace verbosity. Debug tasks capture full reasoning; normal tasks get tool-call-only summary. | Low | Task metadata, trace capture | Reasoning extraction produces large data (thinking blocks can be paragraphs). Default to summary-only. Debug flag enables full capture. Operator sets debug when investigating a problem task. |
-| **Trace retention policy** | Auto-prune trace files for done tasks older than N days. Keep traces for deadlettered tasks indefinitely (forensics). | Low | Trace file storage | Prevents unbounded disk usage. Deadletter traces are the most valuable for understanding systemic failures. |
+|---------|-------------------|------------|--------------|-------|
+| **`aof_subscribe` tool** | Subscribe to tasks not created by the current agent. Manager agents monitoring subordinates. | LOW | New MCP tool, task frontmatter write | Lower priority because dispatch-time subscription covers 90% of cases. |
+| **Filtered subscriptions** | "Notify me only on failure" — `filter: { outcomes: ["deadletter", "cancelled"] }`. Reduces noise for agents only interested in error cases. | LOW | Schema extension to `TaskSubscription` | Easy to add later. Optional `filter` field. |
+| **Callback retry with backoff** | If notification delivery fails, retry with jittered backoff matching existing dispatch retry pattern. | MED | Existing `failure-tracker.ts` | Reuse `trackDispatchFailure` / `shouldTransitionToDeadletter` pattern. |
+| **Notification delivery trace** | Capture trace data for notification-spawned sessions. Debug "my callback never arrived." | LOW | Existing `captureTrace` infrastructure | Should come for free if callbacks go through standard dispatch path. |
+| **Unsubscribe tool** | Cancel a subscription before delivery. Prevents unnecessary session spawns. | LOW | MCP tool to update subscription status to `"cancelled"` | Edge case. Most subscriptions complete quickly. |
+| **Batch notification coalescing** | If agent subscribes to 5 tasks and 3 complete in one poll cycle, deliver one callback with all 3 results. | HIGH | Notification queue, batch assembly, new context format | Significant complexity. Defer unless session spawn cost is a bottleneck. |
+| **Cross-task query-based subscriptions** | "Notify me when ANY task tagged `deploy` completes." | HIGH | Separate subscription registry, query engine | Fundamentally different model (topic-based vs point-to-point). Defer to v2. |
 
 ---
 
 ## Anti-Features
 
-Features to explicitly NOT build for v1.5.
+Features to explicitly NOT build for v1.8.
 
 | Anti-Feature | Why Avoid | What to Do Instead |
 |--------------|-----------|-------------------|
-| **OpenTelemetry integration** | Explicitly deferred to v2 in PROJECT.md. Adds external dependency (OTel collector). AOF is a single-machine filesystem-based tool -- OTel is designed for distributed systems. | File-based trace storage with JSONL events is sufficient. |
-| **Real-time session streaming** | The problem is post-hoc investigation ("what did the agent do?"), not live monitoring. Would require WebSocket infrastructure, inter-process communication. | Capture traces after session completes. `aof trace` inspects after the fact. |
-| **Dashboard / web UI** | Already out of scope per PROJECT.md. Would be a separate milestone with its own research. | `aof trace` CLI with formatted terminal output. |
-| **Full session replay** | Storing entire session transcripts (100KB-1MB each) in task directories would bloat the filesystem store rapidly. 244 session files for one agent alone. | Extract structured summary (tool calls, flags, key reasoning snippets). Reference original session file path for full replay if needed. |
-| **Automatic self-healing from traces** | Tempting to auto-resurrect blocked tasks based on trace analysis, but violates "no LLMs in control plane" for any intelligent healing, and "self-healing" is explicitly mentioned as deferred. | Capture and store traces. Surface flags. Let operators decide via `aof trace` + manual action. |
-| **Cross-task trace correlation** | Building a trace graph across DAG workflow hops adds schema complexity without solving the immediate problem. | Store per-task traces independently. DAG workflow already tracks hop-level status. |
-| **Reasoning quality scoring** | Using an LLM to evaluate reasoning quality from traces violates "no LLMs in control plane." | Expose reasoning via `--debug` flag. Let operators judge quality themselves. |
-| **Session file management** | Cleaning up, archiving, or rotating OpenClaw session files. This is OpenClaw's responsibility, not AOF's. | Read session files as needed. Never write to or delete OpenClaw session directories. |
+| **Webhook/HTTP callback endpoints** | AOF is filesystem-based, single-machine, no HTTP server. Health endpoint uses Unix socket. Adding HTTP callbacks violates architecture constraints. | Deliver callbacks via `GatewayAdapter.spawnSession()` — the existing dispatch path. |
+| **Real-time push (WebSocket/SSE)** | Agents are spawned sessions, not persistent processes. No long-lived connections to push to. The MCP `SubscriptionManager` handles real-time for MCP clients — that is a different layer for a different audience. | Scheduler poll-based delivery. Callbacks arrive as new sessions. |
+| **LLM-driven notification routing** | "Let an LLM decide who to notify" violates the deterministic control plane constraint. | Subscriptions are explicit. Subscriber ID recorded at subscribe time. No inference. |
+| **Email/Slack/Matrix callback delivery** | The existing `NotificationService` handles system-level operator alerts to channels. Task-to-agent callbacks are a different concern — they must spawn agent sessions, not send messages to humans. | Keep `NotificationService` for operator alerts. Subscription system delivers to agents via session dispatch. |
+| **Separate subscription database (SQLite)** | Tempting for query-based subscriptions. Violates filesystem-only constraint. Adds operational complexity. | Store subscriptions in task frontmatter YAML. One file, one source of truth per task. |
+| **Exactly-once delivery** | Impossible without distributed transactions. Not worth the complexity for a single-machine filesystem system. | At-least-once with idempotent agents. Document in SKILL.md: "You may receive duplicate callbacks. Check if you already processed the source task." |
+| **Nested session callbacks** | OpenClaw does not support nested agent sessions. Cannot deliver a callback into a running session. | Callbacks are independent sessions dispatched by the scheduler. The subscribing agent is NOT currently running — it receives a new session. |
+| **Persistent agent mailbox** | Building a queue of undelivered messages for each agent. Over-engineers the problem. | Subscriptions live on the source task. Scheduler scans completed tasks for pending subscriptions. No separate per-agent queue needed. |
 
 ---
 
 ## Feature Dependencies
 
 ```
-Completion enforcement ------> (independent, no deps -- change fallback behavior)
-SKILL.md guidance -----------> (independent, no deps -- text changes)
-
-Session trace capture -------> Trace file storage (need somewhere to write extracted traces)
-Trace file storage ----------> Trace CLI (CLI reads stored trace.json files)
-Trace file storage ----------> No-op detection (needs structured tool call data)
-Trace file storage ----------> Trace event emission (emit events based on trace analysis)
-Trace file storage ----------> Debug flag on tasks (controls what gets stored in trace)
-
-Trace file storage ----------> Retry-aware trace accumulation (store trace history)
-Retry-aware accumulation ----> Prior-failure injection (inject history into task prompt)
+aof_dispatch `notify` param ──> Subscription schema in TaskFrontmatter
+                                    |
+aof_subscribe tool (later) ────────>|
+                                    |
+                                    v
+                          Subscription persistence (in task YAML)
+                                    |
+                                    v
+                          State transition detection
+                          (scheduler checks completed tasks for pending subs)
+                                    |
+                                    v
+                          NotificationContext builder
+                          (assemble payload: source task, status, summary, outputs)
+                                    |
+                                    v
+                          Scheduler notification delivery
+                          (new phase in poll loop: scan + dispatch callbacks)
+                                    |
+                                    v
+                          GatewayAdapter.spawnSession (callback delivery)
+                                    |
+                                    v
+                          Delivery tracking
+                          (mark subscription delivered/failed in task frontmatter)
 ```
 
 ### Build Order Implications
 
-1. **Completion enforcement and SKILL.md are independent** -- can ship as a quick fix before any trace infrastructure exists. Highest ROI, lowest effort.
-2. **Session trace capture -> Trace file storage is the critical path** -- everything else depends on having structured trace data.
-3. **Trace CLI is the user-visible payoff** -- should come immediately after trace storage works.
-4. **Retry-aware accumulation and prior-failure injection are a paired feature** -- defer together if needed.
+1. **Subscription schema must come first** — everything reads/writes this schema.
+2. **`aof_dispatch` notify param is the primary entry point** — agents need a way to create subscriptions.
+3. **State transition detection and notification delivery are the scheduler changes** — the core engine. Must be in the same phase since detection without delivery is useless.
+4. **NotificationContext builder is the payload** — follows `HopContext` pattern from DAG workflows. Required for delivery to be meaningful.
+5. **Delivery tracking closes the loop** — marks subscriptions delivered, prevents re-fire.
+6. **`aof_subscribe` tool is additive** — can ship after the core loop works.
 
 ---
 
 ## MVP Recommendation
 
-### Phase 1: Stop the bleeding (completion enforcement)
+### Phase 1: Foundation (schema + subscribe API)
 
-1. **Completion enforcement** -- Change `onRunComplete` fallback to block instead of auto-complete.
-2. **SKILL.md completion guidance** -- Add explicit instructions about meaningful completion reports.
-3. **Update `formatTaskInstruction()`** -- Reinforce consequences of not calling `aof_task_complete`.
+1. **Subscription schema** in `TaskFrontmatter` — `TaskSubscription` Zod schema, `subscriptions` array field, schema version consideration.
+2. **`notify` parameter on `aof_dispatch`** — When present, write subscription to created task's frontmatter alongside task creation.
+3. **Event type additions** — Add `notification.pending`, `notification.delivered`, `notification.failed` to `EventType` enum.
 
-Rationale: Immediately stops hallucinated completions. No new infrastructure needed.
+Rationale: Establishes the data model. Agents can start creating subscriptions even before delivery works.
 
-### Phase 2: See what happened (trace infrastructure)
+### Phase 2: Delivery engine (scheduler + context)
 
-4. **Session trace capture** -- Parse OpenClaw session JSONL, extract tool calls.
-5. **Trace file storage** -- Write `trace.json` to task directory.
-6. **No-op detection** -- Flag suspicious sessions automatically.
-7. **Trace event emission** -- Integrate flags with existing event system.
+4. **NotificationContext builder** — Assemble callback payload: source task ID, title, final status, completion summary, outputs. Follow `HopContext` / `buildHopContext()` pattern.
+5. **Scheduler notification delivery phase** — New step in poll loop: scan tasks in terminal states (`done`, `cancelled`, `deadletter`) for pending subscriptions. For each, spawn callback session to subscriber agent. Mark delivered on success.
+6. **Delivery failure handling** — Track delivery failures per subscription. Retry up to 3 times. Mark `"failed"` after exhausting retries. Emit `notification.failed` event.
 
-Rationale: Core trace infrastructure. After this phase, every agent session produces structured observability data.
+Rationale: The core engine. After this phase, the full subscribe-trigger-deliver loop works end-to-end.
 
-### Phase 3: Investigate (CLI + debug)
+### Phase 3: Polish (additional APIs + SKILL.md)
 
-8. **Trace CLI** -- `aof trace <task-id>` with summary and `--debug` modes.
-9. **Debug flag on tasks** -- Per-task verbosity control for full reasoning capture.
+7. **`aof_subscribe` tool** — Subscribe to tasks not created by the current agent. Separate MCP tool.
+8. **SKILL.md callback guidance** — Document callback behavior: "You may be spawned as a notification callback. Check the notification context to understand why."
+9. **`all` granularity delivery** — Batch state transitions into single callback per poll cycle for `"all"` subscriptions.
 
-Rationale: Makes trace data accessible to operators. The payoff for phases 1-2.
+Rationale: Expands the API surface and handles the less common use cases.
 
-### Defer to v1.6:
-
-- **Retry-aware trace accumulation** -- Valuable but adds complexity to trace storage schema.
-- **Prior-failure injection** -- Depends on retry-aware accumulation.
-- **Trace retention policy** -- Not urgent until disk usage becomes a concern.
-
----
-
-## Complexity Budget
-
-| Feature | Estimated Effort | Risk |
-|---------|-----------------|------|
-| Completion enforcement | 1-2 hours | Low -- surgical change in existing callback |
-| SKILL.md updates | 30 min | Low -- must fit token budget (verified: ~485 tokens headroom) |
-| formatTaskInstruction update | 15 min | Low -- one string change |
-| Session trace capture | 4-6 hours | Medium -- JSONL streaming parser, edge cases (missing files, `.deleted` suffix, large files) |
-| Trace file storage (schema + writer) | 2-3 hours | Low -- follows `RunArtifact` pattern |
-| No-op detection | 1 hour | Low -- counting logic on extracted trace data |
-| Trace event emission | 1 hour | Low -- extends existing EventLogger |
-| Trace CLI | 3-4 hours | Low -- follows existing CLI patterns (Commander.js) |
-| Debug flag | 1 hour | Low -- metadata field + conditional in trace capture |
-| **Total MVP (Phases 1-3)** | **~2-3 days** | |
+### Defer:
+- **Filtered subscriptions** — Easy schema extension, add when agents request it
+- **Batch coalescing** — Premature optimization unless session spawn cost proves problematic
+- **Query-based subscriptions** — Fundamentally different model, v2
+- **Unsubscribe** — Edge case, add on demand
 
 ---
 
 ## Key Observations from Codebase
 
-1. **The hallucination pathway is exactly identified.** `assign-executor.ts` lines 191-195: `outcome.success` triggers `review -> done` without any verification of what the agent actually did. The fix is a two-line change.
+1. **DAG hop dispatch is the closest analogue.** `dispatchDAGHop()` in `dag-transition-handler.ts` already builds context, spawns a session, and updates state atomically on success. Notification delivery should follow this exact pattern.
 
-2. **Session file path is available at spawn time.** `OpenClawAdapter` already calls `ext.resolveSessionFilePath(sessionId)` (line 107). The session ID is stored in task metadata (line 236). Path resolution is a solved problem.
+2. **The scheduler poll loop is the natural home.** The scheduler already scans all tasks, checks leases, promotes tasks, and dispatches work. Adding a "check pending notifications" phase fits cleanly after completion processing.
 
-3. **Session JSONL is well-structured and parseable.** Verified from real data: `type: "message"` entries contain `toolCall` and `toolResult` content blocks with tool names. Categories can be derived from tool names (`aof_*`, `exec`, `read`, `write`, `web_fetch`, etc.).
+3. **Existing `NotificationService` is for operators, not agents.** It routes to channels (`#aof-dispatch`, `#aof-alerts`), deduplicates, and formats human-readable messages. Task-to-agent callbacks are a completely separate system despite sharing the word "notification."
 
-4. **Session files vary wildly in size.** From 2KB (quick tasks) to 1MB+ (complex debugging sessions). Must use streaming JSONL parser (readline), not `JSON.parse(readFile())`.
+4. **MCP `SubscriptionManager` is for MCP resource changes, not task outcomes.** It watches the filesystem and sends `notifications/resources/updated` to MCP clients. Different audience, different mechanism. No code reuse.
 
-5. **Some session files have `.deleted.*` suffix.** OpenClaw appears to soft-delete sessions by renaming. Trace capture must handle this: try the canonical path first, then glob for `<sessionId>.jsonl.deleted.*`.
+5. **Task frontmatter is the right persistence layer.** Subscriptions are per-task data. Storing them in frontmatter means they are: persisted atomically with the task, visible in task files, backed up with tasks, cleaned up when tasks are archived.
 
-6. **Token budget is tight but sufficient.** Full SKILL.md is 1665 tokens. Budget ceiling is 2150. That leaves ~485 tokens for additions. The proposed ~50 token addition fits comfortably.
+6. **`write-file-atomic` is already used everywhere.** The delivery tracking update (marking subscription as delivered) uses the same atomic write pattern as DAG state persistence.
 
-7. **Existing run artifact pattern is the template.** `run.json`, `run_result.json`, `run_heartbeat.json` already live in task directories with Zod schemas and atomic writes. `trace.json` follows the identical pattern.
+7. **The `onRunComplete` callback fires AFTER task completion.** This is where completion enforcement runs. It is also where notification checks should trigger — detecting that a task reached a terminal state.
 
-8. **The `onRunComplete` callback is the natural hook.** It already fires after agent completion with `AgentRunOutcome`. Adding trace capture here means: agent finishes -> read session JSONL -> extract trace -> write `trace.json` -> check flags -> emit events -> apply completion enforcement logic.
+8. **Schema version may need a bump.** Adding `subscriptions` to frontmatter is a schema extension. However, it defaults to `[]`, so old tasks parse fine without migration. A migration may not be needed if the field is optional with a default.
 
 ---
 
 ## Sources
 
-- Codebase: `src/dispatch/assign-executor.ts` lines 181-226 -- fallback completion logic (HIGH confidence, examined directly)
-- Codebase: `src/openclaw/openclaw-executor.ts` -- session lifecycle, `resolveSessionFilePath`, `runAgentBackground` (HIGH confidence)
-- Codebase: `src/schemas/run.ts`, `src/schemas/run-result.ts` -- existing run artifact schemas (HIGH confidence)
-- Codebase: `src/events/logger.ts` -- JSONL event infrastructure (HIGH confidence)
-- Codebase: `skills/aof/SKILL.md` -- current agent instructions, 1665 tokens (HIGH confidence)
-- Codebase: `skills/aof/SKILL-SEED.md` -- seed tier instructions (HIGH confidence)
-- Codebase: `src/mcp/tools.ts` -- `aof_task_complete` tool registration and schema (HIGH confidence)
-- Real data: `~/.openclaw/agents/swe-backend/sessions/*.jsonl` -- verified JSONL format, message types, tool call structure (HIGH confidence)
-- Real data: 244 session files observed for swe-backend agent, sizes 2KB-1MB (HIGH confidence)
+- AOF codebase: `src/schemas/task.ts` — task frontmatter schema, valid transitions, terminal states (HIGH confidence)
+- AOF codebase: `src/dispatch/dag-transition-handler.ts` — analogous pattern for hop dispatch with context, spawn, atomic state update (HIGH confidence)
+- AOF codebase: `src/dispatch/scheduler.ts` — poll loop structure, action types, scheduler config (HIGH confidence)
+- AOF codebase: `src/events/notifier.ts` — existing notification service for operator alerts, NOT agent callbacks (HIGH confidence)
+- AOF codebase: `src/mcp/subscriptions.ts` — MCP resource subscriptions, different layer (HIGH confidence)
+- AOF codebase: `src/mcp/tools.ts` — dispatch input schema, tool registration pattern (HIGH confidence)
+- AOF codebase: `src/dispatch/executor.ts` — `GatewayAdapter` interface, `TaskContext`, `SpawnResult` (HIGH confidence)
+- AOF codebase: `src/dispatch/aof-dispatch.ts` — dispatch flow: get task, assemble context, transition, spawn (HIGH confidence)
+- [At-Least-Once Delivery patterns](https://www.cloudcomputingpatterns.org/at_least_once_delivery/) — delivery guarantee design (MEDIUM confidence)
+- [You Cannot Have Exactly-Once Delivery](https://bravenewgeek.com/you-cannot-have-exactly-once-delivery/) — rationale for at-least-once (MEDIUM confidence)
+- [AI Agent Orchestration Patterns - Azure](https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/ai-agent-design-patterns) — event-driven agent communication patterns (MEDIUM confidence)
 
 ---
-*Feature research for: AOF v1.5 Event Tracing & Session Observability*
-*Researched: 2026-03-06*
+*Feature research for: AOF v1.8 Task Notifications & Callback Delivery*
+*Researched: 2026-03-09*
