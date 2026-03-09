@@ -1,5 +1,39 @@
 # Changelog
 
+## [1.7.0](https://github.com/d0labs/aof/compare/v1.6.2...v1.7.0) (2026-03-09)
+
+### Features
+
+* **25-01:** implement DAG hop completion enforcement ([0c4e90c](https://github.com/d0labs/aof/commit/0c4e90caffa65cf1860fe6e4729bb6ac417d06b7))
+* **25-01:** implement top-level completion enforcement ([d900b8c](https://github.com/d0labs/aof/commit/d900b8c9cb311c10ba7b4389302de4adb72097ed))
+* **25-02:** add completion protocol section to SKILL.md ([f0050a0](https://github.com/d0labs/aof/commit/f0050a0de7fc3876922a7f3963ac59d011422c32))
+* **25-02:** enhance formatTaskInstruction with enforcement consequences ([8c696ba](https://github.com/d0labs/aof/commit/8c696ba08ac7ffedb0a852eab2fddee98daedcd2))
+* **26-01:** implement no-op detector ([ba9aa7a](https://github.com/d0labs/aof/commit/ba9aa7af50d8c945092fd422c7c15d963fb52346))
+* **26-01:** implement trace schema and session parser ([f869fed](https://github.com/d0labs/aof/commit/f869fed3efbf777eafb117615abeb451c3e6a788))
+* **26-02:** implement trace writer and add trace event types ([43f9bb4](https://github.com/d0labs/aof/commit/43f9bb41ea59eab349987638edef2d33467b0c70))
+* **26-02:** wire captureTrace into onRunComplete callbacks ([02d169b](https://github.com/d0labs/aof/commit/02d169bb62b7e99ba0f5c9a973d359976010c866))
+* **27-01:** add trace formatter with TDD ([30bf89d](https://github.com/d0labs/aof/commit/30bf89d741a1b7b424ca7a3d09ecf8b3d023036e))
+* **27-01:** add trace reader with TDD ([755f088](https://github.com/d0labs/aof/commit/755f0886699d7353cfdc29fd217311f9f3be2717))
+* **27-02:** register trace command in program.ts ([5c3e0de](https://github.com/d0labs/aof/commit/5c3e0de5a2fbfb329fca967f10bd4cffb32d49a7))
+* **27-02:** trace CLI command with DAG hop correlation ([b428a44](https://github.com/d0labs/aof/commit/b428a440e60020478e5fd270f8599524be8a32ac))
+
+### Bug Fixes
+
+* **26-01:** resolve TypeScript error in session-parser toolResult handling ([c52879d](https://github.com/d0labs/aof/commit/c52879dbf2ff17a3c45b9c412b1a23c2bbc0ac87))
+* **26-02:** resolve TypeScript errors in trace integration hooks ([89937e9](https://github.com/d0labs/aof/commit/89937e92c4b147cd1603d1e015cc93e4a807002a))
+* **27-01:** add non-null assertion for regex capture group ([7da82bf](https://github.com/d0labs/aof/commit/7da82bfb258ddf69e3b1fcf64ef92ef30b7812e0))
+* **27:** resolve TypeScript strict null check errors in trace modules ([2a71c5f](https://github.com/d0labs/aof/commit/2a71c5f2e7067eb216c998ede99cf33dd12d6e5d))
+
+### Tests
+
+* **25-01:** add failing tests for DAG hop completion enforcement ([63e114d](https://github.com/d0labs/aof/commit/63e114d6cdd768f071fe8d95e550ee77d861d8ec))
+* **25-01:** add failing tests for top-level completion enforcement ([cfbfd07](https://github.com/d0labs/aof/commit/cfbfd0769da1f767e2e5264ba2e7dec41d9efb77))
+* **25-02:** add failing test for SKILL.md completion protocol content ([adf0713](https://github.com/d0labs/aof/commit/adf0713603d6993e6a4bdfe630c13cf3c3d34bae))
+* **25-02:** add failing tests for formatTaskInstruction enforcement ([7497dd7](https://github.com/d0labs/aof/commit/7497dd78d89d7d89e799747cd5f0f7b63285f820))
+* **26-01:** add failing tests for no-op detector ([66bd381](https://github.com/d0labs/aof/commit/66bd381eb9648765381588ede6124f07bac7fdf1))
+* **26-01:** add failing tests for trace schema and session parser ([8cee2f7](https://github.com/d0labs/aof/commit/8cee2f717dd5efca580189b502751b1587c99e1a))
+* **26-02:** add failing tests for trace writer ([e9e85bc](https://github.com/d0labs/aof/commit/e9e85bcc8fb9749014c5ac47e78fc8e1da2a7599))
+
 ## [1.6.1](https://github.com/d0labs/aof/compare/v1.6.0...v1.6.1) (2026-03-05)
 
 ### Bug Fixes

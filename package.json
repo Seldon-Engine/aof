@@ -1,6 +1,6 @@
 {
   "name": "aof",
-  "version": "1.6.2",
+  "version": "1.7.0",
   "description": "Agentic Ops Fabric — deterministic orchestration for multi-agent systems",
   "type": "module",
   "engines": {
