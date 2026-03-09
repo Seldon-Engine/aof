@@ -8,6 +8,7 @@
 - ✅ **v1.3 Seamless Upgrade** — Phases 17-20 (shipped 2026-03-04)
 - ✅ **v1.4 Context Optimization** — Phases 21-24 (shipped 2026-03-04)
 - ✅ **v1.5 Event Tracing** — Phases 25-27 (shipped 2026-03-08)
+- 🚧 **v1.8 Task Notifications** — Phases 28-32 (in progress)
 
 ## Phases
 
@@ -86,7 +87,77 @@ See: `.planning/milestones/v1.5-ROADMAP.md` for full details
 
 </details>
 
+### 🚧 v1.8 Task Notifications (In Progress)
+
+**Milestone Goal:** Let agents subscribe to task outcomes and receive callbacks, eliminating the dependent-task polling workaround.
+
+- [ ] **Phase 28: Schema and Storage** - Subscription data model, Zod schema, and co-located filesystem persistence
+- [ ] **Phase 29: Subscription API** - MCP tools for creating and canceling subscriptions (dispatch-time and standalone)
+- [ ] **Phase 30: Callback Delivery** - Scheduler-driven callback dispatch with retry and tracing
+- [ ] **Phase 31: Granularity, Safety, and Hardening** - All-transitions granularity, loop prevention, and restart durability
+- [ ] **Phase 32: Agent Guidance** - SKILL.md update with callback behavior and idempotency expectations
+
+## Phase Details
+
+### Phase 28: Schema and Storage
+**Goal**: Subscription data can be created, read, updated, and deleted with schema validation and crash-safe persistence
+**Depends on**: Nothing (first phase of v1.8)
+**Requirements**: SUB-04
+**Success Criteria** (what must be TRUE):
+  1. A `TaskSubscription` Zod schema exists that validates subscriber agent, granularity level, and subscription state
+  2. Subscriptions are persisted as co-located `subscriptions.json` files in task artifact directories
+  3. Subscription writes are atomic (crash during write does not corrupt existing data)
+  4. Subscription CRUD operations (create, read, list, delete) work via a `SubscriptionStore` class
+**Plans**: TBD
+
+### Phase 29: Subscription API
+**Goal**: Agents can subscribe to task outcomes through MCP tools -- at dispatch time or after
+**Depends on**: Phase 28
+**Requirements**: SUB-01, SUB-02, SUB-03
+**Success Criteria** (what must be TRUE):
+  1. Agent can pass a `subscribe` parameter on `aof_dispatch` to subscribe to the created task's outcomes in a single atomic call
+  2. Agent can subscribe to an already-existing task via `aof_task_subscribe` tool
+  3. Agent can cancel a subscription via `aof_task_unsubscribe` tool
+  4. Subscribing to an already-terminal task triggers immediate catch-up delivery (no silent miss)
+**Plans**: TBD
+
+### Phase 30: Callback Delivery
+**Goal**: Subscribed agents receive callback sessions with task results when subscribed events fire
+**Depends on**: Phase 29
+**Requirements**: DLVR-01, DLVR-02, DLVR-03, DLVR-04, GRAN-01
+**Success Criteria** (what must be TRUE):
+  1. When a subscribed task reaches a terminal state (done/cancelled/deadletter), the scheduler spawns a new session to the subscriber agent with task outcome as context
+  2. Failed callback deliveries retry up to 3 times before marking the subscription as failed
+  3. Callback sessions produce traces (trace-N.json) like normal dispatches
+  4. Callback delivery never blocks or delays the underlying task's state transition
+  5. Completion-granularity subscriptions fire exactly once per terminal state transition
+**Plans**: TBD
+
+### Phase 31: Granularity, Safety, and Hardening
+**Goal**: All-transitions granularity works with batching, callback loops are impossible, and pending deliveries survive daemon restarts
+**Depends on**: Phase 30
+**Requirements**: GRAN-02, SAFE-01, SAFE-02
+**Success Criteria** (what must be TRUE):
+  1. `"all"` granularity subscriptions fire on every state transition, with transitions batched per poll cycle into a single callback
+  2. Callback chains cannot loop infinitely -- depth counter or cross-cycle delivery prevents runaway cascades
+  3. Pending subscription deliveries are re-evaluated on daemon startup (no lost callbacks across restarts)
+  4. A callback-spawned task that itself triggers a callback respects a maximum depth limit
+**Plans**: TBD
+
+### Phase 32: Agent Guidance
+**Goal**: Agents understand how to use and respond to callbacks through updated standing context
+**Depends on**: Phase 31
+**Requirements**: GUID-01
+**Success Criteria** (what must be TRUE):
+  1. SKILL.md documents the `subscribe` parameter on `aof_dispatch` and the `aof_task_subscribe` / `aof_task_unsubscribe` tools
+  2. SKILL.md explains idempotency expectations for callback handlers (at-least-once delivery means agents may receive duplicate callbacks)
+  3. Budget gate CI test still passes after SKILL.md update (context size stays under ceiling)
+**Plans**: TBD
+
 ## Progress
+
+**Execution Order:**
+Phases execute in numeric order: 28 -> 29 -> 30 -> 31 -> 32
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -117,3 +188,8 @@ See: `.planning/milestones/v1.5-ROADMAP.md` for full details
 | 25. Completion Enforcement | v1.5 | 2/2 | Complete | 2026-03-07 |
 | 26. Trace Infrastructure | v1.5 | 2/2 | Complete | 2026-03-08 |
 | 27. Trace CLI | v1.5 | 2/2 | Complete | 2026-03-08 |
+| 28. Schema and Storage | v1.8 | 0/? | Not started | - |
+| 29. Subscription API | v1.8 | 0/? | Not started | - |
+| 30. Callback Delivery | v1.8 | 0/? | Not started | - |
+| 31. Granularity, Safety, and Hardening | v1.8 | 0/? | Not started | - |
+| 32. Agent Guidance | v1.8 | 0/? | Not started | - |

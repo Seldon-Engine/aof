@@ -1,7 +1,7 @@
 # Requirements: AOF v1.8 Task Notifications
 
 **Defined:** 2026-03-09
-**Core Value:** Tasks never get dropped — they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
+**Core Value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
 
 ## v1.8 Requirements
 
@@ -67,25 +67,25 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SUB-01 | — | Pending |
-| SUB-02 | — | Pending |
-| SUB-03 | — | Pending |
-| SUB-04 | — | Pending |
-| DLVR-01 | — | Pending |
-| DLVR-02 | — | Pending |
-| DLVR-03 | — | Pending |
-| DLVR-04 | — | Pending |
-| GRAN-01 | — | Pending |
-| GRAN-02 | — | Pending |
-| GUID-01 | — | Pending |
-| SAFE-01 | — | Pending |
-| SAFE-02 | — | Pending |
+| SUB-01 | Phase 29 | Pending |
+| SUB-02 | Phase 29 | Pending |
+| SUB-03 | Phase 29 | Pending |
+| SUB-04 | Phase 28 | Pending |
+| DLVR-01 | Phase 30 | Pending |
+| DLVR-02 | Phase 30 | Pending |
+| DLVR-03 | Phase 30 | Pending |
+| DLVR-04 | Phase 30 | Pending |
+| GRAN-01 | Phase 30 | Pending |
+| GRAN-02 | Phase 31 | Pending |
+| GUID-01 | Phase 32 | Pending |
+| SAFE-01 | Phase 31 | Pending |
+| SAFE-02 | Phase 31 | Pending |
 
 **Coverage:**
 - v1.8 requirements: 13 total
-- Mapped to phases: 0
-- Unmapped: 13 ⚠️
+- Mapped to phases: 13
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-09*
-*Last updated: 2026-03-09 after initial definition*
+*Last updated: 2026-03-09 after roadmap creation*
