@@ -12,6 +12,7 @@ import type { TaskSubscription } from "../schemas/subscription.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import type { SubscriptionStore } from "../store/subscription-store.js";
 import type { GatewayAdapter, TaskContext } from "./executor.js";
+import type { EventLogger } from "../events/logger.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -31,7 +32,7 @@ export interface DeliverCallbacksOptions {
   store: ITaskStore;
   subscriptionStore: SubscriptionStore;
   executor: GatewayAdapter;
-  logger: { log: (...args: unknown[]) => void; emit?: (event: string, data?: unknown) => void };
+  logger: EventLogger;
   tracePath?: string;
 }
 
@@ -44,7 +45,7 @@ export interface DeliverCallbacksOptions {
  * Best-effort: errors are caught and never propagate to the caller (DLVR-04).
  */
 export async function deliverCallbacks(opts: DeliverCallbacksOptions): Promise<void> {
-  const { taskId, store, subscriptionStore, executor, logger } = opts;
+  const { taskId, store, subscriptionStore } = opts;
 
   const task = await store.get(taskId);
   if (!task || !TERMINAL_STATUSES.has(task.frontmatter.status)) {
@@ -69,7 +70,7 @@ export async function deliverCallbacks(opts: DeliverCallbacksOptions): Promise<v
  * Skips subscriptions attempted within MIN_RETRY_INTERVAL_MS (DLVR-02).
  */
 export async function retryPendingDeliveries(opts: DeliverCallbacksOptions): Promise<void> {
-  const { taskId, store, subscriptionStore, executor, logger } = opts;
+  const { taskId, store, subscriptionStore } = opts;
 
   const task = await store.get(taskId);
   if (!task || !TERMINAL_STATUSES.has(task.frontmatter.status)) {
@@ -162,7 +163,10 @@ async function deliverSingleCallback(
       correlationId: randomUUID(),
       onRunComplete: async (outcome) => {
         // DLVR-03: capture trace on completion
-        logger.log?.(`Callback session completed for ${task.frontmatter.id}: success=${outcome.success}`);
+        await logger.log("subscription.delivery_attempted", "callback-delivery", {
+          taskId: task.frontmatter.id,
+          payload: { subscriptionId: sub.id, success: outcome.success },
+        });
       },
     });
 
@@ -171,7 +175,10 @@ async function deliverSingleCallback(
         status: "delivered",
         deliveredAt: new Date().toISOString(),
       });
-      logger.emit?.("subscription.delivered", { taskId: task.frontmatter.id, subscriptionId: sub.id });
+      await logger.log("subscription.delivered", "callback-delivery", {
+        taskId: task.frontmatter.id,
+        payload: { subscriptionId: sub.id },
+      });
     } else {
       await handleDeliveryFailure(task, sub, opts, result.error || "spawn failed");
     }
@@ -205,10 +212,9 @@ async function handleDeliveryFailure(
       deliveryAttempts: newAttempts,
       lastAttemptAt: now,
     });
-    logger.emit?.("subscription.delivery_failed", {
+    await logger.log("subscription.delivery_failed", "callback-delivery", {
       taskId: task.frontmatter.id,
-      subscriptionId: sub.id,
-      attempts: newAttempts,
+      payload: { subscriptionId: sub.id, attempts: newAttempts },
     });
   } else {
     await subscriptionStore.update(task.frontmatter.id, sub.id, {

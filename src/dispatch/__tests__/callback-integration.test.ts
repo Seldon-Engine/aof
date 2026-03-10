@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { FilesystemTaskStore } from "../../store/task-store.js";
 import type { ITaskStore } from "../../store/interfaces.js";
 import { EventLogger } from "../../events/logger.js";
-import { SubscriptionStore } from "../../store/subscription-store.js";
+
 
 // Mock callback-delivery module so we can spy on calls
 vi.mock("../callback-delivery.js", () => ({
@@ -106,7 +106,6 @@ describe("callback integration: onRunComplete", () => {
     };
 
     await executeAssignAction(action, store, logger, {
-      dataDir,
       dryRun: false,
       defaultLeaseTtlMs: 60_000,
       executor: adapter,
@@ -144,10 +143,6 @@ describe("callback integration: onRunComplete", () => {
       callOrder.push("deliverCallbacks");
     });
 
-    // Mock captureTrace at module level to track order
-    const { captureTrace } = await import("../../trace/trace-writer.js");
-    const originalCaptureTrace = captureTrace;
-
     // We can verify ordering by checking that deliverCallbacks is called
     // (trace capture runs before it in the code path)
     const task = await store.create({
@@ -161,7 +156,7 @@ describe("callback integration: onRunComplete", () => {
     await executeAssignAction(
       { type: "assign", taskId: task.frontmatter.id, taskTitle: "Order test", agent: "swe-backend", reason: "test" },
       store, logger,
-      { dataDir, dryRun: false, defaultLeaseTtlMs: 60_000, executor: adapter },
+      { dryRun: false, defaultLeaseTtlMs: 60_000, executor: adapter },
       [task], { value: null },
     );
 
@@ -195,7 +190,7 @@ describe("callback integration: onRunComplete", () => {
     await executeAssignAction(
       { type: "assign", taskId: task.frontmatter.id, taskTitle: "Error test", agent: "swe-backend", reason: "test" },
       store, logger,
-      { dataDir, dryRun: false, defaultLeaseTtlMs: 60_000, executor: adapter },
+      { dryRun: false, defaultLeaseTtlMs: 60_000, executor: adapter },
       [task], { value: null },
     );
 

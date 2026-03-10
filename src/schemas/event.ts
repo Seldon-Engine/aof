@@ -147,6 +147,11 @@ export const EventType = z.enum([
   "dag.hop_timeout_escalation",
   "dag.hop_rejected",
   "dag.hop_rejection_cascade",
+
+  // Subscription delivery (Phase 30)
+  "subscription.delivered",
+  "subscription.delivery_failed",
+  "subscription.delivery_attempted",
 ]);
 export type EventType = z.infer<typeof EventType>;
 
