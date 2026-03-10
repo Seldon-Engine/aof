@@ -23,6 +23,8 @@ import type { TaskContext } from "./executor.js";
 import { classifySpawnError } from "./scheduler-helpers.js";
 import { trackDispatchFailure, shouldTransitionToDeadletter, transitionToDeadletter } from "./failure-tracker.js";
 import { captureTrace } from "../trace/trace-writer.js";
+import { deliverCallbacks } from "./callback-delivery.js";
+import { SubscriptionStore } from "../store/subscription-store.js";
 
 /**
  * Load project manifest from disk.
@@ -199,6 +201,26 @@ export async function executeAssignAction(
           } catch {
             // Trace capture must never crash the scheduler
           }
+
+          // --- Callback delivery (Phase 30) --- best-effort, never blocks transitions
+          try {
+            const tasksDir = store.tasksDir;
+            const taskDirResolver = async (tid: string): Promise<string> => {
+              const t = await store.get(tid);
+              if (!t) throw new Error(`Task not found: ${tid}`);
+              return join(tasksDir, t.frontmatter.status, tid);
+            };
+            const subscriptionStore = new SubscriptionStore(taskDirResolver);
+            await deliverCallbacks({
+              taskId: action.taskId,
+              store,
+              subscriptionStore,
+              executor: config.executor!,
+              logger,
+            });
+          } catch {
+            // Delivery must never crash the scheduler
+          }
           return;
         }
 
@@ -282,6 +304,26 @@ export async function executeAssignAction(
           }
         } catch {
           // Trace capture must never crash the scheduler
+        }
+
+        // --- Callback delivery (Phase 30) --- best-effort, never blocks transitions
+        try {
+          const tasksDir2 = store.tasksDir;
+          const taskDirResolver2 = async (tid: string): Promise<string> => {
+            const t = await store.get(tid);
+            if (!t) throw new Error(`Task not found: ${tid}`);
+            return join(tasksDir2, t.frontmatter.status, tid);
+          };
+          const subscriptionStore2 = new SubscriptionStore(taskDirResolver2);
+          await deliverCallbacks({
+            taskId: action.taskId,
+            store,
+            subscriptionStore: subscriptionStore2,
+            executor: config.executor!,
+            logger,
+          });
+        } catch {
+          // Delivery must never crash the scheduler
         }
       },
     });

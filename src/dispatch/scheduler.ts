@@ -34,6 +34,8 @@ import { checkPromotionEligibility } from "./promotion.js";
 import { executeActions } from "./action-executor.js";
 import { buildTaskStats, buildChildrenMap, checkExpiredLeases, buildResourceOccupancyMap, checkBacklogPromotion, checkBlockedTaskRecovery } from "./scheduler-helpers.js";
 import { dispatchDAGHop } from "./dag-transition-handler.js";
+import { retryPendingDeliveries } from "./callback-delivery.js";
+import { SubscriptionStore } from "../store/subscription-store.js";
 
 export interface SchedulerConfig {
   /** Root data directory. */
@@ -345,6 +347,35 @@ export async function poll(
             `[AOF] DAG hop dispatch failed for ${dagTask.frontmatter.id}/${readyHopId}: ${(err as Error).message}`
           );
         }
+      }
+    }
+  }
+
+  // 6.6. Callback delivery retry scan (Phase 30)
+  if (!config.dryRun && config.executor) {
+    const tasksDir = store.tasksDir;
+    const taskDirResolver = async (tid: string): Promise<string> => {
+      const t = await store.get(tid);
+      if (!t) throw new Error(`Task not found: ${tid}`);
+      return join(tasksDir, t.frontmatter.status, tid);
+    };
+    const subscriptionStore = new SubscriptionStore(taskDirResolver);
+
+    const terminalTasks = allTasks.filter(t =>
+      ["done", "cancelled", "deadletter"].includes(t.frontmatter.status)
+    );
+
+    for (const task of terminalTasks) {
+      try {
+        await retryPendingDeliveries({
+          taskId: task.frontmatter.id,
+          store,
+          subscriptionStore,
+          executor: config.executor,
+          logger,
+        });
+      } catch {
+        // Delivery retry must never crash the scheduler
       }
     }
   }
