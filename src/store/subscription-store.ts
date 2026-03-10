@@ -89,6 +89,43 @@ export class SubscriptionStore {
   }
 
   /**
+   * Update a subscription's delivery-related fields atomically.
+   * Throws if subscription not found.
+   */
+  async update(
+    taskId: string,
+    subscriptionId: string,
+    fields: Partial<
+      Pick<
+        TaskSubscription,
+        "status" | "deliveredAt" | "failureReason" | "deliveryAttempts" | "lastAttemptAt"
+      >
+    >,
+  ): Promise<TaskSubscription> {
+    const taskDir = await this.taskDirResolver(taskId);
+    const filePath = join(taskDir, SUBSCRIPTIONS_FILENAME);
+    const data = await this.readSubscriptionsFile(filePath);
+
+    const index = data.subscriptions.findIndex((s) => s.id === subscriptionId);
+    if (index === -1) {
+      throw new Error(
+        `Subscription ${subscriptionId} not found for task ${taskId}`,
+      );
+    }
+
+    const now = new Date().toISOString();
+    const updated: TaskSubscription = {
+      ...data.subscriptions[index]!,
+      ...fields,
+      updatedAt: now,
+    };
+    data.subscriptions[index] = updated;
+
+    await this.writeSubscriptionsFile(filePath, data);
+    return updated;
+  }
+
+  /**
    * Cancel a subscription by setting its status to "cancelled".
    * Throws if the subscription is not found.
    */

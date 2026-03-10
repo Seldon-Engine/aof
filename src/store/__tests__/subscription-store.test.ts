@@ -108,6 +108,53 @@ describe("schema", () => {
         expect(result.data.status).toBe("active");
       }
     });
+
+    it("accepts deliveryAttempts (number, default 0) and lastAttemptAt (optional datetime)", () => {
+      const result = TaskSubscription.safeParse({
+        ...validSubscription,
+        deliveryAttempts: 2,
+        lastAttemptAt: "2026-03-09T14:00:00Z",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.deliveryAttempts).toBe(2);
+        expect(result.data.lastAttemptAt).toBe("2026-03-09T14:00:00Z");
+      }
+    });
+
+    it("defaults deliveryAttempts to 0 when omitted", () => {
+      const result = TaskSubscription.safeParse(validSubscription);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.deliveryAttempts).toBe(0);
+      }
+    });
+
+    it("rejects negative deliveryAttempts", () => {
+      const result = TaskSubscription.safeParse({
+        ...validSubscription,
+        deliveryAttempts: -1,
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("parses existing subscriptions without deliveryAttempts with default 0 (backward compat)", () => {
+      // Simulate a subscription stored before deliveryAttempts was added
+      const legacy = {
+        id: "550e8400-e29b-41d4-a716-446655440000",
+        subscriberId: "agent:main",
+        granularity: "completion",
+        status: "active",
+        createdAt: "2026-03-09T12:00:00Z",
+        updatedAt: "2026-03-09T12:00:00Z",
+      };
+      const result = TaskSubscription.safeParse(legacy);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.deliveryAttempts).toBe(0);
+        expect(result.data.lastAttemptAt).toBeUndefined();
+      }
+    });
   });
 
   describe("SubscriptionsFile", () => {
@@ -258,6 +305,37 @@ describe("SubscriptionStore", () => {
     it("throws if subscription not found", async () => {
       await expect(
         store.cancel(taskId, "550e8400-e29b-41d4-a716-446655440000"),
+      ).rejects.toThrow();
+    });
+  });
+
+  describe("update()", () => {
+    it("modifies a subscription's fields and persists atomically", async () => {
+      const created = await store.create(taskId, "agent:main", "completion");
+      const updated = await store.update(taskId, created.id, {
+        status: "delivered",
+        deliveredAt: "2026-03-09T15:00:00Z",
+        deliveryAttempts: 1,
+      });
+      expect(updated.status).toBe("delivered");
+      expect(updated.deliveredAt).toBe("2026-03-09T15:00:00Z");
+      expect(updated.deliveryAttempts).toBe(1);
+      expect(updated.updatedAt).not.toBe(created.updatedAt);
+
+      // Verify persistence by reading with new store instance
+      const store2 = new SubscriptionStore(
+        (id: string) => Promise.resolve(join(tmpDir, "tasks", "ready", id)),
+      );
+      const persisted = await store2.get(taskId, created.id);
+      expect(persisted!.status).toBe("delivered");
+    });
+
+    it("throws if subscription not found", async () => {
+      await store.create(taskId, "agent:main", "completion");
+      await expect(
+        store.update(taskId, "550e8400-e29b-41d4-a716-446655440099", {
+          status: "delivered",
+        }),
       ).rejects.toThrow();
     });
   });
