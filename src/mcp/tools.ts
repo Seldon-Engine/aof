@@ -24,6 +24,8 @@ const dispatchInputSchema = z.object({
   workflow: z.union([z.string(), WorkflowDefinition, z.literal(false)]).optional(),
   /** Context tier for skill injection: 'seed' (minimal) or 'full' (complete). Defaults to 'seed'. */
   contextTier: z.enum(["seed", "full"]).optional(),
+  /** Subscribe to task outcome notifications at dispatch time. */
+  subscribe: z.enum(["completion", "all"]).optional(),
 });
 
 const dispatchOutputSchema = z.object({
@@ -32,6 +34,7 @@ const dispatchOutputSchema = z.object({
   assignedAgent: z.string().optional(),
   filePath: z.string().optional(),
   sessionId: z.string().optional(),
+  subscriptionId: z.string().optional(),
 });
 
 const taskUpdateInputSchema = z.object({
@@ -183,6 +186,20 @@ export async function handleAofDispatch(ctx: AofMcpContext, input: z.infer<typeo
   let status: TaskStatus = "ready";
   let sessionId: string | undefined;
 
+  // Subscribe at dispatch time (before executor dispatch for atomicity)
+  let subscriptionId: string | undefined;
+  if (input.subscribe) {
+    const subscriberId = input.actor ?? "mcp";
+    const existing = await ctx.subscriptionStore.list(task.frontmatter.id, { status: "active" });
+    const duplicate = existing.find(s => s.subscriberId === subscriberId && s.granularity === input.subscribe);
+    if (duplicate) {
+      subscriptionId = duplicate.id;
+    } else {
+      const sub = await ctx.subscriptionStore.create(task.frontmatter.id, subscriberId, input.subscribe);
+      subscriptionId = sub.id;
+    }
+  }
+
   if (ctx.executor) {
     const result: DispatchResult = await aofDispatch({
       taskId: task.frontmatter.id,
@@ -205,6 +222,7 @@ export async function handleAofDispatch(ctx: AofMcpContext, input: z.infer<typeo
     assignedAgent: input.assignedAgent,
     filePath: currentTask.path,
     sessionId,
+    ...(subscriptionId && { subscriptionId }),
   };
 }
 
