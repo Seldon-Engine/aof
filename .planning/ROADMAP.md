@@ -123,7 +123,7 @@ Plans:
   4. Subscribing to an already-terminal task triggers immediate catch-up delivery (no silent miss)
 **Plans**: 1 plan
 Plans:
-- [ ] 29-01-PLAN.md — Wire SubscriptionStore into MCP tools (context, subscribe, unsubscribe, dispatch extension)
+- [x] 29-01-PLAN.md — Wire SubscriptionStore into MCP tools (context, subscribe, unsubscribe, dispatch extension)
 
 ### Phase 30: Callback Delivery
 **Goal**: Subscribed agents receive callback sessions with task results when subscribed events fire
@@ -135,7 +135,10 @@ Plans:
   3. Callback sessions produce traces (trace-N.json) like normal dispatches
   4. Callback delivery never blocks or delays the underlying task's state transition
   5. Completion-granularity subscriptions fire exactly once per terminal state transition
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 30-01-PLAN.md — Schema extension, delivery function, and callback payload builder (TDD)
+- [ ] 30-02-PLAN.md — Wire delivery into onRunComplete, scheduler retry scan, and org chart validation (TDD)
 
 ### Phase 31: Granularity, Safety, and Hardening
 **Goal**: All-transitions granularity works with batching, callback loops are impossible, and pending deliveries survive daemon restarts
@@ -193,7 +196,7 @@ Phases execute in numeric order: 28 -> 29 -> 30 -> 31 -> 32
 | 26. Trace Infrastructure | v1.5 | 2/2 | Complete | 2026-03-08 |
 | 27. Trace CLI | v1.5 | 2/2 | Complete | 2026-03-08 |
 | 28. Schema and Storage | v1.8 | 1/1 | Complete | 2026-03-09 |
-| 29. Subscription API | 1/1 | Complete    | 2026-03-10 | - |
-| 30. Callback Delivery | v1.8 | 0/? | Not started | - |
+| 29. Subscription API | v1.8 | 1/1 | Complete | 2026-03-10 |
+| 30. Callback Delivery | v1.8 | 0/2 | Not started | - |
 | 31. Granularity, Safety, and Hardening | v1.8 | 0/? | Not started | - |
 | 32. Agent Guidance | v1.8 | 0/? | Not started | - |
