@@ -13,6 +13,7 @@ import type { ITaskStore } from "../store/interfaces.js";
 import type { SubscriptionStore } from "../store/subscription-store.js";
 import type { GatewayAdapter, TaskContext } from "./executor.js";
 import type { EventLogger } from "../events/logger.js";
+import { captureTrace } from "../trace/trace-writer.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -34,6 +35,7 @@ export interface DeliverCallbacksOptions {
   executor: GatewayAdapter;
   logger: EventLogger;
   tracePath?: string;
+  debug?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -145,7 +147,7 @@ async function deliverSingleCallback(
   sub: TaskSubscription,
   opts: DeliverCallbacksOptions,
 ): Promise<void> {
-  const { subscriptionStore, executor, logger, tracePath } = opts;
+  const { subscriptionStore, executor, logger, tracePath, debug = false } = opts;
   const prompt = buildCallbackPrompt(task, sub, tracePath);
 
   const context: TaskContext = {
@@ -162,7 +164,21 @@ async function deliverSingleCallback(
       timeoutMs: CALLBACK_TIMEOUT_MS,
       correlationId: randomUUID(),
       onRunComplete: async (outcome) => {
-        // DLVR-03: capture trace on completion
+        // DLVR-03: capture trace on completion (best-effort)
+        try {
+          await captureTrace({
+            taskId: task.frontmatter.id,
+            sessionId: outcome.sessionId,
+            agentId: sub.subscriberId,
+            durationMs: outcome.durationMs,
+            store: opts.store,
+            logger,
+            debug,
+          });
+        } catch (_traceErr) {
+          // Best-effort: trace capture failure must not block delivery
+        }
+
         await logger.log("subscription.delivery_attempted", "callback-delivery", {
           taskId: task.frontmatter.id,
           payload: { subscriptionId: sub.id, success: outcome.success },
