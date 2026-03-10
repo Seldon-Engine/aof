@@ -19,6 +19,14 @@ import {
 } from "../callback-delivery.js";
 import type { Task } from "../../schemas/task.js";
 
+// Mock captureTrace from trace-writer
+vi.mock("../../trace/trace-writer.js", () => ({
+  captureTrace: vi.fn().mockResolvedValue({ success: true, noopDetected: false, tracePath: "/tmp/trace-1.json" }),
+}));
+
+import { captureTrace } from "../../trace/trace-writer.js";
+const mockCaptureTrace = vi.mocked(captureTrace);
+
 // Minimal mock task store
 function createMockTaskStore(task: Task | null) {
   return {
@@ -366,7 +374,7 @@ describe("retryPendingDeliveries", () => {
     expect(executor.spawned).toHaveLength(1);
   });
 
-  it("skips subscriptions where lastAttemptAt is less than 30s ago", async () => {
+  it("skips subscriptions where lastAttemptAt is less than 30s ago (cooldown)", async () => {
     const task = makeTask();
     const store = createMockTaskStore(task);
     const sub = await subscriptionStore.create("TASK-2026-03-10-001", "agent:watcher", "completion");
@@ -385,5 +393,125 @@ describe("retryPendingDeliveries", () => {
     });
 
     expect(executor.spawned).toHaveLength(0);
+  });
+});
+
+describe("captureTrace integration in callback delivery", () => {
+  let tmpDir: string;
+  let subscriptionStore: SubscriptionStore;
+  let executor: MockAdapter;
+  let logger: ReturnType<typeof createMockLogger>;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "aof-cb-trace-"));
+    subscriptionStore = new SubscriptionStore(
+      (id: string) => Promise.resolve(join(tmpDir, "tasks", "ready", id)),
+    );
+    executor = new MockAdapter();
+    logger = createMockLogger();
+    mockCaptureTrace.mockClear();
+    mockCaptureTrace.mockResolvedValue({ success: true, noopDetected: false, tracePath: "/tmp/trace-1.json" });
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("calls captureTrace in onRunComplete with correct options", async () => {
+    const task = makeTask();
+    const store = createMockTaskStore(task);
+    await subscriptionStore.create("TASK-2026-03-10-001", "agent:watcher", "completion");
+
+    await deliverCallbacks({
+      taskId: "TASK-2026-03-10-001",
+      store,
+      subscriptionStore,
+      executor,
+      logger,
+    });
+
+    // Manually invoke onRunComplete (MockAdapter stores but doesn't call it)
+    const onRunComplete = executor.spawned[0].opts?.onRunComplete;
+    expect(onRunComplete).toBeTypeOf("function");
+
+    await onRunComplete!({
+      taskId: "TASK-2026-03-10-001",
+      sessionId: "session-abc",
+      success: true,
+      aborted: false,
+      durationMs: 5000,
+    });
+
+    expect(mockCaptureTrace).toHaveBeenCalledOnce();
+    expect(mockCaptureTrace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: "TASK-2026-03-10-001",
+        sessionId: "session-abc",
+        agentId: "agent:watcher",
+        durationMs: 5000,
+        store,
+        logger,
+        debug: false,
+      }),
+    );
+  });
+
+  it("delivery succeeds even when captureTrace throws", async () => {
+    const task = makeTask();
+    const store = createMockTaskStore(task);
+    mockCaptureTrace.mockRejectedValue(new Error("trace write failed"));
+    const sub = await subscriptionStore.create("TASK-2026-03-10-001", "agent:watcher", "completion");
+
+    await deliverCallbacks({
+      taskId: "TASK-2026-03-10-001",
+      store,
+      subscriptionStore,
+      executor,
+      logger,
+    });
+
+    // Invoke onRunComplete -- captureTrace will throw
+    const onRunComplete = executor.spawned[0].opts?.onRunComplete;
+    await onRunComplete!({
+      taskId: "TASK-2026-03-10-001",
+      sessionId: "session-abc",
+      success: true,
+      aborted: false,
+      durationMs: 5000,
+    });
+
+    // captureTrace was called (even though it failed)
+    expect(mockCaptureTrace).toHaveBeenCalledOnce();
+
+    // The delivery itself still succeeded (subscription marked delivered)
+    const updated = await subscriptionStore.get("TASK-2026-03-10-001", sub.id);
+    expect(updated!.status).toBe("delivered");
+  });
+
+  it("calls captureTrace with debug=false by default", async () => {
+    const task = makeTask();
+    const store = createMockTaskStore(task);
+    await subscriptionStore.create("TASK-2026-03-10-001", "agent:watcher", "completion");
+
+    await deliverCallbacks({
+      taskId: "TASK-2026-03-10-001",
+      store,
+      subscriptionStore,
+      executor,
+      logger,
+    });
+
+    const onRunComplete = executor.spawned[0].opts?.onRunComplete;
+    await onRunComplete!({
+      taskId: "TASK-2026-03-10-001",
+      sessionId: "session-abc",
+      success: true,
+      aborted: false,
+      durationMs: 3000,
+    });
+
+    expect(mockCaptureTrace).toHaveBeenCalledWith(
+      expect.objectContaining({ debug: false }),
+    );
   });
 });
