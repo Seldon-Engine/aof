@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: Task Notifications
 status: completed
-stopped_at: Completed 30-02-PLAN.md
-last_updated: "2026-03-10T13:21:15.338Z"
-last_activity: 2026-03-10 — Completed callback delivery plan 02 (delivery wiring + subscribe validation)
+stopped_at: Completed 30-03-PLAN.md
+last_updated: "2026-03-10T15:53:12Z"
+last_activity: 2026-03-10 — Completed callback delivery plan 03 (captureTrace gap closure)
 progress:
   total_phases: 5
   completed_phases: 3
-  total_plans: 4
-  completed_plans: 4
+  total_plans: 5
+  completed_plans: 5
   percent: 96
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-03-09)
 ## Current Position
 
 Phase: 30 of 32 (Callback Delivery)
-Plan: 2 of 2 complete
+Plan: 3 of 3 complete
 Status: Phase Complete
-Last activity: 2026-03-10 — Completed callback delivery plan 02 (delivery wiring + subscribe validation)
+Last activity: 2026-03-10 — Completed callback delivery plan 03 (captureTrace gap closure)
 
 Progress: [██████████] 96%
 
@@ -51,6 +51,7 @@ All decisions logged in PROJECT.md Key Decisions table.
 - [Phase 30]: Delivery failures tracked with counter+timestamp for retry (30s cooldown, 3 max attempts)
 - [Phase 30]: Delivery triggers inline-construct SubscriptionStore to avoid parameter signature changes
 - [Phase 30]: Org chart validation enforced on all subscribe operations (including default "mcp" subscriberId)
+- [Phase 30]: captureTrace wrapped in try/catch in onRunComplete for best-effort trace capture in callbacks
 
 ### Roadmap Evolution
 
@@ -72,6 +73,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-10T13:21:15.335Z
-Stopped at: Completed 30-02-PLAN.md
+Last session: 2026-03-10T15:53:12Z
+Stopped at: Completed 30-03-PLAN.md
 Resume file: None
