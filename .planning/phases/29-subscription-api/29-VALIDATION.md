@@ -38,12 +38,8 @@ created: 2026-03-09
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
-| 29-01-01 | 01 | 1 | SUB-01, SUB-02, SUB-03 | unit | `npx vitest run src/mcp/__tests__/tools.test.ts` | ❌ W0 | ⬜ pending |
-| 29-02-01 | 02 | 1 | SUB-02 | unit | `npx vitest run src/mcp/__tests__/tools.test.ts -t "aof_task_subscribe"` | ❌ W0 | ⬜ pending |
-| 29-02-02 | 02 | 1 | SUB-02 | unit | `npx vitest run src/mcp/__tests__/tools.test.ts -t "idempotent"` | ❌ W0 | ⬜ pending |
-| 29-03-01 | 03 | 1 | SUB-03 | unit | `npx vitest run src/mcp/__tests__/tools.test.ts -t "aof_task_unsubscribe"` | ❌ W0 | ⬜ pending |
-| 29-04-01 | 04 | 1 | SUB-01 | unit | `npx vitest run src/mcp/__tests__/tools.test.ts -t "dispatch.*subscribe"` | ❌ W0 | ⬜ pending |
-| 29-04-02 | 04 | 1 | SUB-01 | unit | `npx vitest run src/mcp/__tests__/tools.test.ts -t "subscriptionId"` | ❌ W0 | ⬜ pending |
+| 29-01-01 | 01 | 1 | SUB-02, SUB-03 | unit | `npx vitest run src/mcp/__tests__/tools.test.ts -t "subscribe\|unsubscribe"` | ❌ W0 | ⬜ pending |
+| 29-01-02 | 01 | 1 | SUB-01 | unit | `npx vitest run src/mcp/__tests__/tools.test.ts -t "dispatch.*subscribe"` | ❌ W0 | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
