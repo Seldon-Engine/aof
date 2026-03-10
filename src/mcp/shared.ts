@@ -6,6 +6,7 @@ import { EventLogger } from "../events/logger.js";
 import type { GatewayAdapter } from "../dispatch/executor.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { ProjectManifest } from "../schemas/project.js";
+import { SubscriptionStore } from "../store/subscription-store.js";
 
 export interface AofMcpOptions {
   dataDir: string;
@@ -21,12 +22,16 @@ export interface AofMcpOptions {
 
 export interface AofMcpContext {
   dataDir: string;
+  /** Vault root for project-level operations (create, list, add participant). */
+  vaultRoot: string;
   store: ITaskStore;
   logger: EventLogger;
   executor?: GatewayAdapter;
   orgChartPath: string;
   /** Project manifest for template resolution (loaded when projectId is provided). */
   projectConfig?: ProjectManifest;
+  /** Subscription store for task notification subscriptions. */
+  subscriptionStore: SubscriptionStore;
 }
 
 export async function createAofMcpContext(options: AofMcpOptions): Promise<AofMcpContext> {
@@ -68,13 +73,28 @@ export async function createAofMcpContext(options: AofMcpOptions): Promise<AofMc
     orgChartPath = options.orgChartPath ?? join(dataDir, "org", "org-chart.yaml");
   }
 
+  const vaultRoot = options.vaultRoot ?? options.dataDir;
+
+  // Build taskDirResolver for SubscriptionStore
+  const tasksDir = (store as FilesystemTaskStore).tasksDir ?? join(dataDir, "tasks");
+  const taskDirResolver = async (taskId: string): Promise<string> => {
+    const task = await store.get(taskId);
+    if (!task) {
+      throw new Error(`Task not found: ${taskId}`);
+    }
+    return join(tasksDir, task.frontmatter.status, taskId);
+  };
+  const subscriptionStore = new SubscriptionStore(taskDirResolver);
+
   return {
     dataDir,
+    vaultRoot,
     store,
     logger,
     executor: options.executor,
     orgChartPath,
     projectConfig,
+    subscriptionStore,
   };
 }
 

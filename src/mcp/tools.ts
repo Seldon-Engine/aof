@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { aofDispatch } from "../dispatch/aof-dispatch.js";
 import { aofStatusReport } from "../tools/aof-tools.js";
-import { aofTaskComplete, aofTaskUpdate } from "../tools/aof-tools.js";
-import type { TaskStatus } from "../schemas/task.js";
+import { aofTaskComplete, aofTaskUpdate, aofTaskEdit, aofTaskCancel, aofTaskDepAdd, aofTaskDepRemove, aofTaskBlock, aofTaskUnblock } from "../tools/aof-tools.js";
+import type { TaskStatus, TaskPriority } from "../schemas/task.js";
 import type { DispatchResult } from "../dispatch/aof-dispatch.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -294,6 +294,339 @@ export async function handleAofStatusReport(ctx: AofMcpContext, input: z.infer<t
   };
 }
 
+// --- Task Edit ---
+
+const taskEditInputSchema = z.object({
+  taskId: z.string(),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  priority: z.enum(["low", "normal", "high", "critical"]).optional(),
+  routing: z.object({
+    role: z.string().optional(),
+    team: z.string().optional(),
+    agent: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+  }).optional(),
+  actor: z.string().optional(),
+});
+
+const taskEditOutputSchema = z.object({
+  success: z.boolean(),
+  taskId: z.string(),
+  updatedFields: z.array(z.string()),
+});
+
+export async function handleAofTaskEdit(ctx: AofMcpContext, input: z.infer<typeof taskEditInputSchema>) {
+  const result = await aofTaskEdit(
+    { store: ctx.store, logger: ctx.logger },
+    {
+      taskId: input.taskId,
+      title: input.title,
+      description: input.description,
+      priority: input.priority as TaskPriority | undefined,
+      routing: input.routing,
+      actor: input.actor ?? "mcp",
+    },
+  );
+
+  return {
+    success: true,
+    taskId: result.taskId,
+    updatedFields: result.updatedFields,
+  };
+}
+
+// --- Task Cancel ---
+
+const taskCancelInputSchema = z.object({
+  taskId: z.string(),
+  reason: z.string().optional(),
+  actor: z.string().optional(),
+});
+
+const taskCancelOutputSchema = z.object({
+  success: z.boolean(),
+  taskId: z.string(),
+  status: z.string(),
+  reason: z.string().optional(),
+});
+
+export async function handleAofTaskCancel(ctx: AofMcpContext, input: z.infer<typeof taskCancelInputSchema>) {
+  const result = await aofTaskCancel(
+    { store: ctx.store, logger: ctx.logger },
+    {
+      taskId: input.taskId,
+      reason: input.reason,
+      actor: input.actor ?? "mcp",
+    },
+  );
+
+  return {
+    success: true,
+    taskId: result.taskId,
+    status: result.status,
+    reason: result.reason,
+  };
+}
+
+// --- Task Block ---
+
+const taskBlockInputSchema = z.object({
+  taskId: z.string(),
+  reason: z.string(),
+  actor: z.string().optional(),
+});
+
+const taskBlockOutputSchema = z.object({
+  success: z.boolean(),
+  taskId: z.string(),
+  status: z.string(),
+  reason: z.string(),
+});
+
+export async function handleAofTaskBlock(ctx: AofMcpContext, input: z.infer<typeof taskBlockInputSchema>) {
+  const result = await aofTaskBlock(
+    { store: ctx.store, logger: ctx.logger },
+    {
+      taskId: input.taskId,
+      reason: input.reason,
+      actor: input.actor ?? "mcp",
+    },
+  );
+
+  return {
+    success: true,
+    taskId: result.taskId,
+    status: result.status,
+    reason: result.reason,
+  };
+}
+
+// --- Task Unblock ---
+
+const taskUnblockInputSchema = z.object({
+  taskId: z.string(),
+  actor: z.string().optional(),
+});
+
+const taskUnblockOutputSchema = z.object({
+  success: z.boolean(),
+  taskId: z.string(),
+  status: z.string(),
+});
+
+export async function handleAofTaskUnblock(ctx: AofMcpContext, input: z.infer<typeof taskUnblockInputSchema>) {
+  const result = await aofTaskUnblock(
+    { store: ctx.store, logger: ctx.logger },
+    {
+      taskId: input.taskId,
+      actor: input.actor ?? "mcp",
+    },
+  );
+
+  return {
+    success: true,
+    taskId: result.taskId,
+    status: result.status,
+  };
+}
+
+// --- Task Dep Add ---
+
+const taskDepAddInputSchema = z.object({
+  taskId: z.string(),
+  blockerId: z.string(),
+  actor: z.string().optional(),
+});
+
+const taskDepAddOutputSchema = z.object({
+  success: z.boolean(),
+  taskId: z.string(),
+  blockerId: z.string(),
+  dependsOn: z.array(z.string()),
+});
+
+export async function handleAofTaskDepAdd(ctx: AofMcpContext, input: z.infer<typeof taskDepAddInputSchema>) {
+  const result = await aofTaskDepAdd(
+    { store: ctx.store, logger: ctx.logger },
+    {
+      taskId: input.taskId,
+      blockerId: input.blockerId,
+      actor: input.actor ?? "mcp",
+    },
+  );
+
+  return {
+    success: true,
+    taskId: result.taskId,
+    blockerId: result.blockerId,
+    dependsOn: result.dependsOn,
+  };
+}
+
+// --- Task Dep Remove ---
+
+const taskDepRemoveInputSchema = z.object({
+  taskId: z.string(),
+  blockerId: z.string(),
+  actor: z.string().optional(),
+});
+
+const taskDepRemoveOutputSchema = z.object({
+  success: z.boolean(),
+  taskId: z.string(),
+  blockerId: z.string(),
+  dependsOn: z.array(z.string()),
+});
+
+export async function handleAofTaskDepRemove(ctx: AofMcpContext, input: z.infer<typeof taskDepRemoveInputSchema>) {
+  const result = await aofTaskDepRemove(
+    { store: ctx.store, logger: ctx.logger },
+    {
+      taskId: input.taskId,
+      blockerId: input.blockerId,
+      actor: input.actor ?? "mcp",
+    },
+  );
+
+  return {
+    success: true,
+    taskId: result.taskId,
+    blockerId: result.blockerId,
+    dependsOn: result.dependsOn,
+  };
+}
+
+// --- Task Subscribe ---
+
+const taskSubscribeInputSchema = z.object({
+  taskId: z.string(),
+  subscriberId: z.string().min(1),
+  granularity: z.enum(["completion", "all"]),
+});
+
+const taskSubscribeOutputSchema = z.object({
+  subscriptionId: z.string(),
+  taskId: z.string(),
+  granularity: z.string(),
+  status: z.string(),
+  taskStatus: z.string(),
+  createdAt: z.string(),
+});
+
+export async function handleAofTaskSubscribe(ctx: AofMcpContext, input: z.infer<typeof taskSubscribeInputSchema>) {
+  const task = await resolveTask(ctx.store, input.taskId);
+
+  // Duplicate detection: find existing active subscription with same subscriberId + granularity
+  const existing = await ctx.subscriptionStore.list(task.frontmatter.id, { status: "active" });
+  const duplicate = existing.find(s => s.subscriberId === input.subscriberId && s.granularity === input.granularity);
+
+  if (duplicate) {
+    return {
+      subscriptionId: duplicate.id,
+      taskId: task.frontmatter.id,
+      granularity: duplicate.granularity,
+      status: duplicate.status,
+      taskStatus: task.frontmatter.status,
+      createdAt: duplicate.createdAt,
+    };
+  }
+
+  const sub = await ctx.subscriptionStore.create(task.frontmatter.id, input.subscriberId, input.granularity);
+
+  return {
+    subscriptionId: sub.id,
+    taskId: task.frontmatter.id,
+    granularity: sub.granularity,
+    status: sub.status,
+    taskStatus: task.frontmatter.status,
+    createdAt: sub.createdAt,
+  };
+}
+
+// --- Task Unsubscribe ---
+
+const taskUnsubscribeInputSchema = z.object({
+  taskId: z.string(),
+  subscriptionId: z.string(),
+});
+
+const taskUnsubscribeOutputSchema = z.object({
+  subscriptionId: z.string(),
+  status: z.literal("cancelled"),
+});
+
+export async function handleAofTaskUnsubscribe(ctx: AofMcpContext, input: z.infer<typeof taskUnsubscribeInputSchema>) {
+  const task = await resolveTask(ctx.store, input.taskId);
+
+  try {
+    const cancelled = await ctx.subscriptionStore.cancel(task.frontmatter.id, input.subscriptionId);
+    return {
+      subscriptionId: cancelled.id,
+      status: "cancelled" as const,
+    };
+  } catch {
+    throw new McpError(ErrorCode.InvalidParams, `Subscription not found: ${input.subscriptionId}`);
+  }
+}
+
+// --- Project Create ---
+
+const projectCreateInputSchema = z.object({
+  id: z.string(),
+  title: z.string().optional(),
+  type: z.enum(["swe", "ops", "research", "admin", "personal", "other"]).optional(),
+  participants: z.array(z.string()).optional(),
+});
+
+const projectCreateOutputSchema = z.object({
+  projectId: z.string(),
+  projectRoot: z.string(),
+  directoriesCreated: z.array(z.string()),
+});
+
+export async function handleAofProjectCreate(ctx: AofMcpContext, input: z.infer<typeof projectCreateInputSchema>) {
+  const { createProject } = await import("../projects/create.js");
+  const result = await createProject(input.id, {
+    vaultRoot: ctx.vaultRoot,
+    title: input.title,
+    type: input.type,
+    participants: input.participants,
+    template: true,
+  });
+
+  return {
+    projectId: result.projectId,
+    projectRoot: result.projectRoot,
+    directoriesCreated: result.directoriesCreated,
+  };
+}
+
+// --- Project List ---
+
+const projectListInputSchema = z.object({});
+
+const projectListOutputSchema = z.object({
+  projects: z.array(z.object({
+    id: z.string(),
+    path: z.string(),
+    error: z.string().optional(),
+  })),
+});
+
+export async function handleAofProjectList(ctx: AofMcpContext) {
+  const { discoverProjects } = await import("../projects/index.js");
+  const projects = await discoverProjects(ctx.vaultRoot);
+
+  return {
+    projects: projects.map(p => ({
+      id: p.id,
+      path: p.path,
+      error: p.error,
+    })),
+  };
+}
+
 export function registerAofTools(server: McpServer, ctx: AofMcpContext, buildBoard: (team: string, status?: string, priority?: string) => Promise<unknown>) {
   server.registerTool("aof_dispatch", {
     description: "Create a new AOF task and assign to an agent or team",
@@ -328,5 +661,83 @@ export function registerAofTools(server: McpServer, ctx: AofMcpContext, buildBoa
     inputSchema: boardInputSchema,
   }, async (input) => ({
     content: [{ type: "text" as const, text: JSON.stringify(await buildBoard(input.team ?? "swe", input.status, input.priority), null, 2) }],
+  }));
+
+  // --- Task mutation tools ---
+
+  server.registerTool("aof_task_edit", {
+    description: "Edit task frontmatter (title, priority, routing) without changing status",
+    inputSchema: taskEditInputSchema,
+  }, async (input) => ({
+    content: [{ type: "text" as const, text: JSON.stringify(await handleAofTaskEdit(ctx, input), null, 2) }],
+  }));
+
+  server.registerTool("aof_task_cancel", {
+    description: "Cancel a task with optional reason",
+    inputSchema: taskCancelInputSchema,
+  }, async (input) => ({
+    content: [{ type: "text" as const, text: JSON.stringify(await handleAofTaskCancel(ctx, input), null, 2) }],
+  }));
+
+  server.registerTool("aof_task_block", {
+    description: "Block a task with a reason, preventing dispatch until unblocked",
+    inputSchema: taskBlockInputSchema,
+  }, async (input) => ({
+    content: [{ type: "text" as const, text: JSON.stringify(await handleAofTaskBlock(ctx, input), null, 2) }],
+  }));
+
+  server.registerTool("aof_task_unblock", {
+    description: "Unblock a previously blocked task, moving it back to ready",
+    inputSchema: taskUnblockInputSchema,
+  }, async (input) => ({
+    content: [{ type: "text" as const, text: JSON.stringify(await handleAofTaskUnblock(ctx, input), null, 2) }],
+  }));
+
+  // --- Dependency tools ---
+
+  server.registerTool("aof_task_dep_add", {
+    description: "Add a dependency — task will be blocked until blocker completes",
+    inputSchema: taskDepAddInputSchema,
+  }, async (input) => ({
+    content: [{ type: "text" as const, text: JSON.stringify(await handleAofTaskDepAdd(ctx, input), null, 2) }],
+  }));
+
+  server.registerTool("aof_task_dep_remove", {
+    description: "Remove a dependency from a task",
+    inputSchema: taskDepRemoveInputSchema,
+  }, async (input) => ({
+    content: [{ type: "text" as const, text: JSON.stringify(await handleAofTaskDepRemove(ctx, input), null, 2) }],
+  }));
+
+  // --- Subscription tools ---
+
+  server.registerTool("aof_task_subscribe", {
+    description: "Subscribe to task outcome notifications",
+    inputSchema: taskSubscribeInputSchema,
+  }, async (input) => ({
+    content: [{ type: "text" as const, text: JSON.stringify(await handleAofTaskSubscribe(ctx, input), null, 2) }],
+  }));
+
+  server.registerTool("aof_task_unsubscribe", {
+    description: "Cancel a task outcome subscription",
+    inputSchema: taskUnsubscribeInputSchema,
+  }, async (input) => ({
+    content: [{ type: "text" as const, text: JSON.stringify(await handleAofTaskUnsubscribe(ctx, input), null, 2) }],
+  }));
+
+  // --- Project tools ---
+
+  server.registerTool("aof_project_create", {
+    description: "Create a new project with standard directory structure and manifest",
+    inputSchema: projectCreateInputSchema,
+  }, async (input) => ({
+    content: [{ type: "text" as const, text: JSON.stringify(await handleAofProjectCreate(ctx, input), null, 2) }],
+  }));
+
+  server.registerTool("aof_project_list", {
+    description: "List all projects on this AOF instance",
+    inputSchema: projectListInputSchema,
+  }, async () => ({
+    content: [{ type: "text" as const, text: JSON.stringify(await handleAofProjectList(ctx), null, 2) }],
   }));
 }
