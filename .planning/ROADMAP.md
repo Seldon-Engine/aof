@@ -110,7 +110,7 @@ See: `.planning/milestones/v1.5-ROADMAP.md` for full details
   4. Subscription CRUD operations (create, read, list, delete) work via a `SubscriptionStore` class
 **Plans**: 1 plan
 Plans:
-- [ ] 28-01-PLAN.md — Subscription schema and SubscriptionStore CRUD with TDD
+- [x] 28-01-PLAN.md — Subscription schema and SubscriptionStore CRUD with TDD
 
 ### Phase 29: Subscription API
 **Goal**: Agents can subscribe to task outcomes through MCP tools -- at dispatch time or after
@@ -121,7 +121,9 @@ Plans:
   2. Agent can subscribe to an already-existing task via `aof_task_subscribe` tool
   3. Agent can cancel a subscription via `aof_task_unsubscribe` tool
   4. Subscribing to an already-terminal task triggers immediate catch-up delivery (no silent miss)
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [ ] 29-01-PLAN.md — Wire SubscriptionStore into MCP tools (context, subscribe, unsubscribe, dispatch extension)
 
 ### Phase 30: Callback Delivery
 **Goal**: Subscribed agents receive callback sessions with task results when subscribed events fire
@@ -190,8 +192,8 @@ Phases execute in numeric order: 28 -> 29 -> 30 -> 31 -> 32
 | 25. Completion Enforcement | v1.5 | 2/2 | Complete | 2026-03-07 |
 | 26. Trace Infrastructure | v1.5 | 2/2 | Complete | 2026-03-08 |
 | 27. Trace CLI | v1.5 | 2/2 | Complete | 2026-03-08 |
-| 28. Schema and Storage | 1/1 | Complete    | 2026-03-09 | - |
-| 29. Subscription API | v1.8 | 0/? | Not started | - |
+| 28. Schema and Storage | v1.8 | 1/1 | Complete | 2026-03-09 |
+| 29. Subscription API | v1.8 | 0/1 | Not started | - |
 | 30. Callback Delivery | v1.8 | 0/? | Not started | - |
 | 31. Granularity, Safety, and Hardening | v1.8 | 0/? | Not started | - |
 | 32. Agent Guidance | v1.8 | 0/? | Not started | - |
