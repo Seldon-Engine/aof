@@ -527,4 +527,100 @@ describe("mcp tools", () => {
       }),
     ).rejects.toThrow(/Task not found/);
   });
+
+  // --- Dispatch + subscribe tests ---
+
+  it("dispatch with subscribe: completion returns subscriptionId", async () => {
+    const ctx = await createAofMcpContext({
+      dataDir,
+      store,
+      logger: new EventLogger(join(dataDir, "events")),
+    });
+
+    const result = await handleAofDispatch(ctx, {
+      title: "Dispatch with sub",
+      brief: "Subscribe at dispatch",
+      subscribe: "completion",
+    });
+
+    expect(result.taskId).toBeDefined();
+    expect(result.subscriptionId).toBeDefined();
+    expect(typeof result.subscriptionId).toBe("string");
+    expect(result.subscriptionId!.length).toBeGreaterThan(0);
+  });
+
+  it("dispatch with subscribe: all returns subscriptionId", async () => {
+    const ctx = await createAofMcpContext({
+      dataDir,
+      store,
+      logger: new EventLogger(join(dataDir, "events")),
+    });
+
+    const result = await handleAofDispatch(ctx, {
+      title: "Dispatch with all sub",
+      brief: "Subscribe all at dispatch",
+      subscribe: "all",
+    });
+
+    expect(result.subscriptionId).toBeDefined();
+  });
+
+  it("dispatch without subscribe does not include subscriptionId", async () => {
+    const ctx = await createAofMcpContext({
+      dataDir,
+      store,
+      logger: new EventLogger(join(dataDir, "events")),
+    });
+
+    const result = await handleAofDispatch(ctx, {
+      title: "Dispatch no sub",
+      brief: "No subscribe param",
+    });
+
+    expect(result.subscriptionId).toBeUndefined();
+  });
+
+  it("dispatch with subscribe uses actor as subscriberId", async () => {
+    const ctx = await createAofMcpContext({
+      dataDir,
+      store,
+      logger: new EventLogger(join(dataDir, "events")),
+    });
+
+    const result = await handleAofDispatch(ctx, {
+      title: "Dispatch actor sub",
+      brief: "Subscribe with actor",
+      subscribe: "completion",
+      actor: "coordinator",
+    });
+
+    expect(result.subscriptionId).toBeDefined();
+
+    // Verify subscriberId matches actor
+    const subs = await ctx.subscriptionStore.list(result.taskId, { status: "active" });
+    const match = subs.find(s => s.id === result.subscriptionId);
+    expect(match).toBeDefined();
+    expect(match!.subscriberId).toBe("coordinator");
+  });
+
+  it("dispatch with subscribe but no actor uses mcp as subscriberId", async () => {
+    const ctx = await createAofMcpContext({
+      dataDir,
+      store,
+      logger: new EventLogger(join(dataDir, "events")),
+    });
+
+    const result = await handleAofDispatch(ctx, {
+      title: "Dispatch default sub",
+      brief: "Subscribe with default actor",
+      subscribe: "completion",
+    });
+
+    expect(result.subscriptionId).toBeDefined();
+
+    const subs = await ctx.subscriptionStore.list(result.taskId, { status: "active" });
+    const match = subs.find(s => s.id === result.subscriptionId);
+    expect(match).toBeDefined();
+    expect(match!.subscriberId).toBe("mcp");
+  });
 });
