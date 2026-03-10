@@ -38,9 +38,10 @@ created: 2026-03-10
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
-| 30-01-01 | 01 | 1 | DLVR-01, DLVR-04, GRAN-01 | unit | `npx vitest run src/dispatch/__tests__/callback-delivery.test.ts` | ❌ W0 | ⬜ pending |
-| 30-01-02 | 01 | 1 | DLVR-02 | unit | `npx vitest run src/dispatch/__tests__/callback-delivery.test.ts -t "retry"` | ❌ W0 | ⬜ pending |
-| 30-01-03 | 01 | 1 | DLVR-03 | unit | `npx vitest run src/dispatch/__tests__/callback-delivery.test.ts -t "trace"` | ❌ W0 | ⬜ pending |
+| 30-01-T1 | 01 | 1 | SUB schema | unit | `npx vitest run src/store/__tests__/subscription-store.test.ts` | ❌ W0 | ⬜ pending |
+| 30-01-T2 | 01 | 1 | DLVR-01, DLVR-02, DLVR-03, DLVR-04, GRAN-01 | unit | `npx vitest run src/dispatch/__tests__/callback-delivery.test.ts` | ❌ W0 | ⬜ pending |
+| 30-02-T1 | 02 | 2 | DLVR-01, DLVR-02, DLVR-04 | unit | `npx vitest run src/dispatch/__tests__/callback-integration.test.ts` | ❌ W0 | ⬜ pending |
+| 30-02-T2 | 02 | 2 | ORG-VAL | unit | `npx vitest run src/mcp/__tests__/tools.test.ts` | ✅ | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
