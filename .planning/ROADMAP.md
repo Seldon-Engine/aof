@@ -193,7 +193,7 @@ Phases execute in numeric order: 28 -> 29 -> 30 -> 31 -> 32
 | 26. Trace Infrastructure | v1.5 | 2/2 | Complete | 2026-03-08 |
 | 27. Trace CLI | v1.5 | 2/2 | Complete | 2026-03-08 |
 | 28. Schema and Storage | v1.8 | 1/1 | Complete | 2026-03-09 |
-| 29. Subscription API | 1/1 | Complete   | 2026-03-10 | - |
+| 29. Subscription API | 1/1 | Complete    | 2026-03-10 | - |
 | 30. Callback Delivery | v1.8 | 0/? | Not started | - |
 | 31. Granularity, Safety, and Hardening | v1.8 | 0/? | Not started | - |
 | 32. Agent Guidance | v1.8 | 0/? | Not started | - |
