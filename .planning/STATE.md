@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: Task Notifications
 status: executing
-stopped_at: Phase 29 context gathered
-last_updated: "2026-03-10T01:41:49.703Z"
-last_activity: 2026-03-09 — Completed schema and storage plan 01
+stopped_at: Completed 29-01-PLAN.md
+last_updated: "2026-03-10T02:16:34.487Z"
+last_activity: 2026-03-10 — Completed subscription API plan 01
 progress:
   total_phases: 5
-  completed_phases: 1
-  total_plans: 1
-  completed_plans: 1
-  percent: 20
+  completed_phases: 2
+  total_plans: 2
+  completed_plans: 2
+  percent: 40
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-09)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** Phase 28 - Schema and Storage (v1.8 Task Notifications)
+**Current focus:** Phase 29 - Subscription API (v1.8 Task Notifications)
 
 ## Current Position
 
-Phase: 28 of 32 (Schema and Storage)
+Phase: 29 of 32 (Subscription API)
 Plan: 1 of 1 complete
 Status: Executing
-Last activity: 2026-03-09 — Completed schema and storage plan 01
+Last activity: 2026-03-10 — Completed subscription API plan 01
 
-Progress: [██░░░░░░░░] 20%
+Progress: [████░░░░░░] 40%
 
 ## Performance Metrics
 
@@ -44,6 +44,9 @@ All decisions logged in PROJECT.md Key Decisions table.
 
 - Phase 28-01: SubscriptionStore uses constructor-injected taskDirResolver for testability and decoupling
 - Phase 28-01: Co-located subscriptions.json in task directories with write-file-atomic for crash safety
+- Phase 29-01: taskDirResolver uses store.get() + tasksDir join for task directory resolution
+- Phase 29-01: Subscription creation placed before executor dispatch for atomicity
+- Phase 29-01: Default subscriberId is "mcp" when actor param not provided
 
 ### Roadmap Evolution
 
@@ -65,6 +68,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-10T01:41:49.695Z
-Stopped at: Phase 29 context gathered
-Resume file: .planning/phases/29-subscription-api/29-CONTEXT.md
+Last session: 2026-03-10T02:16:34.485Z
+Stopped at: Completed 29-01-PLAN.md
+Resume file: None
