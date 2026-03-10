@@ -402,7 +402,7 @@ describe("mcp tools", () => {
 
     const result = await handleAofTaskSubscribe(ctx, {
       taskId: task.frontmatter.id,
-      subscriberId: "agent-alpha",
+      subscriberId: "swe-qa",
       granularity: "completion",
     });
 
@@ -424,7 +424,7 @@ describe("mcp tools", () => {
     await expect(
       handleAofTaskSubscribe(ctx, {
         taskId: "non-existent-task-id",
-        subscriberId: "agent-alpha",
+        subscriberId: "swe-backend",
         granularity: "completion",
       }),
     ).rejects.toThrow(/Task not found/);
@@ -447,13 +447,13 @@ describe("mcp tools", () => {
 
     const first = await handleAofTaskSubscribe(ctx, {
       taskId: task.frontmatter.id,
-      subscriberId: "agent-alpha",
+      subscriberId: "swe-qa",
       granularity: "completion",
     });
 
     const second = await handleAofTaskSubscribe(ctx, {
       taskId: task.frontmatter.id,
-      subscriberId: "agent-alpha",
+      subscriberId: "swe-qa",
       granularity: "completion",
     });
 
@@ -477,7 +477,7 @@ describe("mcp tools", () => {
 
     const sub = await handleAofTaskSubscribe(ctx, {
       taskId: task.frontmatter.id,
-      subscriberId: "agent-alpha",
+      subscriberId: "swe-qa",
       granularity: "all",
     });
 
@@ -541,6 +541,7 @@ describe("mcp tools", () => {
       title: "Dispatch with sub",
       brief: "Subscribe at dispatch",
       subscribe: "completion",
+      actor: "swe-backend",
     });
 
     expect(result.taskId).toBeDefined();
@@ -560,6 +561,7 @@ describe("mcp tools", () => {
       title: "Dispatch with all sub",
       brief: "Subscribe all at dispatch",
       subscribe: "all",
+      actor: "swe-qa",
     });
 
     expect(result.subscriptionId).toBeDefined();
@@ -591,7 +593,7 @@ describe("mcp tools", () => {
       title: "Dispatch actor sub",
       brief: "Subscribe with actor",
       subscribe: "completion",
-      actor: "coordinator",
+      actor: "swe-qa",
     });
 
     expect(result.subscriptionId).toBeDefined();
@@ -600,10 +602,78 @@ describe("mcp tools", () => {
     const subs = await ctx.subscriptionStore.list(result.taskId, { status: "active" });
     const match = subs.find(s => s.id === result.subscriptionId);
     expect(match).toBeDefined();
-    expect(match!.subscriberId).toBe("coordinator");
+    expect(match!.subscriberId).toBe("swe-qa");
   });
 
-  it("dispatch with subscribe but no actor uses mcp as subscriberId", async () => {
+  it("dispatch with subscribe but no actor defaults to mcp (rejected if not in org chart)", async () => {
+    const ctx = await createAofMcpContext({
+      dataDir,
+      store,
+      logger: new EventLogger(join(dataDir, "events")),
+    });
+
+    // "mcp" is not in the org chart, so this should fail with validation error
+    await expect(
+      handleAofDispatch(ctx, {
+        title: "Dispatch default sub",
+        brief: "Subscribe with default actor",
+        subscribe: "completion",
+      }),
+    ).rejects.toThrow(/not found in org chart/);
+  });
+
+  // --- Org chart validation tests (Phase 30-02) ---
+
+  it("subscribe with valid subscriberId (in org chart) succeeds", async () => {
+    const ctx = await createAofMcpContext({
+      dataDir,
+      store,
+      logger: new EventLogger(join(dataDir, "events")),
+    });
+
+    const task = await store.create({
+      title: "Valid sub target",
+      body: "Body",
+      routing: { agent: "swe-backend" },
+      createdBy: "test",
+    });
+    await store.transition(task.frontmatter.id, "ready");
+
+    const result = await handleAofTaskSubscribe(ctx, {
+      taskId: task.frontmatter.id,
+      subscriberId: "swe-backend",
+      granularity: "completion",
+    });
+
+    expect(result.subscriptionId).toBeDefined();
+    expect(result.status).toBe("active");
+  });
+
+  it("subscribe with invalid subscriberId (not in org chart) throws McpError", async () => {
+    const ctx = await createAofMcpContext({
+      dataDir,
+      store,
+      logger: new EventLogger(join(dataDir, "events")),
+    });
+
+    const task = await store.create({
+      title: "Invalid sub target",
+      body: "Body",
+      routing: { agent: "swe-backend" },
+      createdBy: "test",
+    });
+    await store.transition(task.frontmatter.id, "ready");
+
+    await expect(
+      handleAofTaskSubscribe(ctx, {
+        taskId: task.frontmatter.id,
+        subscriberId: "nonexistent-agent",
+        granularity: "completion",
+      }),
+    ).rejects.toThrow(/not found in org chart/);
+  });
+
+  it("dispatch with subscribe and valid actor succeeds with subscription", async () => {
     const ctx = await createAofMcpContext({
       dataDir,
       store,
@@ -611,16 +681,54 @@ describe("mcp tools", () => {
     });
 
     const result = await handleAofDispatch(ctx, {
-      title: "Dispatch default sub",
-      brief: "Subscribe with default actor",
+      title: "Dispatch valid actor sub",
+      brief: "Subscribe with valid actor",
       subscribe: "completion",
+      actor: "swe-backend",
     });
 
     expect(result.subscriptionId).toBeDefined();
+  });
 
-    const subs = await ctx.subscriptionStore.list(result.taskId, { status: "active" });
-    const match = subs.find(s => s.id === result.subscriptionId);
-    expect(match).toBeDefined();
-    expect(match!.subscriberId).toBe("mcp");
+  it("dispatch with subscribe and invalid actor throws McpError", async () => {
+    const ctx = await createAofMcpContext({
+      dataDir,
+      store,
+      logger: new EventLogger(join(dataDir, "events")),
+    });
+
+    await expect(
+      handleAofDispatch(ctx, {
+        title: "Dispatch invalid actor sub",
+        brief: "Subscribe with invalid actor",
+        subscribe: "completion",
+        actor: "nonexistent",
+      }),
+    ).rejects.toThrow(/not found in org chart/);
+  });
+
+  it("subscribe with mcp as subscriberId validates against org chart", async () => {
+    const ctx = await createAofMcpContext({
+      dataDir,
+      store,
+      logger: new EventLogger(join(dataDir, "events")),
+    });
+
+    const task = await store.create({
+      title: "Mcp sub target",
+      body: "Body",
+      routing: { agent: "swe-backend" },
+      createdBy: "test",
+    });
+    await store.transition(task.frontmatter.id, "ready");
+
+    // "mcp" is NOT in the org chart fixture, so this should fail
+    await expect(
+      handleAofTaskSubscribe(ctx, {
+        taskId: task.frontmatter.id,
+        subscriberId: "mcp",
+        granularity: "completion",
+      }),
+    ).rejects.toThrow(/not found in org chart/);
   });
 });

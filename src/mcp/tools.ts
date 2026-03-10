@@ -190,6 +190,8 @@ export async function handleAofDispatch(ctx: AofMcpContext, input: z.infer<typeo
   let subscriptionId: string | undefined;
   if (input.subscribe) {
     const subscriberId = input.actor ?? "mcp";
+    // Validate subscriberId against org chart (Phase 30-02)
+    await validateSubscriberId(ctx.orgChartPath, subscriberId);
     const existing = await ctx.subscriptionStore.list(task.frontmatter.id, { status: "active" });
     const duplicate = existing.find(s => s.subscriberId === subscriberId && s.granularity === input.subscribe);
     if (duplicate) {
@@ -532,8 +534,25 @@ const taskSubscribeOutputSchema = z.object({
   createdAt: z.string(),
 });
 
+async function validateSubscriberId(orgChartPath: string, subscriberId: string): Promise<void> {
+  const result = await loadOrgChart(orgChartPath);
+  if (!result.success || !result.chart) {
+    throw new McpError(ErrorCode.InternalError, "Failed to load org chart for subscriber validation");
+  }
+  const agentExists = result.chart.agents.some(a => a.id === subscriberId);
+  if (!agentExists) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `subscriberId "${subscriberId}" not found in org chart. Available agents: ${result.chart.agents.map(a => a.id).join(", ")}`,
+    );
+  }
+}
+
 export async function handleAofTaskSubscribe(ctx: AofMcpContext, input: z.infer<typeof taskSubscribeInputSchema>) {
   const task = await resolveTask(ctx.store, input.taskId);
+
+  // Validate subscriberId against org chart (Phase 30-02)
+  await validateSubscriberId(ctx.orgChartPath, input.subscriberId);
 
   // Duplicate detection: find existing active subscription with same subscriberId + granularity
   const existing = await ctx.subscriptionStore.list(task.frontmatter.id, { status: "active" });
