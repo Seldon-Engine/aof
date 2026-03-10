@@ -47,7 +47,7 @@ export async function deliverCallbacks(opts: DeliverCallbacksOptions): Promise<v
   const { taskId, store, subscriptionStore, executor, logger } = opts;
 
   const task = await store.get(taskId);
-  if (!task || !TERMINAL_STATUSES.has(task.status)) {
+  if (!task || !TERMINAL_STATUSES.has(task.frontmatter.status)) {
     return;
   }
 
@@ -72,7 +72,7 @@ export async function retryPendingDeliveries(opts: DeliverCallbacksOptions): Pro
   const { taskId, store, subscriptionStore, executor, logger } = opts;
 
   const task = await store.get(taskId);
-  if (!task || !TERMINAL_STATUSES.has(task.status)) {
+  if (!task || !TERMINAL_STATUSES.has(task.frontmatter.status)) {
     return;
   }
 
@@ -114,9 +114,9 @@ export function buildCallbackPrompt(
   const lines: string[] = [
     "You are receiving a task notification callback.",
     "",
-    `Task ID: ${task.id}`,
-    `Title: ${task.title}`,
-    `Final Status: ${task.status}`,
+    `Task ID: ${task.frontmatter.id}`,
+    `Title: ${task.frontmatter.title}`,
+    `Final Status: ${task.frontmatter.status}`,
     `Subscriber: ${sub.subscriberId}`,
   ];
 
@@ -148,7 +148,7 @@ async function deliverSingleCallback(
   const prompt = buildCallbackPrompt(task, sub, tracePath);
 
   const context: TaskContext = {
-    taskId: task.id,
+    taskId: task.frontmatter.id,
     taskPath: "",
     agent: sub.subscriberId,
     priority: "normal",
@@ -162,16 +162,16 @@ async function deliverSingleCallback(
       correlationId: randomUUID(),
       onRunComplete: async (outcome) => {
         // DLVR-03: capture trace on completion
-        logger.log?.(`Callback session completed for ${task.id}: success=${outcome.success}`);
+        logger.log?.(`Callback session completed for ${task.frontmatter.id}: success=${outcome.success}`);
       },
     });
 
     if (result.success) {
-      await subscriptionStore.update(task.id, sub.id, {
+      await subscriptionStore.update(task.frontmatter.id, sub.id, {
         status: "delivered",
         deliveredAt: new Date().toISOString(),
       });
-      logger.emit?.("subscription.delivered", { taskId: task.id, subscriptionId: sub.id });
+      logger.emit?.("subscription.delivered", { taskId: task.frontmatter.id, subscriptionId: sub.id });
     } else {
       await handleDeliveryFailure(task, sub, opts, result.error || "spawn failed");
     }
@@ -199,19 +199,19 @@ async function handleDeliveryFailure(
   const now = new Date().toISOString();
 
   if (newAttempts >= MAX_DELIVERY_ATTEMPTS) {
-    await subscriptionStore.update(task.id, sub.id, {
+    await subscriptionStore.update(task.frontmatter.id, sub.id, {
       status: "failed",
       failureReason: `Delivery failed after ${newAttempts} attempts: ${errorMessage}`,
       deliveryAttempts: newAttempts,
       lastAttemptAt: now,
     });
     logger.emit?.("subscription.delivery_failed", {
-      taskId: task.id,
+      taskId: task.frontmatter.id,
       subscriptionId: sub.id,
       attempts: newAttempts,
     });
   } else {
-    await subscriptionStore.update(task.id, sub.id, {
+    await subscriptionStore.update(task.frontmatter.id, sub.id, {
       deliveryAttempts: newAttempts,
       lastAttemptAt: now,
     });

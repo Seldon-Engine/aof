@@ -48,6 +48,7 @@ export class SubscriptionStore {
       status: "active",
       createdAt: now,
       updatedAt: now,
+      deliveryAttempts: 0,
     };
 
     data.subscriptions.push(subscription);

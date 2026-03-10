@@ -42,18 +42,34 @@ function createMockLogger() {
 }
 
 function makeTask(overrides: Partial<Task> = {}): Task {
-  return {
-    id: "TASK-2026-03-10-001",
-    title: "Test task",
-    status: "done",
-    priority: "normal",
-    routing: { role: "developer" },
-    createdAt: "2026-03-09T12:00:00Z",
-    updatedAt: "2026-03-10T12:00:00Z",
-    createdBy: "test",
+  const base = {
+    frontmatter: {
+      schemaVersion: 2,
+      id: "TASK-2026-03-10-001",
+      project: "_inbox",
+      title: "Test task",
+      status: "done",
+      priority: "normal",
+      routing: { role: "developer", tags: [] },
+      createdAt: "2026-03-09T12:00:00Z",
+      updatedAt: "2026-03-10T12:00:00Z",
+      createdBy: "test",
+      dependsOn: [],
+      contextTier: "seed",
+      lastTransitionAt: "2026-03-10T12:00:00Z",
+      metadata: {},
+      gateHistory: [],
+      tests: [],
+    },
     body: "Task body content\n\n## Outputs\n\nResult: success\nData: 42\n\n## Notes\n\nSome notes.",
-    ...overrides,
-  } as Task;
+  };
+  if (overrides.frontmatter) {
+    base.frontmatter = { ...base.frontmatter, ...overrides.frontmatter } as typeof base.frontmatter;
+  }
+  if (overrides.body !== undefined) {
+    base.body = overrides.body;
+  }
+  return base as Task;
 }
 
 describe("buildCallbackPrompt", () => {
@@ -102,7 +118,7 @@ describe("buildCallbackPrompt", () => {
   });
 
   it("includes taskId, title, finalStatus, and subscriberId", () => {
-    const task = makeTask({ status: "cancelled" as any });
+    const task = makeTask({ frontmatter: { status: "cancelled" } } as any);
     const prompt = buildCallbackPrompt(task, {
       id: "sub-1",
       subscriberId: "agent:watcher",
@@ -195,7 +211,7 @@ describe("deliverCallbacks", () => {
   });
 
   it("skips non-terminal tasks (returns early if status not in done/cancelled/deadletter)", async () => {
-    const task = makeTask({ status: "in-progress" as any });
+    const task = makeTask({ frontmatter: { status: "in-progress" } } as any);
     const store = createMockTaskStore(task);
     await subscriptionStore.create("TASK-2026-03-10-001", "agent:watcher", "completion");
 
