@@ -16,14 +16,14 @@ Requirements for task notification subscriptions and callback delivery.
 
 ### Callback Delivery
 
-- [ ] **DLVR-01**: Scheduler delivers callbacks by spawning a new session to the subscriber agent with task results as context
-- [ ] **DLVR-02**: Failed deliveries retry up to 3 times before marking subscription as failed
-- [ ] **DLVR-03**: Callback sessions produce traces like normal dispatches
-- [ ] **DLVR-04**: Delivery never blocks task state transitions (best-effort, non-blocking)
+- [x] **DLVR-01**: Scheduler delivers callbacks by spawning a new session to the subscriber agent with task results as context
+- [x] **DLVR-02**: Failed deliveries retry up to 3 times before marking subscription as failed
+- [x] **DLVR-03**: Callback sessions produce traces like normal dispatches
+- [x] **DLVR-04**: Delivery never blocks task state transitions (best-effort, non-blocking)
 
 ### Granularity
 
-- [ ] **GRAN-01**: `"completion"` granularity fires on terminal states (done/cancelled/deadletter)
+- [x] **GRAN-01**: `"completion"` granularity fires on terminal states (done/cancelled/deadletter)
 - [ ] **GRAN-02**: `"all"` granularity fires on every state transition, batched per poll cycle
 
 ### Agent Guidance
@@ -71,11 +71,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SUB-02 | Phase 29 | Complete |
 | SUB-03 | Phase 29 | Complete |
 | SUB-04 | Phase 28 | Complete |
-| DLVR-01 | Phase 30 | Pending |
-| DLVR-02 | Phase 30 | Pending |
-| DLVR-03 | Phase 30 | Pending |
-| DLVR-04 | Phase 30 | Pending |
-| GRAN-01 | Phase 30 | Pending |
+| DLVR-01 | Phase 30 | Complete |
+| DLVR-02 | Phase 30 | Complete |
+| DLVR-03 | Phase 30 | Complete |
+| DLVR-04 | Phase 30 | Complete |
+| GRAN-01 | Phase 30 | Complete |
 | GRAN-02 | Phase 31 | Pending |
 | GUID-01 | Phase 32 | Pending |
 | SAFE-01 | Phase 31 | Pending |

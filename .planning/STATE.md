@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: Task Notifications
 status: executing
-stopped_at: Phase 30 context gathered
-last_updated: "2026-03-10T03:38:18.538Z"
+stopped_at: Completed 30-01-PLAN.md
+last_updated: "2026-03-10T12:35:31.286Z"
 last_activity: 2026-03-10 — Completed subscription API plan 01
 progress:
   total_phases: 5
   completed_phases: 2
-  total_plans: 2
-  completed_plans: 2
+  total_plans: 4
+  completed_plans: 3
   percent: 40
 ---
 
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-09)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** Phase 29 - Subscription API (v1.8 Task Notifications)
+**Current focus:** Phase 30 - Callback Delivery (v1.8 Task Notifications)
 
 ## Current Position
 
-Phase: 29 of 32 (Subscription API)
-Plan: 1 of 1 complete
+Phase: 30 of 32 (Callback Delivery)
+Plan: 1 of 2 complete
 Status: Executing
-Last activity: 2026-03-10 — Completed subscription API plan 01
+Last activity: 2026-03-10 — Completed callback delivery plan 01
 
-Progress: [████░░░░░░] 40%
+Progress: [██████████] 96%
 
 ## Performance Metrics
 
@@ -47,6 +47,8 @@ All decisions logged in PROJECT.md Key Decisions table.
 - Phase 29-01: taskDirResolver uses store.get() + tasksDir join for task directory resolution
 - Phase 29-01: Subscription creation placed before executor dispatch for atomicity
 - Phase 29-01: Default subscriberId is "mcp" when actor param not provided
+- [Phase 30]: Callback prompt uses taskFileContents field on TaskContext for structured notification
+- [Phase 30]: Delivery failures tracked with counter+timestamp for retry (30s cooldown, 3 max attempts)
 
 ### Roadmap Evolution
 
@@ -68,6 +70,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-10T03:38:18.535Z
-Stopped at: Phase 30 context gathered
-Resume file: .planning/phases/30-callback-delivery/30-CONTEXT.md
+Last session: 2026-03-10T12:35:31.284Z
+Stopped at: Completed 30-01-PLAN.md
+Resume file: None
