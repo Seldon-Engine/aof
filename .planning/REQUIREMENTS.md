@@ -28,7 +28,7 @@ Requirements for task notification subscriptions and callback delivery.
 
 ### Agent Guidance
 
-- [ ] **GUID-01**: SKILL.md documents callback behavior and idempotency expectations for agents
+- [x] **GUID-01**: SKILL.md documents callback behavior and idempotency expectations for agents
 
 ### Safety
 
@@ -77,7 +77,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DLVR-04 | Phase 30 | Complete |
 | GRAN-01 | Phase 30 | Complete |
 | GRAN-02 | Phase 31 | Complete |
-| GUID-01 | Phase 32 | Pending |
+| GUID-01 | Phase 32 | Complete |
 | SAFE-01 | Phase 31 | Complete |
 | SAFE-02 | Phase 31 | Complete |
 

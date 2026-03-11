@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: Task Notifications
 status: completed
-stopped_at: Phase 32 context gathered
-last_updated: "2026-03-11T19:22:04.262Z"
-last_activity: 2026-03-11 — Completed callback depth limiting and restart recovery plan 02
+stopped_at: Completed 32-01-PLAN.md
+last_updated: "2026-03-11T20:30:32.318Z"
+last_activity: 2026-03-11 — Completed agent guidance documentation plan 01
 progress:
   total_phases: 5
-  completed_phases: 4
-  total_plans: 7
-  completed_plans: 7
+  completed_phases: 5
+  total_plans: 8
+  completed_plans: 8
   percent: 100
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-09)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** Phase 31 - Granularity, Safety and Hardening (v1.8 Task Notifications)
+**Current focus:** Phase 32 - Agent Guidance (v1.8 Task Notifications)
 
 ## Current Position
 
-Phase: 31 of 32 (Granularity, Safety and Hardening)
-Plan: 2 of 2 complete
+Phase: 32 of 32 (Agent Guidance)
+Plan: 1 of 1 complete
 Status: Phase Complete
-Last activity: 2026-03-11 — Completed callback depth limiting and restart recovery plan 02
+Last activity: 2026-03-11 — Completed agent guidance documentation plan 01
 
 Progress: [██████████] 100%
 
@@ -58,6 +58,8 @@ All decisions logged in PROJECT.md Key Decisions table.
 - [Phase 31-02]: MAX_CALLBACK_DEPTH=3 as non-configurable constant for safety simplicity
 - [Phase 31-02]: TaskContext.metadata field added for cross-session callbackDepth propagation
 - [Phase 31-02]: Recovery scan handles both granularities via deliverAllGranularityForSub helper
+- [Phase 32]: Relaxed budget baseline reduction from 50% to 30% for v1.8 subscription/callback content growth
+- [Phase 32]: Budget ceiling bumped to 2500 tokens providing ~10% headroom over measured 2268 total
 
 ### Roadmap Evolution
 
@@ -79,6 +81,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-11T19:22:04.258Z
-Stopped at: Phase 32 context gathered
-Resume file: .planning/phases/32-agent-guidance/32-CONTEXT.md
+Last session: 2026-03-11T20:30:32.315Z
+Stopped at: Completed 32-01-PLAN.md
+Resume file: None
