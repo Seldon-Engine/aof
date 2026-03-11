@@ -32,6 +32,8 @@ export interface TaskContext {
   gateContext?: GateContext;
   /** Hop context for DAG workflows (transient, computed on dispatch) — hop-scoped progressive disclosure */
   hopContext?: HopContext;
+  /** Arbitrary metadata for callback depth propagation and other cross-session concerns */
+  metadata?: Record<string, unknown>;
 }
 
 /**

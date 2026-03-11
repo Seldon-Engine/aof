@@ -112,6 +112,7 @@ export const TaskFrontmatter = z.preprocess((input) => {
   instructionsRef: z.string().min(1).optional().describe("Path to instructions file (optional)"),
   guidanceRef: z.string().min(1).optional().describe("Path to guidance/conventions file (optional)"),
   resource: z.string().optional().describe("Resource identifier for serialization (e.g., workspace path). Only one task per resource can be in-progress at a time."),
+  callbackDepth: z.number().int().min(0).optional().describe("Callback chain depth -- 0 for normal tasks, incremented for callback-spawned tasks"),
   
   // Gate workflow fields (optional for backward compatibility)
   gate: GateState.optional().describe("Current gate and entry timestamp"),

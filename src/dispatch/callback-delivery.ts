@@ -23,6 +23,7 @@ const TERMINAL_STATUSES = new Set(["done", "cancelled", "deadletter"]);
 const CALLBACK_TIMEOUT_MS = 120_000; // 2 minutes per user decision
 const MAX_DELIVERY_ATTEMPTS = 3;
 const MIN_RETRY_INTERVAL_MS = 30_000; // skip retries within 30s
+export const MAX_CALLBACK_DEPTH = 3;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -47,10 +48,20 @@ export interface DeliverCallbacksOptions {
  * Best-effort: errors are caught and never propagate to the caller (DLVR-04).
  */
 export async function deliverCallbacks(opts: DeliverCallbacksOptions): Promise<void> {
-  const { taskId, store, subscriptionStore } = opts;
+  const { taskId, store, subscriptionStore, logger } = opts;
 
   const task = await store.get(taskId);
   if (!task || !TERMINAL_STATUSES.has(task.frontmatter.status)) {
+    return;
+  }
+
+  // SAFE-01: Depth limiting — prevent infinite callback chains
+  const depth = task.frontmatter.callbackDepth ?? 0;
+  if (depth >= MAX_CALLBACK_DEPTH) {
+    await logger.log("subscription.depth_exceeded", "callback-delivery", {
+      taskId,
+      payload: { depth, maxDepth: MAX_CALLBACK_DEPTH },
+    });
     return;
   }
 
@@ -72,7 +83,7 @@ export async function deliverCallbacks(opts: DeliverCallbacksOptions): Promise<v
  * Skips subscriptions attempted within MIN_RETRY_INTERVAL_MS (DLVR-02).
  */
 export async function retryPendingDeliveries(opts: DeliverCallbacksOptions): Promise<void> {
-  const { taskId, store, subscriptionStore } = opts;
+  const { taskId, store, subscriptionStore, logger } = opts;
 
   const task = await store.get(taskId);
   if (!task || !TERMINAL_STATUSES.has(task.frontmatter.status)) {
@@ -80,16 +91,15 @@ export async function retryPendingDeliveries(opts: DeliverCallbacksOptions): Pro
   }
 
   const activeSubs = await subscriptionStore.list(taskId, { status: "active" });
+  // SAFE-02: Expanded filter — include both granularities and deliveryAttempts >= 0
+  // (handles never-attempted recovery AND retry of previously failed attempts)
   const retryCandidates = activeSubs.filter(
-    (s) =>
-      s.granularity === "completion" &&
-      s.deliveryAttempts > 0 &&
-      s.deliveryAttempts < MAX_DELIVERY_ATTEMPTS,
+    (s) => s.deliveryAttempts < MAX_DELIVERY_ATTEMPTS,
   );
 
   const now = Date.now();
   for (const sub of retryCandidates) {
-    // Skip if last attempt was too recent
+    // Skip if last attempt was too recent (only applies to previously attempted)
     if (sub.lastAttemptAt) {
       const elapsed = now - new Date(sub.lastAttemptAt).getTime();
       if (elapsed < MIN_RETRY_INTERVAL_MS) {
@@ -98,7 +108,21 @@ export async function retryPendingDeliveries(opts: DeliverCallbacksOptions): Pro
     }
 
     try {
-      await deliverSingleCallback(task, sub, opts);
+      // SAFE-02: Emit recovery event for never-attempted subscriptions
+      if (sub.deliveryAttempts === 0) {
+        await logger.log("subscription.recovery_attempted", "callback-delivery", {
+          taskId,
+          payload: { subscriptionId: sub.id, granularity: sub.granularity },
+        });
+      }
+
+      // Route based on granularity
+      if (sub.granularity === "all") {
+        // For "all" granularity, use transition-based delivery
+        await deliverAllGranularityForSub(task, sub, opts);
+      } else {
+        await deliverSingleCallback(task, sub, opts);
+      }
     } catch (_err) {
       // Best-effort retry
     }
@@ -168,6 +192,16 @@ export async function deliverAllGranularityCallbacks(opts: DeliverCallbacksOptio
   const task = await store.get(taskId);
   if (!task) return;
 
+  // SAFE-01: Depth limiting — prevent infinite callback chains
+  const depth = task.frontmatter.callbackDepth ?? 0;
+  if (depth >= MAX_CALLBACK_DEPTH) {
+    await logger.log("subscription.depth_exceeded", "callback-delivery", {
+      taskId,
+      payload: { depth, maxDepth: MAX_CALLBACK_DEPTH },
+    });
+    return;
+  }
+
   const activeSubs = await subscriptionStore.list(taskId, { status: "active" });
   const allSubs = activeSubs.filter((s) => s.granularity === "all");
 
@@ -204,6 +238,7 @@ export async function deliverAllGranularityCallbacks(opts: DeliverCallbacksOptio
         priority: "normal",
         routing: { role: sub.subscriberId },
         taskFileContents: prompt,
+        metadata: { callbackDepth: (task.frontmatter.callbackDepth ?? 0) + 1 },
       };
 
       const result = await opts.executor.spawnSession(context, {
@@ -230,6 +265,64 @@ export async function deliverAllGranularityCallbacks(opts: DeliverCallbacksOptio
 // ---------------------------------------------------------------------------
 
 /**
+ * Deliver an "all" granularity callback for a single subscriber during recovery.
+ * Scans event log for transitions after lastDeliveredAt, batches into a single callback.
+ */
+async function deliverAllGranularityForSub(
+  task: Task,
+  sub: TaskSubscription,
+  opts: DeliverCallbacksOptions,
+): Promise<void> {
+  const { subscriptionStore, logger } = opts;
+
+  const lastDeliveredAtMs = sub.lastDeliveredAt
+    ? new Date(sub.lastDeliveredAt).getTime()
+    : 0;
+
+  const events = await logger.query({ type: "task.transitioned", taskId: task.frontmatter.id });
+
+  const newEvents = events
+    .filter((e) => new Date(e.timestamp).getTime() > lastDeliveredAtMs)
+    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+  if (newEvents.length === 0) return;
+
+  const transitions: TransitionRecord[] = newEvents.map((e) => ({
+    fromStatus: String((e.payload as Record<string, unknown>).from ?? ""),
+    toStatus: String((e.payload as Record<string, unknown>).to ?? ""),
+    timestamp: e.timestamp,
+  }));
+
+  const prompt = buildCallbackPrompt(task, sub, opts.tracePath, transitions);
+
+  const context: TaskContext = {
+    taskId: task.frontmatter.id,
+    taskPath: "",
+    agent: sub.subscriberId,
+    priority: "normal",
+    routing: { role: sub.subscriberId },
+    taskFileContents: prompt,
+    metadata: { callbackDepth: (task.frontmatter.callbackDepth ?? 0) + 1 },
+  };
+
+  const result = await opts.executor.spawnSession(context, {
+    timeoutMs: CALLBACK_TIMEOUT_MS,
+    correlationId: randomUUID(),
+  });
+
+  if (result.success) {
+    const latestTimestamp = transitions[transitions.length - 1]!.timestamp;
+    await subscriptionStore.update(task.frontmatter.id, sub.id, {
+      status: "delivered",
+      deliveredAt: new Date().toISOString(),
+      lastDeliveredAt: latestTimestamp,
+    });
+  } else {
+    await handleDeliveryFailure(task, sub, opts, result.error || "spawn failed");
+  }
+}
+
+/**
  * Deliver a single callback to a subscriber agent via session spawn.
  */
 async function deliverSingleCallback(
@@ -247,6 +340,7 @@ async function deliverSingleCallback(
     priority: "normal",
     routing: { role: sub.subscriberId },
     taskFileContents: prompt,
+    metadata: { callbackDepth: (task.frontmatter.callbackDepth ?? 0) + 1 },
   };
 
   try {
