@@ -166,7 +166,7 @@ Plans:
   3. Budget gate CI test still passes after SKILL.md update (context size stays under ceiling)
 **Plans**: 1 plan
 Plans:
-- [ ] 32-01-PLAN.md — SKILL.md subscription docs, callback handler contract, and budget gate adjustment
+- [x] 32-01-PLAN.md — SKILL.md subscription docs, callback handler contract, and budget gate adjustment
 
 ### Phase 33: Callback Wiring Fixes
 **Goal**: All-granularity delivery fires in real-time and callback depth limiting actually prevents infinite loops
@@ -177,7 +177,9 @@ Plans:
   1. `deliverAllGranularityCallbacks` is called from `assign-executor.ts` `onRunComplete` so "all" granularity subscribers get real-time notifications on every state transition
   2. `handleAofDispatch` reads `callbackDepth` from session context and writes it to new task `frontmatter.callbackDepth` so depth limiting works across callback chains
   3. Existing tests continue to pass; new integration tests cover the wired paths
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [ ] 33-01-PLAN.md — Wire deliverAllGranularityCallbacks into onRunComplete and propagate callbackDepth through MCP boundary
 
 ## Progress
 
