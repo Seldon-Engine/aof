@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: Task Notifications
 status: executing
-stopped_at: Completed 31-01-PLAN.md
-last_updated: "2026-03-11T01:35:55.699Z"
-last_activity: 2026-03-11 — Completed all-granularity callback delivery plan 01
+stopped_at: Completed 31-02-PLAN.md
+last_updated: "2026-03-11T01:42:00.000Z"
+last_activity: 2026-03-11 — Completed callback depth limiting and restart recovery plan 02
 progress:
   total_phases: 5
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 7
-  completed_plans: 6
-  percent: 96
+  completed_plans: 7
+  percent: 100
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-09)
 ## Current Position
 
 Phase: 31 of 32 (Granularity, Safety and Hardening)
-Plan: 1 of 2 complete
-Status: In Progress
-Last activity: 2026-03-11 — Completed all-granularity callback delivery plan 01
+Plan: 2 of 2 complete
+Status: Phase Complete
+Last activity: 2026-03-11 — Completed callback depth limiting and restart recovery plan 02
 
-Progress: [██████████] 96%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -55,6 +55,9 @@ All decisions logged in PROJECT.md Key Decisions table.
 - [Phase 31-01]: Cursor-based scanning with lastDeliveredAt as high-water mark into EventLogger.query() results
 - [Phase 31-01]: Self-healing cursor: lastDeliveredAt only advances on successful delivery
 - [Phase 31-01]: All-granularity is status-agnostic (no terminal status check), superset of completion
+- [Phase 31-02]: MAX_CALLBACK_DEPTH=3 as non-configurable constant for safety simplicity
+- [Phase 31-02]: TaskContext.metadata field added for cross-session callbackDepth propagation
+- [Phase 31-02]: Recovery scan handles both granularities via deliverAllGranularityForSub helper
 
 ### Roadmap Evolution
 
@@ -76,6 +79,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-11T01:34:49Z
-Stopped at: Completed 31-01-PLAN.md
-Resume file: .planning/phases/31-granularity-safety-and-hardening/31-01-SUMMARY.md
+Last session: 2026-03-11T01:42:00Z
+Stopped at: Completed 31-02-PLAN.md
+Resume file: .planning/phases/31-granularity-safety-and-hardening/31-02-SUMMARY.md

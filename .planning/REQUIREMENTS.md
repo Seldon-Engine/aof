@@ -32,8 +32,8 @@ Requirements for task notification subscriptions and callback delivery.
 
 ### Safety
 
-- [ ] **SAFE-01**: Infinite callback loops prevented (depth counter or cross-cycle delivery)
-- [ ] **SAFE-02**: Subscription delivery survives daemon restart (pending subscriptions re-evaluated on startup)
+- [x] **SAFE-01**: Infinite callback loops prevented (depth counter or cross-cycle delivery)
+- [x] **SAFE-02**: Subscription delivery survives daemon restart (pending subscriptions re-evaluated on startup)
 
 ## Future Requirements
 
@@ -78,8 +78,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GRAN-01 | Phase 30 | Complete |
 | GRAN-02 | Phase 31 | Complete |
 | GUID-01 | Phase 32 | Pending |
-| SAFE-01 | Phase 31 | Pending |
-| SAFE-02 | Phase 31 | Pending |
+| SAFE-01 | Phase 31 | Complete |
+| SAFE-02 | Phase 31 | Complete |
 
 **Coverage:**
 - v1.8 requirements: 13 total

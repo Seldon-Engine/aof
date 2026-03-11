@@ -94,7 +94,7 @@ See: `.planning/milestones/v1.5-ROADMAP.md` for full details
 - [x] **Phase 28: Schema and Storage** - Subscription data model, Zod schema, and co-located filesystem persistence (completed 2026-03-09)
 - [x] **Phase 29: Subscription API** - MCP tools for creating and canceling subscriptions (dispatch-time and standalone) (completed 2026-03-10)
 - [x] **Phase 30: Callback Delivery** - Scheduler-driven callback dispatch with retry and tracing (gap closure in progress) (completed 2026-03-10)
-- [ ] **Phase 31: Granularity, Safety, and Hardening** - All-transitions granularity, loop prevention, and restart durability
+- [x] **Phase 31: Granularity, Safety, and Hardening** - All-transitions granularity, loop prevention, and restart durability (completed 2026-03-11)
 - [ ] **Phase 32: Agent Guidance** - SKILL.md update with callback behavior and idempotency expectations
 
 ## Phase Details
@@ -202,5 +202,5 @@ Phases execute in numeric order: 28 -> 29 -> 30 -> 31 -> 32
 | 28. Schema and Storage | v1.8 | 1/1 | Complete | 2026-03-09 |
 | 29. Subscription API | v1.8 | 1/1 | Complete | 2026-03-10 |
 | 30. Callback Delivery | 3/3 | Complete    | 2026-03-10 | - |
-| 31. Granularity, Safety, and Hardening | 1/2 | In Progress|  | - |
+| 31. Granularity, Safety, and Hardening | 2/2 | Complete   | 2026-03-11 | - |
 | 32. Agent Guidance | v1.8 | 0/? | Not started | - |
