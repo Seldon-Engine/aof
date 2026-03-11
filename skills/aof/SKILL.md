@@ -20,12 +20,20 @@ Agents use MCP tools below. CLI (`aof`) is for human operators only (setup, debu
 
 | Tool | Purpose | Returns |
 |------|---------|---------|
-| `aof_dispatch` | Create task and assign to agent/team. Accepts `workflow` param (see DAG section). | `{ taskId, status, assignedAgent, filePath, sessionId }` |
+| `aof_dispatch` | Create task and assign to agent/team. Accepts `workflow` (see DAG section) and `subscribe` params. | `{ taskId, status, assignedAgent, filePath, sessionId, subscriptionId }` |
 | `aof_task_update` | Log work, change status, mark blocked, append outputs | `{ success, taskId, newStatus, updatedAt }` |
 | `aof_task_complete` | Mark task done with summary and deliverables | `{ success, taskId, finalStatus, completedAt }` |
 | `aof_status_report` | Query task counts filtered by agent/status | `{ total, byStatus, tasks[], summary }` |
 | `aof_board` | Kanban board view for a team | `{ team, timestamp, columns, stats }` |
-| `aof_project_create` | Create isolated project with own task store | `{ projectId, path }` |
+| `aof_task_edit` | Edit task frontmatter (title, priority, routing) without changing status | `{ success, taskId, updatedFields }` |
+| `aof_task_cancel` | Cancel a task with optional reason | `{ success, taskId, status, reason }` |
+| `aof_task_block` | Block a task with a reason, preventing dispatch until unblocked | `{ success, taskId, status, reason }` |
+| `aof_task_unblock` | Unblock a previously blocked task, moving it back to ready | `{ success, taskId, status }` |
+| `aof_task_dep_add` | Add dependency — task blocked until blocker completes | `{ success, taskId, blockerId, dependsOn }` |
+| `aof_task_dep_remove` | Remove a dependency from a task | `{ success, taskId, blockerId, dependsOn }` |
+| `aof_task_subscribe` | Subscribe to task outcome notifications | `{ subscriptionId, taskId, granularity, status }` |
+| `aof_task_unsubscribe` | Cancel a task outcome subscription | `{ subscriptionId, status }` |
+| `aof_project_create` | Create isolated project with own task store | `{ projectId, projectRoot, directoriesCreated }` |
 | `aof_project_list` | List all projects on the instance | `{ projects[] }` |
 | `aof_project_add_participant` | Add agent to project participant list | `{ success }` |
 
@@ -197,3 +205,29 @@ Agent `id` values must match OpenClaw agent names. Run `aof init` to auto-sync f
 ## Completion Protocol
 
 Always call `aof_task_complete` with a brief summary when done. Exiting without this call fails the task and triggers retry.
+
+---
+
+## Subscriptions & Callbacks
+
+Subscribe to task notifications. Callbacks spawn a new session to the subscriber agent with task results.
+
+- **Subscribe at dispatch:** `subscribe: "completion"` or `subscribe: "all"` param on `aof_dispatch`
+- **Subscribe later:** `aof_task_subscribe` tool (subscriberId must be a valid org chart agent ID)
+- **Unsubscribe:** `aof_task_unsubscribe` with the subscriptionId
+
+### Granularity
+
+| Granularity | Fires | Use for |
+|-------------|-------|---------|
+| `completion` | Once on terminal state (done/cancelled/deadletter) | React-on-done workflows |
+| `all` | Every status change, batched per poll cycle | Progress monitoring |
+
+`all` is a superset of `completion` -- no need for both on the same task.
+
+### Callback Handler Contract
+
+- You receive a session with task results as context. Process it and exit.
+- Delivery is at-least-once. You may receive the same callback more than once. Design handlers to be idempotent.
+- Callback chains are depth-limited to 3.
+- Callback sessions have a 2-minute timeout -- keep handlers lightweight.

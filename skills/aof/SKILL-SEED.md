@@ -14,14 +14,21 @@ Deterministic orchestration for multi-agent systems. Agents use MCP tools below.
 
 | Tool | Purpose | Returns |
 |------|---------|---------|
-| `aof_dispatch` | Create task and assign to agent/team | `{ taskId, status, assignedAgent, filePath, sessionId }` |
+| `aof_dispatch` | Create task and assign to agent/team. Accepts `workflow` and `subscribe` params. | `{ taskId, status, assignedAgent, filePath, sessionId, subscriptionId }` |
 | `aof_task_update` | Log work, change status, mark blocked | `{ success, taskId, newStatus, updatedAt }` |
 | `aof_task_complete` | Mark task done with summary and deliverables | `{ success, taskId, finalStatus, completedAt }` |
 | `aof_status_report` | Query task counts filtered by agent/status | `{ total, byStatus, tasks[], summary }` |
 | `aof_board` | Kanban board view for a team | `{ team, timestamp, columns, stats }` |
-| `aof_project_create` | Create isolated project with own task store | `{ projectId, path }` |
+| `aof_task_edit` | Edit task frontmatter (title, priority, routing) | `{ success, taskId, updatedFields }` |
+| `aof_task_cancel` | Cancel a task with optional reason | `{ success, taskId, status, reason }` |
+| `aof_task_block` | Block a task with a reason | `{ success, taskId, status, reason }` |
+| `aof_task_unblock` | Unblock a task, move back to ready | `{ success, taskId, status }` |
+| `aof_task_dep_add` | Add dependency (task blocked until blocker completes) | `{ success, taskId, blockerId, dependsOn }` |
+| `aof_task_dep_remove` | Remove a dependency from a task | `{ success, taskId, blockerId, dependsOn }` |
+| `aof_task_subscribe` | Subscribe to task outcome notifications | `{ subscriptionId, taskId, granularity, status }` |
+| `aof_task_unsubscribe` | Cancel a task outcome subscription | `{ subscriptionId, status }` |
+| `aof_project_create` | Create isolated project with own task store | `{ projectId, projectRoot, directoriesCreated }` |
 | `aof_project_list` | List all projects on the instance | `{ projects[] }` |
-| `aof_project_add_participant` | Add agent to project participant list | `{ success }` |
 
 No parameter tables here -- tool JSON schemas provide full parameter docs at call time.
 
