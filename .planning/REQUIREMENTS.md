@@ -24,7 +24,7 @@ Requirements for task notification subscriptions and callback delivery.
 ### Granularity
 
 - [x] **GRAN-01**: `"completion"` granularity fires on terminal states (done/cancelled/deadletter)
-- [x] **GRAN-02**: `"all"` granularity fires on every state transition, batched per poll cycle
+- [ ] **GRAN-02**: `"all"` granularity fires on every state transition, batched per poll cycle
 
 ### Agent Guidance
 
@@ -32,7 +32,7 @@ Requirements for task notification subscriptions and callback delivery.
 
 ### Safety
 
-- [x] **SAFE-01**: Infinite callback loops prevented (depth counter or cross-cycle delivery)
+- [ ] **SAFE-01**: Infinite callback loops prevented (depth counter or cross-cycle delivery)
 - [x] **SAFE-02**: Subscription delivery survives daemon restart (pending subscriptions re-evaluated on startup)
 
 ## Future Requirements
@@ -76,13 +76,15 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DLVR-03 | Phase 30 | Complete |
 | DLVR-04 | Phase 30 | Complete |
 | GRAN-01 | Phase 30 | Complete |
-| GRAN-02 | Phase 31 | Complete |
+| GRAN-02 | Phase 33 | Pending |
 | GUID-01 | Phase 32 | Complete |
-| SAFE-01 | Phase 31 | Complete |
+| SAFE-01 | Phase 33 | Pending |
 | SAFE-02 | Phase 31 | Complete |
 
 **Coverage:**
 - v1.8 requirements: 13 total
+- Satisfied: 11
+- Pending (gap closure): 2 (GRAN-02, SAFE-01 → Phase 33)
 - Mapped to phases: 13
 - Unmapped: 0
 

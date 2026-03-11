@@ -96,6 +96,7 @@ See: `.planning/milestones/v1.5-ROADMAP.md` for full details
 - [x] **Phase 30: Callback Delivery** - Scheduler-driven callback dispatch with retry and tracing (gap closure in progress) (completed 2026-03-10)
 - [x] **Phase 31: Granularity, Safety, and Hardening** - All-transitions granularity, loop prevention, and restart durability (completed 2026-03-11)
 - [x] **Phase 32: Agent Guidance** - SKILL.md update with callback behavior and idempotency expectations (completed 2026-03-11)
+- [ ] **Phase 33: Callback Wiring Fixes** - Wire deliverAllGranularityCallbacks into production and propagate callbackDepth through MCP boundary (gap closure)
 
 ## Phase Details
 
@@ -167,10 +168,21 @@ Plans:
 Plans:
 - [ ] 32-01-PLAN.md — SKILL.md subscription docs, callback handler contract, and budget gate adjustment
 
+### Phase 33: Callback Wiring Fixes
+**Goal**: All-granularity delivery fires in real-time and callback depth limiting actually prevents infinite loops
+**Depends on**: Phase 32
+**Requirements**: GRAN-02, SAFE-01
+**Gap Closure**: Closes integration gaps from v1.8 milestone audit
+**Success Criteria** (what must be TRUE):
+  1. `deliverAllGranularityCallbacks` is called from `assign-executor.ts` `onRunComplete` so "all" granularity subscribers get real-time notifications on every state transition
+  2. `handleAofDispatch` reads `callbackDepth` from session context and writes it to new task `frontmatter.callbackDepth` so depth limiting works across callback chains
+  3. Existing tests continue to pass; new integration tests cover the wired paths
+**Plans**: TBD
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 28 -> 29 -> 30 -> 31 -> 32
+Phases execute in numeric order: 28 -> 29 -> 30 -> 31 -> 32 -> 33
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -205,4 +217,5 @@ Phases execute in numeric order: 28 -> 29 -> 30 -> 31 -> 32
 | 29. Subscription API | v1.8 | 1/1 | Complete | 2026-03-10 |
 | 30. Callback Delivery | v1.8 | 3/3 | Complete | 2026-03-10 |
 | 31. Granularity, Safety, and Hardening | v1.8 | 2/2 | Complete | 2026-03-11 |
-| 32. Agent Guidance | 1/1 | Complete    | 2026-03-11 | - |
+| 32. Agent Guidance | v1.8 | 1/1 | Complete | 2026-03-11 |
+| 33. Callback Wiring Fixes | v1.8 | 0/? | Not started | - |
