@@ -803,3 +803,279 @@ describe("TaskSubscription schema with lastDeliveredAt", () => {
     expect(withoutLDA.lastDeliveredAt).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// SAFE-01: Callback depth limiting tests (Phase 31-02)
+// ---------------------------------------------------------------------------
+
+describe("SAFE-01: callback depth limiting", () => {
+  let tmpDir: string;
+  let subscriptionStore: SubscriptionStore;
+  let executor: MockAdapter;
+  let logger: ReturnType<typeof createMockLogger>;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "aof-cb-depth-"));
+    subscriptionStore = new SubscriptionStore(
+      (id: string) => Promise.resolve(join(tmpDir, "tasks", "ready", id)),
+    );
+    executor = new MockAdapter();
+    logger = createMockLogger();
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("Test 1: deliverCallbacks skips delivery when task.frontmatter.callbackDepth >= 3", async () => {
+    const task = makeTask({ frontmatter: { callbackDepth: 3 } } as any);
+    const store = createMockTaskStore(task);
+    await subscriptionStore.create("TASK-2026-03-10-001", "agent:watcher", "completion");
+
+    await deliverCallbacks({
+      taskId: "TASK-2026-03-10-001",
+      store,
+      subscriptionStore,
+      executor,
+      logger,
+    });
+
+    expect(executor.spawned).toHaveLength(0);
+  });
+
+  it("Test 2: deliverCallbacks delivers normally when callbackDepth is 0 or undefined", async () => {
+    // callbackDepth = 0
+    const task0 = makeTask({ frontmatter: { callbackDepth: 0 } } as any);
+    const store0 = createMockTaskStore(task0);
+    await subscriptionStore.create("TASK-2026-03-10-001", "agent:watcher", "completion");
+
+    await deliverCallbacks({
+      taskId: "TASK-2026-03-10-001",
+      store: store0,
+      subscriptionStore,
+      executor,
+      logger,
+    });
+
+    expect(executor.spawned).toHaveLength(1);
+
+    // Reset
+    executor.spawned.length = 0;
+
+    // callbackDepth = undefined (default)
+    const tmpDir2 = await mkdtemp(join(tmpdir(), "aof-cb-depth2-"));
+    const subscriptionStore2 = new SubscriptionStore(
+      (id: string) => Promise.resolve(join(tmpDir2, "tasks", "ready", id)),
+    );
+    const taskUndef = makeTask(); // no callbackDepth
+    const storeUndef = createMockTaskStore(taskUndef);
+    await subscriptionStore2.create("TASK-2026-03-10-001", "agent:watcher", "completion");
+
+    await deliverCallbacks({
+      taskId: "TASK-2026-03-10-001",
+      store: storeUndef,
+      subscriptionStore: subscriptionStore2,
+      executor,
+      logger,
+    });
+
+    expect(executor.spawned).toHaveLength(1);
+    await rm(tmpDir2, { recursive: true, force: true });
+  });
+
+  it("Test 3: subscription.depth_exceeded event logged with depth and maxDepth payload", async () => {
+    const task = makeTask({ frontmatter: { callbackDepth: 4 } } as any);
+    const store = createMockTaskStore(task);
+    await subscriptionStore.create("TASK-2026-03-10-001", "agent:watcher", "completion");
+
+    await deliverCallbacks({
+      taskId: "TASK-2026-03-10-001",
+      store,
+      subscriptionStore,
+      executor,
+      logger,
+    });
+
+    expect(logger.log).toHaveBeenCalledWith(
+      "subscription.depth_exceeded",
+      "callback-delivery",
+      expect.objectContaining({
+        taskId: "TASK-2026-03-10-001",
+        payload: expect.objectContaining({
+          depth: 4,
+          maxDepth: 3,
+        }),
+      }),
+    );
+  });
+
+  it("Test 4: deliverSingleCallback includes callbackDepth + 1 in TaskContext metadata", async () => {
+    const task = makeTask({ frontmatter: { callbackDepth: 1 } } as any);
+    const store = createMockTaskStore(task);
+    await subscriptionStore.create("TASK-2026-03-10-001", "agent:watcher", "completion");
+
+    await deliverCallbacks({
+      taskId: "TASK-2026-03-10-001",
+      store,
+      subscriptionStore,
+      executor,
+      logger,
+    });
+
+    expect(executor.spawned).toHaveLength(1);
+    const context = executor.spawned[0].context;
+    expect((context as any).metadata?.callbackDepth).toBe(2);
+  });
+
+  it("Test 5: deliverAllGranularityCallbacks also checks depth before delivery", async () => {
+    const task = makeTask({ frontmatter: { callbackDepth: 3, status: "in-progress" } } as any);
+    const store = createMockTaskStore(task);
+    await subscriptionStore.create("TASK-2026-03-10-001", "agent:watcher", "all");
+
+    logger.query = vi.fn().mockResolvedValue([
+      {
+        eventId: 1, type: "task.transitioned", timestamp: "2026-03-10T10:01:00Z",
+        actor: "system", taskId: "TASK-2026-03-10-001",
+        payload: { from: "ready", to: "in-progress" },
+      },
+    ]);
+
+    await deliverAllGranularityCallbacks({
+      taskId: "TASK-2026-03-10-001",
+      store,
+      subscriptionStore,
+      executor,
+      logger,
+    });
+
+    expect(executor.spawned).toHaveLength(0);
+    expect(logger.log).toHaveBeenCalledWith(
+      "subscription.depth_exceeded",
+      "callback-delivery",
+      expect.objectContaining({
+        taskId: "TASK-2026-03-10-001",
+      }),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SAFE-02: Restart recovery tests (Phase 31-02)
+// ---------------------------------------------------------------------------
+
+describe("SAFE-02: restart recovery", () => {
+  let tmpDir: string;
+  let subscriptionStore: SubscriptionStore;
+  let executor: MockAdapter;
+  let logger: ReturnType<typeof createMockLogger>;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "aof-cb-recovery-"));
+    subscriptionStore = new SubscriptionStore(
+      (id: string) => Promise.resolve(join(tmpDir, "tasks", "ready", id)),
+    );
+    executor = new MockAdapter();
+    logger = createMockLogger();
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("Test 6: retryPendingDeliveries picks up subscriptions with deliveryAttempts === 0 on terminal tasks", async () => {
+    const task = makeTask();
+    const store = createMockTaskStore(task);
+    // Create a subscription that was never attempted (deliveryAttempts = 0)
+    await subscriptionStore.create("TASK-2026-03-10-001", "agent:watcher", "completion");
+
+    await retryPendingDeliveries({
+      taskId: "TASK-2026-03-10-001",
+      store,
+      subscriptionStore,
+      executor,
+      logger,
+    });
+
+    expect(executor.spawned).toHaveLength(1);
+  });
+
+  it("Test 7: retryPendingDeliveries emits subscription.recovery_attempted for never-attempted subscriptions", async () => {
+    const task = makeTask();
+    const store = createMockTaskStore(task);
+    const sub = await subscriptionStore.create("TASK-2026-03-10-001", "agent:watcher", "completion");
+
+    await retryPendingDeliveries({
+      taskId: "TASK-2026-03-10-001",
+      store,
+      subscriptionStore,
+      executor,
+      logger,
+    });
+
+    expect(logger.log).toHaveBeenCalledWith(
+      "subscription.recovery_attempted",
+      "callback-delivery",
+      expect.objectContaining({
+        taskId: "TASK-2026-03-10-001",
+        payload: expect.objectContaining({
+          subscriptionId: sub.id,
+        }),
+      }),
+    );
+  });
+
+  it("Test 8: retryPendingDeliveries handles both completion and all granularity subscriptions", async () => {
+    const task = makeTask();
+    const store = createMockTaskStore(task);
+    // Create subscriptions of both granularities, never attempted
+    await subscriptionStore.create("TASK-2026-03-10-001", "agent:completion-watcher", "completion");
+    await subscriptionStore.create("TASK-2026-03-10-001", "agent:all-watcher", "all");
+
+    // For "all" granularity, mock the logger.query for transition events
+    logger.query = vi.fn().mockResolvedValue([
+      {
+        eventId: 1, type: "task.transitioned", timestamp: "2026-03-10T11:00:00Z",
+        actor: "system", taskId: "TASK-2026-03-10-001",
+        payload: { from: "in-progress", to: "done" },
+      },
+    ]);
+
+    await retryPendingDeliveries({
+      taskId: "TASK-2026-03-10-001",
+      store,
+      subscriptionStore,
+      executor,
+      logger,
+    });
+
+    // Both should be attempted
+    expect(executor.spawned.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("Test 9: Subscription with deliveryAttempts = 2 from pre-restart still counts toward 3-attempt max", async () => {
+    const task = makeTask();
+    const store = createMockTaskStore(task);
+    executor.setShouldFail(true, "connection refused");
+
+    const sub = await subscriptionStore.create("TASK-2026-03-10-001", "agent:watcher", "completion");
+    // Simulate 2 prior attempts from before restart
+    const oldTime = new Date(Date.now() - 60_000).toISOString();
+    await subscriptionStore.update("TASK-2026-03-10-001", sub.id, {
+      deliveryAttempts: 2,
+      lastAttemptAt: oldTime,
+    });
+
+    await retryPendingDeliveries({
+      taskId: "TASK-2026-03-10-001",
+      store,
+      subscriptionStore,
+      executor,
+      logger,
+    });
+
+    // Should attempt (2 < 3) but the failure increments to 3 and marks failed
+    const updated = await subscriptionStore.get("TASK-2026-03-10-001", sub.id);
+    expect(updated!.deliveryAttempts).toBe(3);
+    expect(updated!.status).toBe("failed");
+  });
+});
