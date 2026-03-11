@@ -16,6 +16,7 @@ import {
   deliverCallbacks,
   retryPendingDeliveries,
   buildCallbackPrompt,
+  deliverAllGranularityCallbacks,
 } from "../callback-delivery.js";
 import type { Task } from "../../schemas/task.js";
 
@@ -513,5 +514,292 @@ describe("captureTrace integration in callback delivery", () => {
     expect(mockCaptureTrace).toHaveBeenCalledWith(
       expect.objectContaining({ debug: false }),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// All-granularity delivery tests (Phase 31)
+// ---------------------------------------------------------------------------
+
+describe("deliverAllGranularityCallbacks", () => {
+  let tmpDir: string;
+  let subscriptionStore: SubscriptionStore;
+  let executor: MockAdapter;
+  let logger: ReturnType<typeof createMockLogger>;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "aof-cb-all-"));
+    subscriptionStore = new SubscriptionStore(
+      (id: string) => Promise.resolve(join(tmpDir, "tasks", "ready", id)),
+    );
+    executor = new MockAdapter();
+    logger = createMockLogger();
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("delivers single callback with all 3 transitions since lastDeliveredAt in order", async () => {
+    const task = makeTask({ frontmatter: { status: "in-progress" } } as any);
+    const store = createMockTaskStore(task);
+    const sub = await subscriptionStore.create("TASK-2026-03-10-001", "agent:watcher", "all");
+
+    // Set lastDeliveredAt to before the transitions
+    const baseTime = new Date("2026-03-10T10:00:00Z");
+    await subscriptionStore.update("TASK-2026-03-10-001", sub.id, {
+      lastDeliveredAt: baseTime.toISOString(),
+    } as any);
+
+    // Mock logger.query to return 3 transitions after lastDeliveredAt
+    logger.query = vi.fn().mockResolvedValue([
+      {
+        eventId: 1, type: "task.transitioned", timestamp: "2026-03-10T10:01:00Z",
+        actor: "system", taskId: "TASK-2026-03-10-001",
+        payload: { from: "ready", to: "in-progress" },
+      },
+      {
+        eventId: 2, type: "task.transitioned", timestamp: "2026-03-10T10:02:00Z",
+        actor: "system", taskId: "TASK-2026-03-10-001",
+        payload: { from: "in-progress", to: "blocked" },
+      },
+      {
+        eventId: 3, type: "task.transitioned", timestamp: "2026-03-10T10:03:00Z",
+        actor: "system", taskId: "TASK-2026-03-10-001",
+        payload: { from: "blocked", to: "in-progress" },
+      },
+    ]);
+
+    await deliverAllGranularityCallbacks({
+      taskId: "TASK-2026-03-10-001",
+      store,
+      subscriptionStore,
+      executor,
+      logger,
+    });
+
+    expect(executor.spawned).toHaveLength(1);
+    // The prompt should include all 3 transitions
+    const prompt = executor.spawned[0].context.taskFileContents;
+    expect(prompt).toContain("ready -> in-progress");
+    expect(prompt).toContain("in-progress -> blocked");
+    expect(prompt).toContain("blocked -> in-progress");
+  });
+
+  it("delivers no callback when no new transitions since lastDeliveredAt", async () => {
+    const task = makeTask({ frontmatter: { status: "in-progress" } } as any);
+    const store = createMockTaskStore(task);
+    const sub = await subscriptionStore.create("TASK-2026-03-10-001", "agent:watcher", "all");
+
+    await subscriptionStore.update("TASK-2026-03-10-001", sub.id, {
+      lastDeliveredAt: "2026-03-10T12:00:00Z",
+    } as any);
+
+    // No transitions after lastDeliveredAt
+    logger.query = vi.fn().mockResolvedValue([]);
+
+    await deliverAllGranularityCallbacks({
+      taskId: "TASK-2026-03-10-001",
+      store,
+      subscriptionStore,
+      executor,
+      logger,
+    });
+
+    expect(executor.spawned).toHaveLength(0);
+  });
+
+  it("advances lastDeliveredAt to latest transition timestamp after successful delivery", async () => {
+    const task = makeTask({ frontmatter: { status: "in-progress" } } as any);
+    const store = createMockTaskStore(task);
+    const sub = await subscriptionStore.create("TASK-2026-03-10-001", "agent:watcher", "all");
+
+    await subscriptionStore.update("TASK-2026-03-10-001", sub.id, {
+      lastDeliveredAt: "2026-03-10T10:00:00Z",
+    } as any);
+
+    logger.query = vi.fn().mockResolvedValue([
+      {
+        eventId: 1, type: "task.transitioned", timestamp: "2026-03-10T10:05:00Z",
+        actor: "system", taskId: "TASK-2026-03-10-001",
+        payload: { from: "ready", to: "in-progress" },
+      },
+    ]);
+
+    await deliverAllGranularityCallbacks({
+      taskId: "TASK-2026-03-10-001",
+      store,
+      subscriptionStore,
+      executor,
+      logger,
+    });
+
+    const updated = await subscriptionStore.get("TASK-2026-03-10-001", sub.id);
+    expect(updated!.lastDeliveredAt).toBe("2026-03-10T10:05:00Z");
+  });
+
+  it("gets all transitions from task creation when lastDeliveredAt is undefined", async () => {
+    const task = makeTask({ frontmatter: { status: "in-progress" } } as any);
+    const store = createMockTaskStore(task);
+    await subscriptionStore.create("TASK-2026-03-10-001", "agent:watcher", "all");
+    // No lastDeliveredAt set (undefined)
+
+    logger.query = vi.fn().mockResolvedValue([
+      {
+        eventId: 1, type: "task.transitioned", timestamp: "2026-03-09T12:00:00Z",
+        actor: "system", taskId: "TASK-2026-03-10-001",
+        payload: { from: "pending", to: "ready" },
+      },
+      {
+        eventId: 2, type: "task.transitioned", timestamp: "2026-03-10T10:00:00Z",
+        actor: "system", taskId: "TASK-2026-03-10-001",
+        payload: { from: "ready", to: "in-progress" },
+      },
+    ]);
+
+    await deliverAllGranularityCallbacks({
+      taskId: "TASK-2026-03-10-001",
+      store,
+      subscriptionStore,
+      executor,
+      logger,
+    });
+
+    expect(executor.spawned).toHaveLength(1);
+    const prompt = executor.spawned[0].context.taskFileContents;
+    expect(prompt).toContain("pending -> ready");
+    expect(prompt).toContain("ready -> in-progress");
+  });
+
+  it("does NOT advance lastDeliveredAt on failed delivery (self-healing cursor)", async () => {
+    const task = makeTask({ frontmatter: { status: "in-progress" } } as any);
+    const store = createMockTaskStore(task);
+    executor.setShouldFail(true, "connection refused");
+    const sub = await subscriptionStore.create("TASK-2026-03-10-001", "agent:watcher", "all");
+
+    await subscriptionStore.update("TASK-2026-03-10-001", sub.id, {
+      lastDeliveredAt: "2026-03-10T10:00:00Z",
+    } as any);
+
+    logger.query = vi.fn().mockResolvedValue([
+      {
+        eventId: 1, type: "task.transitioned", timestamp: "2026-03-10T10:05:00Z",
+        actor: "system", taskId: "TASK-2026-03-10-001",
+        payload: { from: "ready", to: "in-progress" },
+      },
+    ]);
+
+    await deliverAllGranularityCallbacks({
+      taskId: "TASK-2026-03-10-001",
+      store,
+      subscriptionStore,
+      executor,
+      logger,
+    });
+
+    const updated = await subscriptionStore.get("TASK-2026-03-10-001", sub.id);
+    // lastDeliveredAt should NOT have advanced
+    expect(updated!.lastDeliveredAt).toBe("2026-03-10T10:00:00Z");
+  });
+
+  it("fires on terminal transitions too (superset of completion)", async () => {
+    const task = makeTask({ frontmatter: { status: "done" } } as any);
+    const store = createMockTaskStore(task);
+    const sub = await subscriptionStore.create("TASK-2026-03-10-001", "agent:watcher", "all");
+
+    await subscriptionStore.update("TASK-2026-03-10-001", sub.id, {
+      lastDeliveredAt: "2026-03-10T10:00:00Z",
+    } as any);
+
+    logger.query = vi.fn().mockResolvedValue([
+      {
+        eventId: 1, type: "task.transitioned", timestamp: "2026-03-10T11:00:00Z",
+        actor: "system", taskId: "TASK-2026-03-10-001",
+        payload: { from: "in-progress", to: "done" },
+      },
+    ]);
+
+    await deliverAllGranularityCallbacks({
+      taskId: "TASK-2026-03-10-001",
+      store,
+      subscriptionStore,
+      executor,
+      logger,
+    });
+
+    expect(executor.spawned).toHaveLength(1);
+    const prompt = executor.spawned[0].context.taskFileContents;
+    expect(prompt).toContain("in-progress -> done");
+  });
+});
+
+describe("buildCallbackPrompt with transitions", () => {
+  it("includes transitions section when transitions array provided", () => {
+    const task = makeTask();
+    const sub = {
+      id: "sub-1",
+      subscriberId: "agent:watcher",
+      granularity: "all" as const,
+      status: "active" as const,
+      createdAt: "2026-03-09T12:00:00Z",
+      updatedAt: "2026-03-09T12:00:00Z",
+      deliveryAttempts: 0,
+    };
+    const transitions = [
+      { fromStatus: "ready", toStatus: "in-progress", timestamp: "2026-03-10T10:01:00Z" },
+      { fromStatus: "in-progress", toStatus: "done", timestamp: "2026-03-10T10:02:00Z" },
+    ];
+
+    const prompt = buildCallbackPrompt(task, sub, undefined, transitions);
+    expect(prompt).toContain("## Transitions");
+    expect(prompt).toContain("ready -> in-progress");
+    expect(prompt).toContain("in-progress -> done");
+    expect(prompt).toContain("2026-03-10T10:01:00Z");
+    expect(prompt).toContain("2026-03-10T10:02:00Z");
+  });
+
+  it("does not include transitions section when transitions not provided", () => {
+    const task = makeTask();
+    const sub = {
+      id: "sub-1",
+      subscriberId: "agent:watcher",
+      granularity: "completion" as const,
+      status: "active" as const,
+      createdAt: "2026-03-09T12:00:00Z",
+      updatedAt: "2026-03-09T12:00:00Z",
+      deliveryAttempts: 0,
+    };
+
+    const prompt = buildCallbackPrompt(task, sub);
+    expect(prompt).not.toContain("## Transitions");
+  });
+});
+
+describe("TaskSubscription schema with lastDeliveredAt", () => {
+  it("validates lastDeliveredAt as optional datetime string", async () => {
+    const { TaskSubscription } = await import("../../schemas/subscription.js");
+    const valid = TaskSubscription.parse({
+      id: "123e4567-e89b-12d3-a456-426614174000",
+      subscriberId: "agent:watcher",
+      granularity: "all",
+      status: "active",
+      createdAt: "2026-03-09T12:00:00Z",
+      updatedAt: "2026-03-09T12:00:00Z",
+      deliveryAttempts: 0,
+      lastDeliveredAt: "2026-03-10T10:00:00Z",
+    });
+    expect(valid.lastDeliveredAt).toBe("2026-03-10T10:00:00Z");
+
+    // Also valid without lastDeliveredAt
+    const withoutLDA = TaskSubscription.parse({
+      id: "123e4567-e89b-12d3-a456-426614174000",
+      subscriberId: "agent:watcher",
+      granularity: "all",
+      status: "active",
+      createdAt: "2026-03-09T12:00:00Z",
+      updatedAt: "2026-03-09T12:00:00Z",
+      deliveryAttempts: 0,
+    });
+    expect(withoutLDA.lastDeliveredAt).toBeUndefined();
   });
 });
