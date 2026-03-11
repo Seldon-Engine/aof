@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: Task Notifications
-status: completed
-stopped_at: Phase 31 context gathered
-last_updated: "2026-03-11T00:44:19.027Z"
-last_activity: 2026-03-10 — Completed callback delivery plan 03 (captureTrace gap closure)
+status: executing
+stopped_at: Completed 31-01-PLAN.md
+last_updated: "2026-03-11T01:35:55.699Z"
+last_activity: 2026-03-11 — Completed all-granularity callback delivery plan 01
 progress:
   total_phases: 5
   completed_phases: 3
-  total_plans: 5
-  completed_plans: 5
+  total_plans: 7
+  completed_plans: 6
   percent: 96
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-09)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** Phase 30 - Callback Delivery (v1.8 Task Notifications)
+**Current focus:** Phase 31 - Granularity, Safety and Hardening (v1.8 Task Notifications)
 
 ## Current Position
 
-Phase: 30 of 32 (Callback Delivery)
-Plan: 3 of 3 complete
-Status: Phase Complete
-Last activity: 2026-03-10 — Completed callback delivery plan 03 (captureTrace gap closure)
+Phase: 31 of 32 (Granularity, Safety and Hardening)
+Plan: 1 of 2 complete
+Status: In Progress
+Last activity: 2026-03-11 — Completed all-granularity callback delivery plan 01
 
 Progress: [██████████] 96%
 
@@ -52,6 +52,9 @@ All decisions logged in PROJECT.md Key Decisions table.
 - [Phase 30]: Delivery triggers inline-construct SubscriptionStore to avoid parameter signature changes
 - [Phase 30]: Org chart validation enforced on all subscribe operations (including default "mcp" subscriberId)
 - [Phase 30]: captureTrace wrapped in try/catch in onRunComplete for best-effort trace capture in callbacks
+- [Phase 31-01]: Cursor-based scanning with lastDeliveredAt as high-water mark into EventLogger.query() results
+- [Phase 31-01]: Self-healing cursor: lastDeliveredAt only advances on successful delivery
+- [Phase 31-01]: All-granularity is status-agnostic (no terminal status check), superset of completion
 
 ### Roadmap Evolution
 
@@ -73,6 +76,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-11T00:44:19.024Z
-Stopped at: Phase 31 context gathered
-Resume file: .planning/phases/31-granularity-safety-and-hardening/31-CONTEXT.md
+Last session: 2026-03-11T01:34:49Z
+Stopped at: Completed 31-01-PLAN.md
+Resume file: .planning/phases/31-granularity-safety-and-hardening/31-01-SUMMARY.md

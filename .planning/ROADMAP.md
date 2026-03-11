@@ -202,5 +202,5 @@ Phases execute in numeric order: 28 -> 29 -> 30 -> 31 -> 32
 | 28. Schema and Storage | v1.8 | 1/1 | Complete | 2026-03-09 |
 | 29. Subscription API | v1.8 | 1/1 | Complete | 2026-03-10 |
 | 30. Callback Delivery | 3/3 | Complete    | 2026-03-10 | - |
-| 31. Granularity, Safety, and Hardening | v1.8 | 0/2 | Not started | - |
+| 31. Granularity, Safety, and Hardening | 1/2 | In Progress|  | - |
 | 32. Agent Guidance | v1.8 | 0/? | Not started | - |

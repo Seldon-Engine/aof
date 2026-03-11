@@ -24,7 +24,7 @@ Requirements for task notification subscriptions and callback delivery.
 ### Granularity
 
 - [x] **GRAN-01**: `"completion"` granularity fires on terminal states (done/cancelled/deadletter)
-- [ ] **GRAN-02**: `"all"` granularity fires on every state transition, batched per poll cycle
+- [x] **GRAN-02**: `"all"` granularity fires on every state transition, batched per poll cycle
 
 ### Agent Guidance
 
@@ -76,7 +76,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DLVR-03 | Phase 30 | Complete |
 | DLVR-04 | Phase 30 | Complete |
 | GRAN-01 | Phase 30 | Complete |
-| GRAN-02 | Phase 31 | Pending |
+| GRAN-02 | Phase 31 | Complete |
 | GUID-01 | Phase 32 | Pending |
 | SAFE-01 | Phase 31 | Pending |
 | SAFE-02 | Phase 31 | Pending |
