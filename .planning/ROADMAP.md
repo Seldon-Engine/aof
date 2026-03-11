@@ -139,7 +139,7 @@ Plans:
 Plans:
 - [x] 30-01-PLAN.md — Schema extension, delivery function, and callback payload builder (TDD)
 - [x] 30-02-PLAN.md — Wire delivery into onRunComplete, scheduler retry scan, and org chart validation (TDD)
-- [ ] 30-03-PLAN.md — Gap closure: wire captureTrace into callback delivery onRunComplete (DLVR-03)
+- [x] 30-03-PLAN.md — Gap closure: wire captureTrace into callback delivery onRunComplete (DLVR-03)
 
 ### Phase 31: Granularity, Safety, and Hardening
 **Goal**: All-transitions granularity works with batching, callback loops are impossible, and pending deliveries survive daemon restarts
@@ -150,7 +150,10 @@ Plans:
   2. Callback chains cannot loop infinitely -- depth counter or cross-cycle delivery prevents runaway cascades
   3. Pending subscription deliveries are re-evaluated on daemon startup (no lost callbacks across restarts)
   4. A callback-spawned task that itself triggers a callback respects a maximum depth limit
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 31-01-PLAN.md — "All" granularity delivery with batched transitions and schema extensions (TDD)
+- [ ] 31-02-PLAN.md — Callback depth limiting and daemon restart recovery (TDD)
 
 ### Phase 32: Agent Guidance
 **Goal**: Agents understand how to use and respond to callbacks through updated standing context
@@ -199,5 +202,5 @@ Phases execute in numeric order: 28 -> 29 -> 30 -> 31 -> 32
 | 28. Schema and Storage | v1.8 | 1/1 | Complete | 2026-03-09 |
 | 29. Subscription API | v1.8 | 1/1 | Complete | 2026-03-10 |
 | 30. Callback Delivery | 3/3 | Complete    | 2026-03-10 | - |
-| 31. Granularity, Safety, and Hardening | v1.8 | 0/? | Not started | - |
+| 31. Granularity, Safety, and Hardening | v1.8 | 0/2 | Not started | - |
 | 32. Agent Guidance | v1.8 | 0/? | Not started | - |
