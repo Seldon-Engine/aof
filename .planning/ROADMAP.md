@@ -152,8 +152,8 @@ Plans:
   4. A callback-spawned task that itself triggers a callback respects a maximum depth limit
 **Plans**: 2 plans
 Plans:
-- [ ] 31-01-PLAN.md — "All" granularity delivery with batched transitions and schema extensions (TDD)
-- [ ] 31-02-PLAN.md — Callback depth limiting and daemon restart recovery (TDD)
+- [x] 31-01-PLAN.md — "All" granularity delivery with batched transitions and schema extensions (TDD)
+- [x] 31-02-PLAN.md — Callback depth limiting and daemon restart recovery (TDD)
 
 ### Phase 32: Agent Guidance
 **Goal**: Agents understand how to use and respond to callbacks through updated standing context
@@ -163,7 +163,9 @@ Plans:
   1. SKILL.md documents the `subscribe` parameter on `aof_dispatch` and the `aof_task_subscribe` / `aof_task_unsubscribe` tools
   2. SKILL.md explains idempotency expectations for callback handlers (at-least-once delivery means agents may receive duplicate callbacks)
   3. Budget gate CI test still passes after SKILL.md update (context size stays under ceiling)
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [ ] 32-01-PLAN.md — SKILL.md subscription docs, callback handler contract, and budget gate adjustment
 
 ## Progress
 
@@ -201,6 +203,6 @@ Phases execute in numeric order: 28 -> 29 -> 30 -> 31 -> 32
 | 27. Trace CLI | v1.5 | 2/2 | Complete | 2026-03-08 |
 | 28. Schema and Storage | v1.8 | 1/1 | Complete | 2026-03-09 |
 | 29. Subscription API | v1.8 | 1/1 | Complete | 2026-03-10 |
-| 30. Callback Delivery | 3/3 | Complete    | 2026-03-10 | - |
-| 31. Granularity, Safety, and Hardening | 2/2 | Complete    | 2026-03-11 | - |
-| 32. Agent Guidance | v1.8 | 0/? | Not started | - |
+| 30. Callback Delivery | v1.8 | 3/3 | Complete | 2026-03-10 |
+| 31. Granularity, Safety, and Hardening | v1.8 | 2/2 | Complete | 2026-03-11 |
+| 32. Agent Guidance | v1.8 | 0/1 | Not started | - |
