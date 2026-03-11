@@ -106,13 +106,24 @@ export async function retryPendingDeliveries(opts: DeliverCallbacksOptions): Pro
 }
 
 /**
+ * Transition record for all-granularity batched delivery.
+ */
+export interface TransitionRecord {
+  fromStatus: string;
+  toStatus: string;
+  timestamp: string;
+}
+
+/**
  * Build a structured callback prompt for the subscriber agent.
  * Includes task outcome summary and extracted Outputs section.
+ * When transitions are provided (all-granularity), includes a Transitions section.
  */
 export function buildCallbackPrompt(
   task: Task,
   sub: TaskSubscription,
   tracePath?: string,
+  transitions?: TransitionRecord[],
 ): string {
   const lines: string[] = [
     "You are receiving a task notification callback.",
@@ -127,12 +138,91 @@ export function buildCallbackPrompt(
     lines.push(`Trace: ${tracePath}`);
   }
 
+  if (transitions && transitions.length > 0) {
+    lines.push("", "## Transitions", "");
+    for (const t of transitions) {
+      lines.push(`- ${t.fromStatus} -> ${t.toStatus} at ${t.timestamp}`);
+    }
+  }
+
   const outputs = extractOutputsSection(task.body);
   if (outputs) {
     lines.push("", "## Outputs", "", outputs);
   }
 
   return lines.join("\n");
+}
+
+/**
+ * Deliver batched transition callbacks to all active "all" granularity subscribers.
+ * For each subscriber, scans the event log for task.transitioned events after
+ * the subscriber's lastDeliveredAt cursor, batches them into a single callback,
+ * and advances the cursor on success.
+ *
+ * Does NOT require terminal status — fires on every state transition.
+ * Best-effort: errors per subscriber are caught and never propagate (DLVR-04).
+ */
+export async function deliverAllGranularityCallbacks(opts: DeliverCallbacksOptions): Promise<void> {
+  const { taskId, store, subscriptionStore, logger } = opts;
+
+  const task = await store.get(taskId);
+  if (!task) return;
+
+  const activeSubs = await subscriptionStore.list(taskId, { status: "active" });
+  const allSubs = activeSubs.filter((s) => s.granularity === "all");
+
+  for (const sub of allSubs) {
+    try {
+      const lastDeliveredAtMs = sub.lastDeliveredAt
+        ? new Date(sub.lastDeliveredAt).getTime()
+        : 0;
+
+      // Query all task.transitioned events for this task
+      const events = await logger.query({ type: "task.transitioned", taskId });
+
+      // Filter to events after lastDeliveredAt and sort chronologically
+      const newEvents = events
+        .filter((e) => new Date(e.timestamp).getTime() > lastDeliveredAtMs)
+        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+      if (newEvents.length === 0) continue;
+
+      // Map to transition records
+      const transitions: TransitionRecord[] = newEvents.map((e) => ({
+        fromStatus: String((e.payload as Record<string, unknown>).from ?? ""),
+        toStatus: String((e.payload as Record<string, unknown>).to ?? ""),
+        timestamp: e.timestamp,
+      }));
+
+      // Build prompt with transitions
+      const prompt = buildCallbackPrompt(task, sub, opts.tracePath, transitions);
+
+      const context: TaskContext = {
+        taskId: task.frontmatter.id,
+        taskPath: "",
+        agent: sub.subscriberId,
+        priority: "normal",
+        routing: { role: sub.subscriberId },
+        taskFileContents: prompt,
+      };
+
+      const result = await opts.executor.spawnSession(context, {
+        timeoutMs: CALLBACK_TIMEOUT_MS,
+        correlationId: randomUUID(),
+      });
+
+      if (result.success) {
+        // Advance cursor to latest transition timestamp
+        const latestTimestamp = transitions[transitions.length - 1]!.timestamp;
+        await subscriptionStore.update(taskId, sub.id, {
+          lastDeliveredAt: latestTimestamp,
+        });
+      }
+      // On failure, do NOT advance lastDeliveredAt (self-healing cursor)
+    } catch (_err) {
+      // DLVR-04: best-effort, never propagate
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

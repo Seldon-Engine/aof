@@ -152,6 +152,10 @@ export const EventType = z.enum([
   "subscription.delivered",
   "subscription.delivery_failed",
   "subscription.delivery_attempted",
+
+  // Subscription safety (Phase 31)
+  "subscription.depth_exceeded",
+  "subscription.recovery_attempted",
 ]);
 export type EventType = z.infer<typeof EventType>;
 

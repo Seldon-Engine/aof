@@ -35,6 +35,7 @@ export const TaskSubscription = z.object({
   failureReason: z.string().optional().describe("Reason for delivery failure (set when status is 'failed')"),
   deliveryAttempts: z.number().int().min(0).default(0).describe("Number of delivery attempts made"),
   lastAttemptAt: z.string().datetime().optional().describe("ISO-8601 timestamp of last delivery attempt"),
+  lastDeliveredAt: z.string().datetime().optional().describe("ISO-8601 cursor for all-granularity delivery — tracks last delivered transition timestamp"),
 });
 export type TaskSubscription = z.infer<typeof TaskSubscription>;
 

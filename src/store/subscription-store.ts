@@ -99,7 +99,7 @@ export class SubscriptionStore {
     fields: Partial<
       Pick<
         TaskSubscription,
-        "status" | "deliveredAt" | "failureReason" | "deliveryAttempts" | "lastAttemptAt"
+        "status" | "deliveredAt" | "failureReason" | "deliveryAttempts" | "lastAttemptAt" | "lastDeliveredAt"
       >
     >,
   ): Promise<TaskSubscription> {
