@@ -125,7 +125,7 @@ See: `.planning/milestones/v1.8-ROADMAP.md` for full details
   2. `grep -r` for gate-evaluator, gate-conditional, gate-context-builder, GateSchema, WorkflowGateSchema across src/ and tests/ returns zero hits (excluding migration stubs)
   3. No unused imports remain in scheduler.ts, no deprecated type aliases exist in executor.ts or dispatch/index.ts, no commented-out code blocks remain in event.ts or promotion.ts
   4. All existing tests pass (vitest full suite green) — no regressions from removals
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
 - [ ] 34-01-PLAN.md — Gate system removal (source, tests, re-exports, migration, imports)
 - [ ] 34-02-PLAN.md — Cleanup unused MCP schemas, deprecated aliases, commented code, notifier
@@ -256,7 +256,7 @@ Phases execute in numeric order: 34 -> 35 -> 36 -> 37 -> 38 -> 39 -> 40
 | 31. Granularity, Safety, Hardening | v1.8 | 2/2 | Complete | 2026-03-11 |
 | 32. Agent Guidance | v1.8 | 1/1 | Complete | 2026-03-11 |
 | 33. Callback Wiring Fixes | v1.8 | 1/1 | Complete | 2026-03-12 |
-| 34. Dead Code Removal | v1.10 | 0/? | Not started | - |
+| 34. Dead Code Removal | 1/2 | In Progress|  | - |
 | 35. Bug Fixes | v1.10 | 0/? | Not started | - |
 | 36. Config Registry | v1.10 | 0/? | Not started | - |
 | 37. Structured Logging | v1.10 | 0/? | Not started | - |

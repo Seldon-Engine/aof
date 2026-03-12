@@ -9,11 +9,11 @@ Requirements for codebase cleanup milestone. Each maps to roadmap phases.
 
 ### Dead Code
 
-- [ ] **DEAD-01**: Legacy gate system removed — gate-evaluator.ts, gate-conditional.ts, gate-context-builder.ts, gate.ts schema, workflow.ts schema (~900 lines source)
-- [ ] **DEAD-02**: Legacy gate test files removed — gate-evaluator.test.ts, gate-enforcement.test.ts, gate-conditional.test.ts, gate-context-builder.test.ts, gate-timeout.test.ts, gate.test.ts, task-gate-extensions.test.ts (~2,000 lines tests)
-- [ ] **DEAD-03**: Gate barrel re-exports removed from schemas/index.ts and dispatch/index.ts
-- [ ] **DEAD-04**: Lazy gate-to-DAG migration removed from FilesystemTaskStore (get, getByPrefix, list) and migration/gate-to-dag.ts
-- [ ] **DEAD-05**: Unused imports cleaned from scheduler.ts (18+ symbols from prior extractions)
+- [x] **DEAD-01**: Legacy gate system removed — gate-evaluator.ts, gate-conditional.ts, gate-context-builder.ts, gate.ts schema, workflow.ts schema (~900 lines source)
+- [x] **DEAD-02**: Legacy gate test files removed — gate-evaluator.test.ts, gate-enforcement.test.ts, gate-conditional.test.ts, gate-context-builder.test.ts, gate-timeout.test.ts, gate.test.ts, task-gate-extensions.test.ts (~2,000 lines tests)
+- [x] **DEAD-03**: Gate barrel re-exports removed from schemas/index.ts and dispatch/index.ts
+- [x] **DEAD-04**: Lazy gate-to-DAG migration removed from FilesystemTaskStore (get, getByPrefix, list) and migration/gate-to-dag.ts
+- [x] **DEAD-05**: Unused imports cleaned from scheduler.ts (18+ symbols from prior extractions)
 - [ ] **DEAD-06**: 13 unused MCP output schemas removed from mcp/tools.ts (~100 lines)
 - [ ] **DEAD-07**: Deprecated type aliases removed (DispatchResult, Executor, MockExecutor) from executor.ts and dispatch/index.ts
 - [ ] **DEAD-08**: Commented-out code removed (event.ts import, promotion.ts Phase 2 block, stale JSDoc references)
@@ -102,11 +102,11 @@ Requirements for codebase cleanup milestone. Each maps to roadmap phases.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DEAD-01 | Phase 34 | Pending |
-| DEAD-02 | Phase 34 | Pending |
-| DEAD-03 | Phase 34 | Pending |
-| DEAD-04 | Phase 34 | Pending |
-| DEAD-05 | Phase 34 | Pending |
+| DEAD-01 | Phase 34 | Complete |
+| DEAD-02 | Phase 34 | Complete |
+| DEAD-03 | Phase 34 | Complete |
+| DEAD-04 | Phase 34 | Complete |
+| DEAD-05 | Phase 34 | Complete |
 | DEAD-06 | Phase 34 | Pending |
 | DEAD-07 | Phase 34 | Pending |
 | DEAD-08 | Phase 34 | Pending |

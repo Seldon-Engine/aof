@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.10
 milestone_name: Codebase Cleanups
-status: planning
-stopped_at: Phase 34 context gathered
-last_updated: "2026-03-12T19:28:36.305Z"
-last_activity: 2026-03-12 — Roadmap created for v1.10
+status: executing
+stopped_at: Completed 34-01-PLAN.md
+last_updated: "2026-03-12T19:59:34Z"
+last_activity: 2026-03-12 — Completed 34-01 gate system removal
 progress:
   total_phases: 7
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  total_plans: 2
+  completed_plans: 1
+  percent: 5
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-12)
 ## Current Position
 
 Phase: 34 of 40 (Dead Code Removal) — first of 7 phases in v1.10
-Plan: —
-Status: Ready to plan
-Last activity: 2026-03-12 — Roadmap created for v1.10
+Plan: 1 of 2 complete
+Status: Executing
+Last activity: 2026-03-12 — Completed 34-01 (gate system removal)
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█░░░░░░░░░] 5%
 
 ## Performance Metrics
 
@@ -41,6 +41,9 @@ Progress: [░░░░░░░░░░] 0%
 ### Decisions
 
 All decisions logged in PROJECT.md Key Decisions table.
+
+- [34-01] Inlined gate schemas into consuming files rather than deleting types outright, preserving backward compat for persisted data
+- [34-01] Removed migration002 from migration chain since gate-to-DAG batch migration is no longer needed
 
 ### Roadmap Evolution
 
@@ -64,6 +67,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-12T19:28:36.303Z
-Stopped at: Phase 34 context gathered
-Resume file: .planning/phases/34-dead-code-removal/34-CONTEXT.md
+Last session: 2026-03-12T19:59:34Z
+Stopped at: Completed 34-01-PLAN.md
+Resume file: .planning/phases/34-dead-code-removal/34-01-SUMMARY.md
