@@ -23,7 +23,7 @@ import type { TaskContext } from "./executor.js";
 import { classifySpawnError } from "./scheduler-helpers.js";
 import { trackDispatchFailure, shouldTransitionToDeadletter, transitionToDeadletter } from "./failure-tracker.js";
 import { captureTrace } from "../trace/trace-writer.js";
-import { deliverCallbacks } from "./callback-delivery.js";
+import { deliverCallbacks, deliverAllGranularityCallbacks } from "./callback-delivery.js";
 import { SubscriptionStore } from "../store/subscription-store.js";
 
 /**
@@ -203,23 +203,30 @@ export async function executeAssignAction(
           }
 
           // --- Callback delivery (Phase 30) --- best-effort, never blocks transitions
+          const tasksDir = store.tasksDir;
+          const taskDirResolver = async (tid: string): Promise<string> => {
+            const t = await store.get(tid);
+            if (!t) throw new Error(`Task not found: ${tid}`);
+            return join(tasksDir, t.frontmatter.status, tid);
+          };
+          const subscriptionStore = new SubscriptionStore(taskDirResolver);
+          const callbackOpts = {
+            taskId: action.taskId,
+            store,
+            subscriptionStore,
+            executor: config.executor!,
+            logger,
+          };
           try {
-            const tasksDir = store.tasksDir;
-            const taskDirResolver = async (tid: string): Promise<string> => {
-              const t = await store.get(tid);
-              if (!t) throw new Error(`Task not found: ${tid}`);
-              return join(tasksDir, t.frontmatter.status, tid);
-            };
-            const subscriptionStore = new SubscriptionStore(taskDirResolver);
-            await deliverCallbacks({
-              taskId: action.taskId,
-              store,
-              subscriptionStore,
-              executor: config.executor!,
-              logger,
-            });
+            await deliverCallbacks(callbackOpts);
           } catch {
             // Delivery must never crash the scheduler
+          }
+          // GRAN-02: Deliver all-granularity callbacks (separate try/catch per DLVR-04)
+          try {
+            await deliverAllGranularityCallbacks(callbackOpts);
+          } catch {
+            // All-granularity delivery must never crash the scheduler
           }
           return;
         }
@@ -307,23 +314,30 @@ export async function executeAssignAction(
         }
 
         // --- Callback delivery (Phase 30) --- best-effort, never blocks transitions
+        const tasksDir2 = store.tasksDir;
+        const taskDirResolver2 = async (tid: string): Promise<string> => {
+          const t = await store.get(tid);
+          if (!t) throw new Error(`Task not found: ${tid}`);
+          return join(tasksDir2, t.frontmatter.status, tid);
+        };
+        const subscriptionStore2 = new SubscriptionStore(taskDirResolver2);
+        const callbackOpts2 = {
+          taskId: action.taskId,
+          store,
+          subscriptionStore: subscriptionStore2,
+          executor: config.executor!,
+          logger,
+        };
         try {
-          const tasksDir2 = store.tasksDir;
-          const taskDirResolver2 = async (tid: string): Promise<string> => {
-            const t = await store.get(tid);
-            if (!t) throw new Error(`Task not found: ${tid}`);
-            return join(tasksDir2, t.frontmatter.status, tid);
-          };
-          const subscriptionStore2 = new SubscriptionStore(taskDirResolver2);
-          await deliverCallbacks({
-            taskId: action.taskId,
-            store,
-            subscriptionStore: subscriptionStore2,
-            executor: config.executor!,
-            logger,
-          });
+          await deliverCallbacks(callbackOpts2);
         } catch {
           // Delivery must never crash the scheduler
+        }
+        // GRAN-02: Deliver all-granularity callbacks (separate try/catch per DLVR-04)
+        try {
+          await deliverAllGranularityCallbacks(callbackOpts2);
+        } catch {
+          // All-granularity delivery must never crash the scheduler
         }
       },
     });
