@@ -39,7 +39,6 @@ export interface AOFServiceDependencies {
   store?: ITaskStore;
   logger?: EventLogger;
   metrics?: AOFMetrics;
-  /** @deprecated Pass `engine` instead. Will be removed in a future release. */
   notifier?: NotificationService;
   /** Notification policy engine — wired to EventLogger.onEvent automatically. */
   engine?: NotificationPolicyEngine;

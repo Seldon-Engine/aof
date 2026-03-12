@@ -2,7 +2,6 @@
  * DAG transition handler — orchestrates DAG evaluation, state persistence,
  * and hop dispatch within DAG-based task workflows.
  *
- * Mirrors the gate-transition-handler.ts pattern for the DAG path.
  * Two exported functions:
  * - handleDAGHopCompletion: processes a hop completion/failure, evaluates DAG,
  *   persists state atomically, and returns ready hops for dispatch.

@@ -43,9 +43,6 @@ export interface SpawnResult {
   platformLimit?: number;  // OpenClaw platform concurrency limit (from error message)
 }
 
-/** @deprecated Use SpawnResult instead. */
-export type ExecutorResult = SpawnResult;
-
 /**
  * Outcome of a completed agent run (XRAY-005 fix).
  * Passed to the onRunComplete callback so the dispatcher can detect
@@ -108,9 +105,6 @@ export interface GatewayAdapter {
    */
   forceCompleteSession(sessionId: string): Promise<void>;
 }
-
-/** @deprecated Use GatewayAdapter instead. */
-export type DispatchExecutor = GatewayAdapter;
 
 // ---------------------------------------------------------------------------
 // Mock session tracking types (internal to MockAdapter)
@@ -278,5 +272,3 @@ export class MockAdapter implements GatewayAdapter {
   }
 }
 
-/** @deprecated Use MockAdapter instead. */
-export const MockExecutor = MockAdapter;

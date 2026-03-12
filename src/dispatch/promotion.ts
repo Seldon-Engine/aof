@@ -69,11 +69,5 @@ export function checkPromotionEligibility(
     };
   }
 
-  // 5. Future: Check approval gate (Phase 2)
-  // const requiresApproval = task.frontmatter.metadata?.requiresApproval;
-  // if (requiresApproval) {
-  //   return { eligible: false, reason: "Requires manual approval" };
-  // }
-
   return { eligible: true };
 }

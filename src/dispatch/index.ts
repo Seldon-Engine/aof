@@ -1,11 +1,7 @@
 export { poll } from "./scheduler.js";
 export type { SchedulerConfig, SchedulerAction, PollResult } from "./scheduler.js";
-export { MockAdapter, MockExecutor } from "./executor.js";
+export { MockAdapter } from "./executor.js";
 export type { GatewayAdapter, SpawnResult, SessionStatus, TaskContext } from "./executor.js";
-/** @deprecated Use GatewayAdapter instead. */
-export type { DispatchExecutor } from "./executor.js";
-/** @deprecated Use SpawnResult instead. */
-export type { ExecutorResult } from "./executor.js";
 export { SLAChecker } from "./sla-checker.js";
 export type { SLAViolation, SLACheckerConfig } from "./sla-checker.js";
 // Note: aofDispatch from aof-dispatch.js is not re-exported to avoid naming conflict with tools/aof-tools.ts
