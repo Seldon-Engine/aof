@@ -3,8 +3,9 @@
  * Guided setup for new AOF installations.
  */
 
-import { mkdir, writeFile, readFile, access } from "node:fs/promises";
+import { mkdir, writeFile, readFile, access, unlink } from "node:fs/promises";
 import { join } from "node:path";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { stringify as stringifyYaml } from "yaml";
 import { OrgChart } from "../schemas/org-chart.js";
@@ -352,6 +353,111 @@ async function generateOrgChart(template: "minimal" | "full"): Promise<Record<st
       generated: new Date().toISOString(),
     },
   };
+}
+
+/**
+ * Idempotent scaffold repair — ensures all required directories and files exist.
+ * Unlike `runWizard()` (which creates everything fresh), this only fills gaps.
+ * Never overwrites existing files.
+ *
+ * Returns a list of items that were repaired/created.
+ */
+export async function ensureScaffold(dataDir: string): Promise<string[]> {
+  const repaired: string[] = [];
+
+  // Required directories
+  const directories = [
+    "tasks/backlog",
+    "tasks/ready",
+    "tasks/in-progress",
+    "tasks/review",
+    "tasks/blocked",
+    "tasks/done",
+    "events",
+    "data",
+    "org",
+    "memory",
+    "state",
+    "logs",
+  ];
+
+  for (const dir of directories) {
+    const fullPath = join(dataDir, dir);
+    try {
+      await access(fullPath);
+    } catch {
+      await mkdir(fullPath, { recursive: true });
+      repaired.push(`${dir}/`);
+    }
+  }
+
+  // Ensure org chart exists (create minimal if missing)
+  const orgChartPath = join(dataDir, "org", "org-chart.yaml");
+  try {
+    await access(orgChartPath);
+  } catch {
+    const { stringify: stringifyYaml } = await import("yaml");
+    const minimalOrgChart = {
+      schemaVersion: 1,
+      template: "minimal",
+      teams: [
+        {
+          id: "main",
+          name: "Main Team",
+          description: "Primary operating team",
+        },
+      ],
+      agents: [
+        {
+          id: "main",
+          name: "Main Agent",
+          description: "Primary orchestration agent",
+          team: "main",
+          canDelegate: false,
+          active: true,
+          capabilities: {
+            tags: ["orchestration", "coordination"],
+            concurrency: 1,
+          },
+          comms: {
+            preferred: "cli",
+            fallbacks: ["cli"],
+          },
+        },
+      ],
+      routing: [],
+      metadata: {
+        template: "minimal",
+        generated: new Date().toISOString(),
+      },
+    };
+    await writeFile(orgChartPath, stringifyYaml(minimalOrgChart), "utf-8");
+    repaired.push("org/org-chart.yaml");
+  }
+
+  // Clean up stale PID file if daemon is not running
+  const pidPath = join(dataDir, "daemon.pid");
+  if (existsSync(pidPath)) {
+    try {
+      const pidStr = await readFile(pidPath, "utf-8");
+      const pid = parseInt(pidStr.trim(), 10);
+      if (!isNaN(pid)) {
+        try {
+          process.kill(pid, 0); // Check if process is running
+        } catch {
+          // Process not running — remove stale PID
+          await unlink(pidPath);
+          repaired.push("daemon.pid (stale, removed)");
+        }
+      }
+    } catch {
+      // Can't read PID file — remove it
+      await unlink(pidPath);
+      repaired.push("daemon.pid (unreadable, removed)");
+    }
+  }
+
+  return repaired;
 }
 
 /**

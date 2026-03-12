@@ -34,7 +34,8 @@ curl -fsSL https://raw.githubusercontent.com/d0labs/aof/main/scripts/install.sh 
 ```bash
 aof init              # Configure OpenClaw integration
 aof daemon install    # Start the background daemon
-aof task create "My first task" --agent main-agent
+aof org show          # List available agents
+aof task create "My first task" --agent <your-agent-id>
 aof daemon status     # Verify it's running
 ```
 

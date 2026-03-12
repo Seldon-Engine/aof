@@ -114,6 +114,8 @@ describe("Completion Enforcement (top-level)", () => {
 
     adapter = new CaptureAdapter();
     config = {
+      dataDir: testDir,
+      dryRun: false,
       executor: adapter,
       maxConcurrentDispatches: 3,
       defaultLeaseTtlMs: 60_000,

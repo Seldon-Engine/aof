@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { orgChartPath as orgChartPathFn, eventsDir, projectManifestPath } from "../config/paths.js";
 import type { Task, TaskStatus, TaskPriority } from "../schemas/task.js";
 import { FilesystemTaskStore } from "../store/task-store.js";
 import type { ITaskStore } from "../store/interfaces.js";
@@ -54,15 +55,15 @@ export async function createAofMcpContext(options: AofMcpOptions): Promise<AofMc
 
     store = options.store ?? resolution.store;
     dataDir = resolution.projectRoot;
-    logger = options.logger ?? new EventLogger(join(dataDir, "events"));
-    orgChartPath = options.orgChartPath ?? join(resolution.vaultRoot, "org", "org-chart.yaml");
+    logger = options.logger ?? new EventLogger(eventsDir(dataDir));
+    orgChartPath = options.orgChartPath ?? orgChartPathFn(resolution.vaultRoot);
 
     // Load project manifest for workflow template resolution
     try {
       const { readFile } = await import("node:fs/promises");
       const { parse: parseYaml } = await import("yaml");
       const { ProjectManifest: ProjectManifestSchema } = await import("../schemas/project.js");
-      const manifestPath = join(dataDir, "project.yaml");
+      const manifestPath = projectManifestPath(dataDir);
       const raw = await readFile(manifestPath, "utf-8");
       const parsed = parseYaml(raw) as unknown;
       projectConfig = ProjectManifestSchema.parse(parsed);
@@ -73,8 +74,8 @@ export async function createAofMcpContext(options: AofMcpOptions): Promise<AofMc
     // Legacy behavior: use dataDir directly
     store = options.store ?? new FilesystemTaskStore(options.dataDir);
     dataDir = options.dataDir;
-    logger = options.logger ?? new EventLogger(join(dataDir, "events"));
-    orgChartPath = options.orgChartPath ?? join(dataDir, "org", "org-chart.yaml");
+    logger = options.logger ?? new EventLogger(eventsDir(dataDir));
+    orgChartPath = options.orgChartPath ?? orgChartPathFn(dataDir);
   }
 
   const vaultRoot = options.vaultRoot ?? options.dataDir;

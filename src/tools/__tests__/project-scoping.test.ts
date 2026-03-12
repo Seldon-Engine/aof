@@ -23,6 +23,7 @@ describe("Project scoping", () => {
   let logger: EventLogger;
 
   const dispatchConfig: DispatchConfig = {
+    dataDir: "",
     dryRun: true,
     defaultLeaseTtlMs: 600_000,
   };

@@ -82,8 +82,6 @@ export async function runPluginStep(state: WizardState, yes: boolean): Promise<v
     return;
   }
 
-  const pluginJsonPath = join(PKG_ROOT, "openclaw.plugin.json");
-
   if (!alreadyRegistered) {
     const doRegister =
       yes ||
@@ -95,7 +93,7 @@ export async function runPluginStep(state: WizardState, yes: boolean): Promise<v
     if (doRegister) {
       console.log("  Registering AOF plugin...");
       try {
-        await registerAofPlugin(pluginJsonPath);
+        await registerAofPlugin();
         state.pluginRegistered = true;
         state.addedToAllowList = true;
         console.log("  ✅ Plugin registered and added to allow list.\n");

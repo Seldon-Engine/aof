@@ -1,5 +1,5 @@
-import { join } from "node:path";
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { eventsDir, daemonSocketPath, daemonPidPath } from "../config/paths.js";
 import type { Server } from "node:http";
 import { FilesystemTaskStore } from "../store/task-store.js";
 import type { ITaskStore } from "../store/interfaces.js";
@@ -10,6 +10,7 @@ import type { poll } from "../dispatch/scheduler.js";
 import { createHealthServer, selfCheck, type DaemonStateProvider, type StatusContextProvider } from "./server.js";
 import { setShuttingDown } from "./health.js";
 import { VERSION } from "../version.js";
+import { StandaloneAdapter } from "./standalone-adapter.js";
 
 export interface AOFDaemonOptions extends AOFServiceConfig {
   store?: ITaskStore;
@@ -19,6 +20,10 @@ export interface AOFDaemonOptions extends AOFServiceConfig {
   /** Path to Unix domain socket for health server. Default: join(dataDir, "daemon.sock"). */
   socketPath?: string;
   enableHealthServer?: boolean;
+  /** Gateway URL for standalone executor (default: env OPENCLAW_GATEWAY_URL or http://localhost:3000). */
+  gatewayUrl?: string;
+  /** Gateway auth token for standalone executor (default: env OPENCLAW_GATEWAY_TOKEN). */
+  gatewayToken?: string;
 }
 
 export interface AOFDaemonContext {
@@ -39,9 +44,9 @@ function isProcessRunning(pid: number): boolean {
 
 export async function startAofDaemon(opts: AOFDaemonOptions): Promise<AOFDaemonContext> {
   const store = opts.store ?? new FilesystemTaskStore(opts.dataDir);
-  const logger = opts.logger ?? new EventLogger(join(opts.dataDir, "events"));
-  const socketPath = opts.socketPath ?? join(opts.dataDir, "daemon.sock");
-  const lockFile = join(opts.dataDir, "daemon.pid");
+  const logger = opts.logger ?? new EventLogger(eventsDir(opts.dataDir));
+  const socketPath = opts.socketPath ?? daemonSocketPath(opts.dataDir);
+  const lockFile = daemonPidPath(opts.dataDir);
 
   // Reset shutdown flag from any previous run in this process (important for tests)
   setShuttingDown(false);
@@ -63,12 +68,17 @@ export async function startAofDaemon(opts: AOFDaemonOptions): Promise<AOFDaemonC
   }
 
   // --- Step 1: Create AOFService (constructor only, no start) ---
+  const executor = opts.dryRun
+    ? undefined
+    : new StandaloneAdapter({ gatewayUrl: opts.gatewayUrl, gatewayToken: opts.gatewayToken });
+
   const service = new AOFService(
     {
       store,
       logger,
       metrics: opts.metrics,
       poller: opts.poller,
+      executor,
     },
     {
       dataDir: opts.dataDir,

@@ -74,7 +74,7 @@ Create a file called `org-chart.yaml` in your AOF data directory:
 ```yaml
 schemaVersion: 1
 agents:
-  - id: main-agent
+  - id: main
     name: Main Agent
     description: General-purpose agent for all tasks
     capabilities:
@@ -88,7 +88,7 @@ agents:
 teams:
   - id: default
     name: Default Team
-    lead: main-agent
+    lead: main
 
 routing: []
 ```
@@ -176,10 +176,18 @@ aof daemon uninstall     # Stop and remove the OS service file
 
 ## Create Your First Task
 
-Tasks in AOF are Markdown files with YAML frontmatter. You can create them via the CLI:
+Tasks in AOF are Markdown files with YAML frontmatter. You can create them via the CLI.
+
+First, check which agents are available in your org chart:
 
 ```bash
-aof task create "Implement user authentication" --priority high --agent main-agent
+aof org show
+```
+
+Then create a task routed to one of your agents:
+
+```bash
+aof task create "Implement user authentication" --priority high --agent <your-agent-id>
 ```
 
 This creates a task file with the following structure:
@@ -193,7 +201,7 @@ title: Implement user authentication
 status: ready
 priority: high
 routing:
-  agent: main-agent
+  agent: <your-agent-id>
   tags: []
 createdAt: 2026-02-27T12:00:00Z
 updatedAt: 2026-02-27T12:00:00Z
@@ -255,7 +263,7 @@ aof scan
 aof board
 
 # View recent events (task transitions, dispatches, lease operations)
-aof events
+aof scan --recent
 ```
 
 ### Example: watching a task flow
@@ -326,7 +334,7 @@ aof daemon install
 - Verify the daemon is running: `aof daemon status`
 - Check that the target agent exists in your org chart and is `active: true`
 - Ensure the agent's `capabilities.tags` match the task's `routing.tags`
-- Check for dispatch errors in the event log: `aof events`
+- Check for dispatch errors in the event log: `aof scan --recent`
 
 ### OpenClaw integration issues
 

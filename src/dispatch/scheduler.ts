@@ -13,6 +13,7 @@ import { checkStaleHeartbeats, markRunArtifactExpired, readRunResult } from "../
 import { resolveCompletionTransitions } from "../protocol/completion-utils.js";
 import { SLAChecker } from "./sla-checker.js";
 import { join, relative } from "node:path";
+import { orgChartPath as orgChartPathFn, projectManifestPath } from "../config/paths.js";
 import { readFile, access } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import writeFileAtomic from "write-file-atomic";
@@ -214,7 +215,7 @@ export async function poll(
   // 3.8. Check for SLA violations (AOF-ae6: SLA scheduler integration)
   const slaChecker = config.slaChecker ?? new SLAChecker();
   let projectManifest: Record<string, unknown> = {};
-  const projectYamlPath = join(config.dataDir, "project.yaml");
+  const projectYamlPath = projectManifestPath(config.dataDir);
   try {
     const projectYamlContent = await readFile(projectYamlPath, "utf-8");
     projectManifest = parseYaml(projectYamlContent) ?? {};
@@ -514,16 +515,16 @@ export async function poll(
   // Runs after normal dispatch cycle to evaluate triggers and create review tasks
   try {
     // Load org chart to get team configurations
-    const orgChartPath = join(config.dataDir, "org", "org-chart.yaml");
+    const orgPath = orgChartPathFn(config.dataDir);
     let orgChartExists = true;
     try {
-      await access(orgChartPath);
+      await access(orgPath);
     } catch {
       orgChartExists = false;
     }
 
     if (orgChartExists) {
-      const orgChartResult = await loadOrgChart(orgChartPath);
+      const orgChartResult = await loadOrgChart(orgPath);
       
       if (orgChartResult.success && orgChartResult.chart) {
         const teams = orgChartResult.chart.teams ?? [];

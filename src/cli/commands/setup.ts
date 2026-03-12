@@ -11,13 +11,15 @@ import { homedir } from "node:os";
 import { readFile, access, mkdir, cp, writeFile, unlink, rm } from "node:fs/promises";
 import type { Command } from "commander";
 import writeFileAtomic from "write-file-atomic";
-import { runWizard } from "../../packaging/wizard.js";
+import { runWizard, ensureScaffold } from "../../packaging/wizard.js";
+import { normalizePath } from "../../config/paths.js";
 import { runMigrations } from "../../packaging/migrations.js";
 import type { Migration } from "../../packaging/migrations.js";
 import { createSnapshot, restoreSnapshot, pruneSnapshots } from "../../packaging/snapshot.js";
 import { migration001 } from "../../packaging/migrations/001-default-workflow-template.js";
 import { migration002 } from "../../packaging/migrations/002-gate-to-dag-batch.js";
 import { migration003 } from "../../packaging/migrations/003-version-metadata.js";
+import { migration004 } from "../../packaging/migrations/004-scaffold-repair.js";
 import {
   detectOpenClaw,
   isAofPluginRegistered,
@@ -60,7 +62,7 @@ export interface SetupOptions {
  * Returns all registered migrations in order.
  */
 function getAllMigrations(): Migration[] {
-  return [migration001, migration002, migration003];
+  return [migration001, migration002, migration003, migration004];
 }
 
 // --- Helpers ---
@@ -173,8 +175,7 @@ async function wireOpenClawPlugin(dataDir: string, openclawPath?: string): Promi
   // Register AOF plugin
   try {
     const alreadyRegistered = await isAofPluginRegistered();
-    const pluginJsonPath = join(dataDir, "openclaw.plugin.json");
-    await registerAofPlugin(pluginJsonPath);
+    await registerAofPlugin();
     say(alreadyRegistered ? "AOF plugin entry updated" : "AOF plugin registered");
   } catch (e) {
     warn(`Failed to register AOF plugin: ${e instanceof Error ? e.message : String(e)}`);
@@ -200,9 +201,10 @@ async function wireOpenClawPlugin(dataDir: string, openclawPath?: string): Promi
     const paths = Array.isArray(existingPaths) ? [...existingPaths] : [];
 
     // Remove old AOF paths and add current dataDir
-    const filtered = paths.filter(
-      (p) => !p.includes("/aof") || p === dataDir
-    );
+    const filtered = paths.filter((p) => {
+      if (p === dataDir) return true;
+      return !(p.endsWith("/.aof") || p.endsWith("/aof"));
+    });
     if (!filtered.includes(dataDir)) {
       filtered.push(dataDir);
     }
@@ -381,7 +383,13 @@ export async function runSetup(opts: SetupOptions): Promise<void> {
     say("Version metadata written");
   }
 
-  // 4. OpenClaw plugin wiring
+  // 4. Ensure scaffold integrity (repairs broken installs on upgrade)
+  const repaired = await ensureScaffold(dataDir);
+  if (repaired.length > 0) {
+    say(`Repaired: ${repaired.join(", ")}`);
+  }
+
+  // 5. OpenClaw plugin wiring
   console.log("\n  Configuring OpenClaw integration...");
   await wireOpenClawPlugin(dataDir, openclawPath);
 
@@ -411,7 +419,7 @@ export function registerSetupCommand(program: Command): void {
       }) => {
         try {
           await runSetup({
-            dataDir: opts.dataDir,
+            dataDir: normalizePath(opts.dataDir),
             auto: opts.auto,
             upgrade: opts.upgrade,
             legacy: opts.legacy,

@@ -400,6 +400,115 @@ write_version_file() {
   say "Version file written"
 }
 
+# --- Setup shell PATH ---
+
+setup_shell_path() {
+  local bin_dir="$INSTALL_DIR/bin"
+  mkdir -p "$bin_dir"
+
+  # Create aof launcher script
+  cat > "$bin_dir/aof" <<LAUNCHER
+#!/bin/sh
+exec node "$INSTALL_DIR/dist/cli/index.js" "\$@"
+LAUNCHER
+  chmod +x "$bin_dir/aof"
+
+  # Create aof-daemon launcher script
+  cat > "$bin_dir/aof-daemon" <<LAUNCHER
+#!/bin/sh
+exec node "$INSTALL_DIR/dist/daemon/index.js" "\$@"
+LAUNCHER
+  chmod +x "$bin_dir/aof-daemon"
+
+  say "Launcher scripts created in $bin_dir"
+
+  # Add bin_dir to PATH in shell profile (idempotent via sentinel comment)
+  local sentinel="# AOF PATH"
+  local shell_name
+  shell_name="$(basename "${SHELL:-/bin/sh}")"
+
+  case "$shell_name" in
+    fish)
+      local fish_config="${HOME}/.config/fish/config.fish"
+      if [ -f "$fish_config" ] && grep -q "$sentinel" "$fish_config" 2>/dev/null; then
+        say "PATH already configured in $fish_config"
+      else
+        mkdir -p "$(dirname "$fish_config")"
+        printf '\n%s\nfish_add_path "%s"\n' "$sentinel" "$bin_dir" >> "$fish_config"
+        say "PATH added to $fish_config"
+      fi
+      ;;
+    zsh)
+      local zshrc="${HOME}/.zshrc"
+      if [ -f "$zshrc" ] && grep -q "$sentinel" "$zshrc" 2>/dev/null; then
+        say "PATH already configured in $zshrc"
+      else
+        printf '\n%s\nexport PATH="%s:$PATH"\n' "$sentinel" "$bin_dir" >> "$zshrc"
+        say "PATH added to $zshrc"
+      fi
+      ;;
+    *)
+      local bashrc="${HOME}/.bashrc"
+      if [ -f "${HOME}/.bash_profile" ] && ! [ -f "$bashrc" ]; then
+        bashrc="${HOME}/.bash_profile"
+      fi
+      if [ -f "$bashrc" ] && grep -q "$sentinel" "$bashrc" 2>/dev/null; then
+        say "PATH already configured in $bashrc"
+      else
+        printf '\n%s\nexport PATH="%s:$PATH"\n' "$sentinel" "$bin_dir" >> "$bashrc"
+        say "PATH added to $bashrc"
+      fi
+      ;;
+  esac
+}
+
+# --- Install daemon ---
+
+DAEMON_INSTALLED=""
+
+install_daemon() {
+  if [ -f "$INSTALL_DIR/dist/cli/index.js" ]; then
+    say "Installing daemon service..."
+    if node "$INSTALL_DIR/dist/cli/index.js" daemon install \
+      --data-dir "$INSTALL_DIR" 2>&1; then
+      DAEMON_INSTALLED="true"
+      say "Daemon installed and running"
+    else
+      warn "Daemon install failed (non-fatal) — run 'aof daemon install' manually"
+    fi
+  fi
+}
+
+# --- Validate install ---
+
+validate_install() {
+  local ok=true
+
+  # Check binary works
+  if ! node "$INSTALL_DIR/dist/cli/index.js" --version >/dev/null 2>&1; then
+    warn "aof binary check failed"
+    ok=false
+  fi
+
+  # Check org chart exists
+  if [ ! -f "$INSTALL_DIR/org/org-chart.yaml" ]; then
+    warn "org chart missing after install"
+    ok=false
+  fi
+
+  # Check tasks dir exists
+  if [ ! -d "$INSTALL_DIR/tasks/ready" ]; then
+    warn "tasks directory structure missing"
+    ok=false
+  fi
+
+  if [ "$ok" = false ]; then
+    warn "Install validation failed — run 'aof setup --auto --data-dir $INSTALL_DIR' to repair"
+  else
+    say "Install validated"
+  fi
+}
+
 # --- Print summary ---
 
 print_summary() {
@@ -419,11 +528,22 @@ print_summary() {
     printf "  OpenClaw: not detected (install OpenClaw to use AOF as a platform plugin)\n"
   fi
 
+  if [ -n "$DAEMON_INSTALLED" ]; then
+    printf "  Daemon: installed and running\n"
+  else
+    printf "  Daemon: not installed — run 'aof daemon install' to start\n"
+  fi
+
   printf "\n"
   printf "  Next steps:\n"
-  printf "    1. Review your org chart: %s/org/org-chart.yaml\n" "$INSTALL_DIR"
-  printf "    2. Start the daemon:      aof daemon install && aof daemon start\n"
-  printf "    3. Create your first task: aof task create \"My first task\"\n"
+  printf "    1. Restart your shell (or run: source your shell profile)\n"
+  printf "    2. Review your org chart: %s/org/org-chart.yaml\n" "$INSTALL_DIR"
+  if [ -z "$DAEMON_INSTALLED" ]; then
+    printf "    3. Start the daemon:      aof daemon install\n"
+    printf "    4. Create your first task: aof task create \"My first task\"\n"
+  else
+    printf "    3. Create your first task: aof task create \"My first task\"\n"
+  fi
   printf "\n"
 }
 
@@ -440,6 +560,9 @@ main() {
   extract_and_install
   run_node_setup
   write_version_file
+  setup_shell_path
+  install_daemon
+  validate_install
   print_summary
 
   # Clear cleanup paths on success (don't remove tarball temp since it's harmless)

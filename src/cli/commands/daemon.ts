@@ -9,7 +9,7 @@
  */
 
 import { join } from "node:path";
-import { existsSync, readFileSync, unlinkSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import type { Command } from "commander";
 import {
@@ -22,6 +22,8 @@ import {
 import { selfCheck } from "../../daemon/server.js";
 import { startAofDaemon } from "../../daemon/daemon.js";
 import type { HealthStatus } from "../../daemon/health.js";
+import { normalizePath } from "../../config/paths.js";
+import { ensureScaffold } from "../../packaging/wizard.js";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -232,32 +234,23 @@ function cleanupSocketFile(dataDir: string): void {
 
 /**
  * Validate that the data directory is usable for daemon operation.
- * Checks existence, writability (via logs dir creation), and basic structure.
+ * Also runs ensureScaffold to self-heal missing directories/files.
  */
-function validateConfig(dataDir: string): { valid: boolean; error?: string } {
+async function validateConfig(dataDir: string): Promise<{ valid: boolean; error?: string }> {
   if (!existsSync(dataDir)) {
     return { valid: false, error: `Data directory does not exist: ${dataDir}` };
   }
 
-  // Ensure tasks/ directory exists or can be created
-  const tasksDir = join(dataDir, "tasks");
+  // Self-heal: ensure all scaffold directories and org chart exist
   try {
-    mkdirSync(tasksDir, { recursive: true });
+    const repaired = await ensureScaffold(dataDir);
+    if (repaired.length > 0) {
+      console.log(`  Repaired: ${repaired.join(", ")}`);
+    }
   } catch (err) {
     return {
       valid: false,
-      error: `Cannot create tasks directory at ${tasksDir}: ${(err as Error).message}`,
-    };
-  }
-
-  // Ensure logs/ directory exists or can be created
-  const logsDir = join(dataDir, "logs");
-  try {
-    mkdirSync(logsDir, { recursive: true });
-  } catch (err) {
-    return {
-      valid: false,
-      error: `Cannot create logs directory at ${logsDir}: ${(err as Error).message}`,
+      error: `Cannot repair scaffold at ${dataDir}: ${(err as Error).message}`,
     };
   }
 
@@ -272,7 +265,7 @@ async function daemonInstall(dataDir: string): Promise<void> {
   console.log("Installing AOF daemon...\n");
 
   // Validate config
-  const validation = validateConfig(dataDir);
+  const validation = await validateConfig(dataDir);
   if (!validation.valid) {
     console.error(`Error: ${validation.error}`);
     console.error("\nFix the issue above and try again.");
@@ -330,10 +323,10 @@ async function daemonUninstall(dataDir: string): Promise<void> {
 // Start (foreground mode for development)
 // ---------------------------------------------------------------------------
 
-async function daemonStartForeground(dataDir: string): Promise<void> {
+async function daemonStartForeground(dataDir: string, gatewayUrl?: string, gatewayToken?: string): Promise<void> {
   console.log("Starting AOF daemon in foreground...\n");
 
-  const validation = validateConfig(dataDir);
+  const validation = await validateConfig(dataDir);
   if (!validation.valid) {
     console.error(`Error: ${validation.error}`);
     process.exitCode = 1;
@@ -348,6 +341,8 @@ async function daemonStartForeground(dataDir: string): Promise<void> {
     const { service } = await startAofDaemon({
       dataDir,
       enableHealthServer: true,
+      gatewayUrl,
+      gatewayToken,
     });
 
     console.log("Daemon running. Press Ctrl+C to stop.");
@@ -549,7 +544,7 @@ export function registerDaemonCommands(program: Command): void {
     .option("--data-dir <path>", "Data directory (default: --root value)")
     .action(async (opts: { dataDir?: string }) => {
       const root = program.opts()["root"] as string;
-      const dataDir = opts.dataDir ?? root;
+      const dataDir = opts.dataDir ? normalizePath(opts.dataDir) : root;
       await daemonInstall(dataDir);
     });
 
@@ -559,7 +554,7 @@ export function registerDaemonCommands(program: Command): void {
     .option("--data-dir <path>", "Data directory (default: --root value)")
     .action(async (opts: { dataDir?: string }) => {
       const root = program.opts()["root"] as string;
-      const dataDir = opts.dataDir ?? root;
+      const dataDir = opts.dataDir ? normalizePath(opts.dataDir) : root;
       await daemonUninstall(dataDir);
     });
 
@@ -568,12 +563,14 @@ export function registerDaemonCommands(program: Command): void {
     .description("Start daemon (use --foreground for development, otherwise redirects to install)")
     .option("--foreground", "Run daemon in the current process (development mode)", false)
     .option("--data-dir <path>", "Data directory (default: --root value)")
-    .action(async (opts: { foreground: boolean; dataDir?: string }) => {
+    .option("--gateway-url <url>", "OpenClaw gateway URL (default: env OPENCLAW_GATEWAY_URL or http://localhost:3000)")
+    .option("--gateway-token <token>", "OpenClaw gateway auth token (default: env OPENCLAW_GATEWAY_TOKEN)")
+    .action(async (opts: { foreground: boolean; dataDir?: string; gatewayUrl?: string; gatewayToken?: string }) => {
       const root = program.opts()["root"] as string;
-      const dataDir = opts.dataDir ?? root;
+      const dataDir = opts.dataDir ? normalizePath(opts.dataDir) : root;
 
       if (opts.foreground) {
-        await daemonStartForeground(dataDir);
+        await daemonStartForeground(dataDir, opts.gatewayUrl, opts.gatewayToken);
       } else {
         console.log("Use `aof daemon install` to start the daemon under OS supervision.");
         console.log("Use `aof daemon start --foreground` for development.\n");

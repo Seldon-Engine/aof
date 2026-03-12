@@ -209,7 +209,7 @@ Prevents context rot by limiting how much context an agent receives.
 ```yaml
 schemaVersion: 1
 agents:
-  - id: main-agent
+  - id: main
     name: Main Agent
     capabilities:
       tags: [general]

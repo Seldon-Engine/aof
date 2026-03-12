@@ -109,6 +109,8 @@ describe("assign-executor callback wiring (GRAN-02)", () => {
     };
 
     const config: DispatchConfig = {
+      dataDir: store.projectRoot,
+      dryRun: false,
       executor,
       maxConcurrentDispatches: 3,
       defaultLeaseTtlMs: 60000,
@@ -158,6 +160,8 @@ describe("assign-executor callback wiring (GRAN-02)", () => {
     };
 
     const config: DispatchConfig = {
+      dataDir: store.projectRoot,
+      dryRun: false,
       executor,
       maxConcurrentDispatches: 3,
       defaultLeaseTtlMs: 60000,
@@ -206,6 +210,8 @@ describe("assign-executor callback wiring (GRAN-02)", () => {
     };
 
     const config: DispatchConfig = {
+      dataDir: store.projectRoot,
+      dryRun: false,
       executor,
       maxConcurrentDispatches: 3,
       defaultLeaseTtlMs: 60000,

@@ -143,10 +143,11 @@ export async function addAofToAllowList(): Promise<void> {
  */
 /**
  * Register AOF as a plugin entry (idempotent).
- * The `path` is NOT set here — OpenClaw resolves the plugin via npm/node_modules.
- * @param _pluginJsonPath - reserved for future use / health checks
+ *
+ * Note: The `path` is NOT set here — OpenClaw discovers plugins by scanning
+ * the directories listed in `plugins.load.paths`, not from this entry.
  */
-export async function registerAofPlugin(_pluginJsonPath: string): Promise<void> {
+export async function registerAofPlugin(): Promise<void> {
   await openclawConfigSet("plugins.entries.aof", { enabled: true });
   await addAofToAllowList();
 }

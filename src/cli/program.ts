@@ -37,6 +37,7 @@ import { registerSystemCommands } from "./commands/system.js";
 import { registerSetupCommand } from "./commands/setup.js";
 import { registerTraceCommand } from "./commands/trace.js";
 import { DEFAULT_AOF_ROOT } from "../projects/resolver.js";
+import { normalizePath } from "../config/paths.js";
 
 const AOF_ROOT = process.env["AOF_ROOT"] ?? DEFAULT_AOF_ROOT;
 
@@ -46,6 +47,13 @@ const program = new Command()
   .description("Agentic Ops Fabric — deterministic orchestration for multi-agent systems")
   .option("--root <path>", "AOF root directory", AOF_ROOT);
 
+// Normalize --root to absolute path before any command runs
+program.hook("preAction", (thisCommand) => {
+  const opts = thisCommand.opts();
+  if (opts["root"]) {
+    opts["root"] = normalizePath(opts["root"] as string);
+  }
+});
 
 // --- init (integration wizard) ---
 registerInitCommand(program);

@@ -6,22 +6,19 @@
 import { confirm } from "@inquirer/prompts";
 import { readFile, access } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
 import { parse as parseYaml } from "yaml";
 import { OrgChart } from "../schemas/org-chart.js";
 import { isAofInAllowList, openclawConfigGet, execFileAsync } from "../packaging/openclaw-cli.js";
+import { resolveDataDir, orgChartPath, daemonPidPath } from "../config/paths.js";
 import type { WizardState } from "./init-steps.js";
-
-const DEFAULT_DATA_DIR = join(homedir(), ".openclaw", "aof");
 
 // Step 6: Lint org chart + allow-list check
 export async function runLintStep(state: WizardState, _yes: boolean): Promise<void> {
   console.log("🔍 Linting configuration...");
-  const orgChartPath = join(process.cwd(), "org", "org-chart.yaml");
+  const chartPath = orgChartPath(resolveDataDir());
   try {
-    await access(orgChartPath);
-    const raw = await readFile(orgChartPath, "utf-8");
+    await access(chartPath);
+    const raw = await readFile(chartPath, "utf-8");
     const result = OrgChart.safeParse(parseYaml(raw) as unknown);
     if (result.success) {
       console.log("  ✅ Org chart is valid.\n");
@@ -96,8 +93,8 @@ async function pollHealth(url: string, opts: { maxAttempts: number; intervalMs: 
 // Step 8: AOF daemon
 export async function runDaemonStep(state: WizardState, yes: boolean): Promise<void> {
   console.log("🤖 AOF daemon...");
-  const dataDir = (process.env["AOF_DATA_DIR"] as string | undefined) ?? DEFAULT_DATA_DIR;
-  const pidFile = join(dataDir, "daemon.pid");
+  const dataDir = resolveDataDir();
+  const pidFile = daemonPidPath(dataDir);
   if (existsSync(pidFile)) {
     const pid = parseInt(readFileSync(pidFile, "utf-8").trim(), 10);
     if (!isNaN(pid) && isDaemonRunning(pid)) {

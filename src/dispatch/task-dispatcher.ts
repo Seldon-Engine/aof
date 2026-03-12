@@ -17,12 +17,13 @@ import type { GatewayAdapter } from "./executor.js";
 import { isLeaseActive } from "./lease-manager.js";
 import { checkThrottle, updateThrottleState } from "./throttle.js";
 import { loadOrgChart } from "../org/loader.js";
-import { join } from "node:path";
+import { orgChartPath } from "../config/paths.js";
 
 export { executeAssignAction, loadProjectManifest } from "./assign-executor.js";
 import { loadProjectManifest } from "./assign-executor.js";
 
 export interface DispatchConfig {
+  dataDir: string;
   dryRun: boolean;
   defaultLeaseTtlMs: number;
   spawnTimeoutMs?: number;
@@ -89,8 +90,7 @@ export async function buildDispatchActions(
   // AOF-adf: Load org chart for per-team throttling
   let orgChart: Awaited<ReturnType<typeof loadOrgChart>> | null = null;
   try {
-    const orgChartPath = join(store.projectRoot, "org", "org-chart.yaml");
-    const result = await loadOrgChart(orgChartPath);
+    const result = await loadOrgChart(orgChartPath(config.dataDir));
     if (result.success) {
       orgChart = result;
     }

@@ -6,7 +6,8 @@
  */
 
 import { fileURLToPath } from "node:url";
-import { join, dirname } from "node:path";
+import { dirname } from "node:path";
+import { orgChartPath, resolveDataDir } from "../config/paths.js";
 import { detectOpenClaw } from "../packaging/openclaw-cli.js";
 import { runSyncStep } from "./init-sync.js";
 import {
@@ -67,9 +68,9 @@ export async function init(opts: InitOptions = {}): Promise<void> {
   await runToolVisibilityStep(state, yes);
 
   // Step 2.5: Org chart ↔ OpenClaw agent sync
-  const orgChartPath = join(process.cwd(), "org", "org-chart.yaml");
+  const chartPath = orgChartPath(resolveDataDir());
   try {
-    const syncResult = await runSyncStep(orgChartPath, yes);
+    const syncResult = await runSyncStep(chartPath, yes);
     state.syncCompleted = syncResult.imported.length > 0 || syncResult.exported.length > 0;
     state.warnings.push(...syncResult.warnings);
   } catch {
