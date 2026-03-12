@@ -76,16 +76,20 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 - ✓ Structured trace capture with retry accumulation (`trace-N.json`) — v1.5
 - ✓ `aof trace <task-id>` CLI with summary, `--debug`, `--json`, and DAG hop correlation — v1.5
 
+### Validated (v1.8)
+
+- ✓ Task notification subscriptions — subscribe at dispatch time or to existing tasks — v1.8
+- ✓ Two granularity levels: `"completion"` (terminal states) and `"all"` (every state transition, batched) — v1.8
+- ✓ Scheduler-driven callback delivery — spawns sessions to subscriber agents with task outcome as context — v1.8
+- ✓ Callback retry (3 attempts, 30s cooldown) with delivery failure tracking — v1.8
+- ✓ Callback depth limiting (MAX_DEPTH=3) prevents infinite callback loops across MCP boundary — v1.8
+- ✓ Daemon restart recovery — pending subscriptions re-evaluated on first poll — v1.8
+- ✓ Agent guidance for callback behavior, at-least-once delivery, idempotency expectations — v1.8
+- ✓ Budget gate CI test enforces 2500-token ceiling on context injection — v1.8
+
 ### Active
 
-## Current Milestone: v1.8 Task Notifications
-
-**Goal:** Let agents subscribe to task outcomes and receive callbacks, eliminating the dependent-task polling workaround.
-
-**Target features:**
-- Task notification subscriptions (subscribe on create or after)
-- Two granularity levels: `"completion"` (success/failure) or `"all"` (state transitions)
-- Scheduler-driven notification delivery (likely new session dispatch to subscribing agent with results as context)
+(No active milestone — next milestone TBD)
 
 ### Validated (v1.2)
 
@@ -122,7 +126,7 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 
 - AOF lives at `~/Projects/AOF/` — TypeScript project with src/, tests/, dist/
 - Source structure: cli/, dispatch/, store/, protocol/, events/, org/, memory/, schemas/, daemon/, recovery/, gateway/, plugins/
-- Builds with tsdown, tests with vitest (~486k LOC, 2975+ tests)
+- Builds with tsdown, tests with vitest (~109k LOC, 3,090+ tests)
 - Runtime data lands in `~/.openclaw/aof/` (events/, tasks/, state/, memory/)
 - OpenClaw gateway is at `~/.openclaw/workspace/package/` — AOF uses its plugin-sdk export
 - The org chart (`org/org-chart.yaml`) drives all routing, memory, and agent configuration
@@ -132,6 +136,7 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 - v1.3 shipped: seamless upgrade — migration framework, DAG-as-default, smoke tests, release pipeline, legacy gate removal
 - v1.4 shipped: context optimization — compressed SKILL.md (51% reduction), tiered delivery (seed/full), workflow API on aof_dispatch, CI budget gate
 - v1.5 shipped: event tracing — completion enforcement, session trace capture, `aof trace` CLI with DAG hop correlation
+- v1.8 shipped: task notifications — subscription API, callback delivery with retry, all-granularity batching, depth limiting, restart recovery
 - OpenClaw constraint: no nested agent sessions — scheduler must advance hops between independent sessions
 - Node 22 pinned as prerequisite (Node 24/25 have better-sqlite3 build failures)
 
@@ -175,6 +180,17 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 | Streaming JSONL parsing (node:readline) | Memory-efficient line-by-line processing for potentially large session files | ✓ Good |
 | Trace capture after enforcement (observational) | Tracing never interferes with task state transitions — purely diagnostic | ✓ Good |
 | DAG hop correlation via correlationId with sequential fallback | Graceful degradation when correlation IDs are missing | ✓ Good |
+| Co-located subscriptions.json (not frontmatter) | Subscriptions are multi-entry; frontmatter is single-value | ✓ Good |
+| Constructor-injected taskDirResolver for SubscriptionStore | Testability and decoupling from store internals | ✓ Good |
+| Subscription creation before executor dispatch | Atomic subscribe+dispatch — no window where task completes before subscription exists | ✓ Good |
+| Callback prompt uses taskFileContents for structured notification | Subscriber gets full task state, not just ID | ✓ Good |
+| Delivery failures tracked with counter+timestamp | 30s cooldown, 3 max attempts, self-healing retry | ✓ Good |
+| Org chart validation on all subscribe operations | Even default "mcp" subscriberId must be in org chart | ✓ Good |
+| Cursor-based scanning with lastDeliveredAt | High-water mark into EventLogger.query — self-healing on failure | ✓ Good |
+| MAX_CALLBACK_DEPTH=3 as non-configurable constant | Safety simplicity — no runtime configuration surface for loop prevention | ✓ Good |
+| TaskContext.metadata for callbackDepth propagation | Cross-session depth tracking without schema changes to gateway | ✓ Good |
+| AOF_CALLBACK_DEPTH env var bridge for MCP boundary | Only mechanism that crosses OpenClaw agent spawn boundary | ✓ Good (accepted race window) |
+| Budget ceiling 2500 tokens with 30% reduction baseline | ~10% headroom over measured 2268 total after v1.8 SKILL.md growth | ✓ Good |
 
 ---
-*Last updated: 2026-03-09 after v1.8 milestone start*
+*Last updated: 2026-03-12 after v1.8 milestone complete*

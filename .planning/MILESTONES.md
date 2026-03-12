@@ -1,5 +1,26 @@
 # Milestones
 
+## v1.8 Task Notifications (Shipped: 2026-03-12)
+
+**Phases completed:** 6 phases (28-33), 9 plans
+**Timeline:** 2026-03-09 → 2026-03-12 (4 days)
+**Code:** +3,970 lines across 22 files (~109k LOC TypeScript, 3,090 tests)
+
+**Key accomplishments:**
+- Subscription schema + SubscriptionStore with crash-safe co-located persistence (subscriptions.json per task)
+- MCP tools for subscribe/unsubscribe + dispatch-time subscription via `subscribe` param on `aof_dispatch`
+- Scheduler-driven callback delivery — spawns sessions to subscriber agents with task outcome as context
+- Retry with 3-attempt max, 30s cooldown, and delivery failure tracking
+- All-granularity delivery with cursor-based batching (lastDeliveredAt high-water mark into EventLogger.query)
+- Callback depth limiting (MAX_DEPTH=3) prevents infinite callback loops across MCP boundary
+- Daemon restart recovery — pending subscriptions re-evaluated on first poll after restart
+- Agent guidance in SKILL.md documenting callback behavior, at-least-once delivery, idempotency expectations
+- Budget gate CI test adjusted to 2500-token ceiling with 30% reduction baseline
+
+**Git range:** eca7506 → 56e01d3
+
+---
+
 ## v1.5 Event Tracing (Shipped: 2026-03-08)
 
 **Phases completed:** 3 phases (25-27), 6 plans

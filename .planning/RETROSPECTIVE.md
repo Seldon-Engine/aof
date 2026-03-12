@@ -129,23 +129,59 @@
 
 ---
 
+## Milestone: v1.8 — Task Notifications
+
+**Shipped:** 2026-03-12
+**Phases:** 6 | **Plans:** 9
+
+### What Was Built
+- Subscription schema + SubscriptionStore with crash-safe co-located persistence
+- MCP tools for subscribe/unsubscribe + dispatch-time subscription
+- Scheduler-driven callback delivery with retry (3 attempts, 30s cooldown)
+- All-granularity delivery with cursor-based batching and trace capture
+- Callback depth limiting (MAX_DEPTH=3) with daemon restart recovery
+- Agent guidance in SKILL.md with budget gate enforcement (2500 ceiling)
+
+### What Worked
+- Milestone audit after Phase 32 caught two real integration gaps (orphaned export, broken depth propagation) — Phase 33 closed both cleanly
+- TDD approach continued to pay off — 3,090 tests with zero regressions across all 9 plans
+- Gap closure as a dedicated phase (33) with focused scope: 2 tasks, 2 commits, clean verification
+- Budget gate CI pattern extended successfully from v1.4 — caught context growth and adapted ceiling
+
+### What Was Inefficient
+- deliverAllGranularityCallbacks was built in Phase 31 but never wired into production — integration gap survived 2 phases before audit caught it
+- callbackDepth propagation designed in Phase 31 research but env var bridge approach only discovered during Phase 33 planning
+- REQUIREMENTS.md coverage summary became stale ("Pending: 2") after Phase 33 completed — no auto-update mechanism
+
+### Patterns Established
+- **Env var bridge for MCP boundary crossing:** AOF_CALLBACK_DEPTH set before spawnSession, cleared in finally — pragmatic approach for in-process agent spawning
+- **Cursor-based delivery scanning:** lastDeliveredAt high-water mark into EventLogger.query — self-healing on failure
+- **Dual delivery paths:** deliverCallbacks (completion) and deliverAllGranularityCallbacks (all) called independently in separate try/catch blocks
+
+### Key Lessons
+- Integration gaps are invisible to phase-level verification — milestone audit is essential for catching cross-phase wiring issues
+- Functions that are exported but never called from production should be flagged during phase verification (add key_links check)
+- Requirements that span multiple phases (GRAN-02, SAFE-01 split across 31 and 33) need explicit "wiring phase" planning
+
+---
+
 ## Cross-Milestone Trends
 
-| Metric | v1.0 | v1.1 | v1.2 | v1.3 | v1.4 | v1.5 |
-|--------|------|------|------|------|------|------|
-| Phases | 3 | 6 | 7 | 4 | 4 | 3 |
-| Plans | 7 | 16 | 16 | 7 | 6 | 6 |
-| Commits | 15 | 40 | — | — | 39 | ~30 |
-| Files changed | 64 | 148 | — | — | 47 | 47 |
-| Lines added | +3,527 | +7,583 | — | — | +3,767 | +6,600 |
-| Lines removed | -584 | -4,865 | — | — | -580 | -88 |
-| Avg plan duration | ~4 min | ~4.3 min | — | — | ~3.2 min | ~5.8 min |
-| Total execution | ~30 min | ~1.7 hrs | — | — | ~19 min | ~35 min |
+| Metric | v1.0 | v1.1 | v1.2 | v1.3 | v1.4 | v1.5 | v1.8 |
+|--------|------|------|------|------|------|------|------|
+| Phases | 3 | 6 | 7 | 4 | 4 | 3 | 6 |
+| Plans | 7 | 16 | 16 | 7 | 6 | 6 | 9 |
+| Commits | 15 | 40 | — | — | 39 | ~30 | ~25 |
+| Files changed | 64 | 148 | — | — | 47 | 47 | 22 |
+| Lines added | +3,527 | +7,583 | — | — | +3,767 | +6,600 | +3,970 |
+| Lines removed | -584 | -4,865 | — | — | -580 | -88 | -11 |
+| Timeline | 1 day | 2 days | — | — | 1 day | 2 days | 4 days |
 
 **Observations:**
 - Plan execution time is consistent (~3-5 min avg) regardless of phase complexity
 - v1.5 had highest lines-added per plan (+1,100/plan) due to TDD approach generating substantial test code
 - Three-phase milestones (v1.5) with linear dependencies execute most cleanly — zero blocked phases, zero rework
-- Audit-driven hotfix phases (Phase 8 in v1.1) work well for closing audit gaps without replanning
+- Audit-driven hotfix phases (Phase 8 in v1.1, Phase 33 in v1.8) work well for closing integration gaps
 - Budget gate pattern (CI test asserting ceiling) is reusable for other measurable constraints
-- Nyquist validation consistently skipped across v1.4 and v1.5 — consider dropping or making it non-blocking
+- v1.8 had lowest lines-removed (-11) — almost entirely additive, indicating clean new feature with no legacy removal
+- Integration gaps (orphaned exports, broken cross-boundary propagation) are a recurring pattern — milestone audit is the safety net
