@@ -21,9 +21,9 @@ Requirements for codebase cleanup milestone. Each maps to roadmap phases.
 
 ### Bug Fixes
 
-- [ ] **BUG-01**: buildTaskStats counts cancelled and deadletter statuses — prevents false "all tasks blocked" alerts
-- [ ] **BUG-02**: Daemon startTime initialized inside startAofDaemon() — not at module load
-- [ ] **BUG-03**: UpdatePatch.blockers moved to correct position in type (or removed if truly unused)
+- [x] **BUG-01**: buildTaskStats counts cancelled and deadletter statuses — prevents false "all tasks blocked" alerts
+- [x] **BUG-02**: Daemon startTime initialized inside startAofDaemon() — not at module load
+- [x] **BUG-03**: UpdatePatch.blockers moved to correct position in type (or removed if truly unused)
 - [x] **BUG-04**: TOCTOU race in transitionTask/acquireLease mitigated — scheduler-initiated transitions routed through task lock manager
 
 ### Config Registry
@@ -111,9 +111,9 @@ Requirements for codebase cleanup milestone. Each maps to roadmap phases.
 | DEAD-07 | Phase 34 | Complete |
 | DEAD-08 | Phase 34 | Complete |
 | DEAD-09 | Phase 34 | Complete |
-| BUG-01 | Phase 35 | Pending |
-| BUG-02 | Phase 35 | Pending |
-| BUG-03 | Phase 35 | Pending |
+| BUG-01 | Phase 35 | Complete |
+| BUG-02 | Phase 35 | Complete |
+| BUG-03 | Phase 35 | Complete |
 | BUG-04 | Phase 35 | Complete |
 | CFG-01 | Phase 36 | Pending |
 | CFG-02 | Phase 36 | Pending |

@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.10
 milestone_name: Codebase Cleanups
 status: executing
-stopped_at: Completed 35-02-PLAN.md
-last_updated: "2026-03-12T21:26:49.168Z"
+stopped_at: Completed 35-01-PLAN.md
+last_updated: "2026-03-12T21:27:08.683Z"
 last_activity: 2026-03-12 — Completed 35-02 (TOCTOU race condition fix)
 progress:
   total_phases: 7
@@ -50,6 +50,7 @@ All decisions logged in PROJECT.md Key Decisions table.
 - [Phase 34]: Kept notifier field in AOFServiceDependencies because ProtocolRouter still uses it
 - [35-02] Wrapped entire executeAssignAction body in withLock rather than individual call sites for complete mutation coverage
 - [35-02] Added lockManager to DispatchConfig in addition to SchedulerConfig since assign-executor uses DispatchConfig type
+- [Phase 35]: Used TDD for buildTaskStats fix to ensure regression coverage before implementation
 
 ### Roadmap Evolution
 
@@ -73,6 +74,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-12T21:25:11Z
-Stopped at: Completed 35-02-PLAN.md
-Resume file: .planning/phases/35-bug-fixes/35-02-SUMMARY.md
+Last session: 2026-03-12T21:27:08.681Z
+Stopped at: Completed 35-01-PLAN.md
+Resume file: None
