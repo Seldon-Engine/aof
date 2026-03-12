@@ -229,3 +229,166 @@ describe("assign-executor callback wiring (GRAN-02)", () => {
     expect(result.failed).toBe(false);
   });
 });
+
+describe("assign-executor lockManager integration (BUG-04)", () => {
+  let tmpDir: string;
+  let store: FilesystemTaskStore;
+  let logger: EventLogger;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "aof-assign-lock-"));
+    store = new FilesystemTaskStore(tmpDir);
+    await store.init();
+    logger = new EventLogger(join(tmpDir, "events"));
+
+    // Reset mocks
+    vi.mocked(deliverCallbacks).mockReset().mockResolvedValue(undefined);
+    vi.mocked(deliverAllGranularityCallbacks).mockReset().mockResolvedValue(undefined);
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("wraps acquireLease call inside lockManager.withLock when lockManager is provided", async () => {
+    const task = await store.create({
+      title: "Test lock manager acquireLease",
+      body: "Test body",
+      routing: { agent: "test-agent" },
+      createdBy: "test",
+    });
+    await store.transition(task.frontmatter.id, "ready");
+
+    const mockLockManager = {
+      withLock: vi.fn(async (_taskId: string, fn: () => Promise<unknown>) => fn()),
+    };
+
+    const executor: GatewayAdapter = {
+      spawnSession: vi.fn().mockImplementation(async (_context: TaskContext, spawnOpts: any) => {
+        // Simulate agent transitioning task to done via proper chain
+        await store.transition(task.frontmatter.id, "in-progress");
+        await store.transition(task.frontmatter.id, "review");
+        await store.transition(task.frontmatter.id, "done");
+
+        if (spawnOpts?.onRunComplete) {
+          await spawnOpts.onRunComplete({
+            success: true,
+            sessionId: "test-session",
+            durationMs: 1000,
+          });
+        }
+        return { success: true, sessionId: "test-session" } as SpawnResult;
+      }),
+    };
+
+    const config: DispatchConfig = {
+      dataDir: store.projectRoot,
+      dryRun: false,
+      executor,
+      maxConcurrentDispatches: 3,
+      defaultLeaseTtlMs: 60000,
+      lockManager: mockLockManager,
+    };
+
+    const action: SchedulerAction = {
+      type: "assign",
+      taskId: task.frontmatter.id,
+      agent: "test-agent",
+    };
+
+    const result = await executeAssignAction(action, store, logger, config, [task], { value: null });
+
+    expect(result.executed).toBe(true);
+    expect(result.failed).toBe(false);
+    expect(mockLockManager.withLock).toHaveBeenCalledWith(task.frontmatter.id, expect.any(Function));
+  });
+
+  it("wraps store.transition (on spawn failure) inside lockManager.withLock when lockManager is provided", async () => {
+    const task = await store.create({
+      title: "Test lock manager spawn failure",
+      body: "Test body",
+      routing: { agent: "test-agent" },
+      createdBy: "test",
+    });
+    await store.transition(task.frontmatter.id, "ready");
+
+    const mockLockManager = {
+      withLock: vi.fn(async (_taskId: string, fn: () => Promise<unknown>) => fn()),
+    };
+
+    const executor: GatewayAdapter = {
+      spawnSession: vi.fn().mockResolvedValue({
+        success: false,
+        error: "transient spawn error",
+      } as SpawnResult),
+    };
+
+    const config: DispatchConfig = {
+      dataDir: store.projectRoot,
+      dryRun: false,
+      executor,
+      maxConcurrentDispatches: 3,
+      defaultLeaseTtlMs: 60000,
+      lockManager: mockLockManager,
+    };
+
+    const action: SchedulerAction = {
+      type: "assign",
+      taskId: task.frontmatter.id,
+      agent: "test-agent",
+    };
+
+    const result = await executeAssignAction(action, store, logger, config, [task], { value: null });
+
+    expect(result.failed).toBe(true);
+    expect(mockLockManager.withLock).toHaveBeenCalledWith(task.frontmatter.id, expect.any(Function));
+  });
+
+  it("executes without locking when no lockManager is provided (backward compat)", async () => {
+    const task = await store.create({
+      title: "Test no lock manager backward compat",
+      body: "Test body",
+      routing: { agent: "test-agent" },
+      createdBy: "test",
+    });
+    await store.transition(task.frontmatter.id, "ready");
+
+    const executor: GatewayAdapter = {
+      spawnSession: vi.fn().mockImplementation(async (_context: TaskContext, spawnOpts: any) => {
+        await store.transition(task.frontmatter.id, "in-progress");
+        await store.transition(task.frontmatter.id, "review");
+        await store.transition(task.frontmatter.id, "done");
+
+        if (spawnOpts?.onRunComplete) {
+          await spawnOpts.onRunComplete({
+            success: true,
+            sessionId: "test-session",
+            durationMs: 1000,
+          });
+        }
+        return { success: true, sessionId: "test-session" } as SpawnResult;
+      }),
+    };
+
+    // No lockManager in config
+    const config: DispatchConfig = {
+      dataDir: store.projectRoot,
+      dryRun: false,
+      executor,
+      maxConcurrentDispatches: 3,
+      defaultLeaseTtlMs: 60000,
+    };
+
+    const action: SchedulerAction = {
+      type: "assign",
+      taskId: task.frontmatter.id,
+      agent: "test-agent",
+    };
+
+    const result = await executeAssignAction(action, store, logger, config, [task], { value: null });
+
+    // Should still work without lockManager
+    expect(result.executed).toBe(true);
+    expect(result.failed).toBe(false);
+  });
+});
