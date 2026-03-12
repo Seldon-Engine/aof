@@ -1,292 +1,312 @@
 # Technology Stack
 
-**Project:** AOF v1.8 Task Notification Subscriptions & Callback Delivery
-**Researched:** 2026-03-09
-**Scope:** Stack additions/changes for task completion/failure callbacks, agent notification delivery, subscription storage, and event integration
+**Project:** AOF v1.10 — Centralized Config Registry & Structured Logging
+**Researched:** 2026-03-12
+**Scope:** Stack additions/changes for replacing scattered `process.env` access with a typed config registry and replacing 751 `console.*` calls with structured logging
 
 ## Executive Assessment
 
-**No new runtime dependencies required.** The existing stack covers all needs for v1.8. Task notification subscriptions are stored as metadata on task frontmatter (filesystem-native). Callback delivery reuses the existing `GatewayAdapter.spawnSession()` mechanism to dispatch a notification session to the subscribing agent. Event integration hooks into the existing `EventLogger.onEvent` callback and `NotificationPolicyEngine` pipeline.
+**No new runtime dependencies required.** Both the config registry and structured logging should be built as zero-dependency internal modules using Node.js 22 built-ins and existing Zod schemas. This is the correct choice for AOF because:
 
-The key architectural insight: "notification delivery" in AOF means "spawn a new agent session with the completion/failure result as context." There is no push channel, no WebSocket, no HTTP callback -- the scheduler dispatches a session to the subscribing agent, exactly like it dispatches any other task hop. This keeps the design within AOF's existing patterns and constraints (no nested sessions, deterministic control plane, filesystem-based).
+1. **Config registry** is a Zod schema + singleton pattern -- no library exists that adds value over what Zod already provides. The "registry" is a typed object populated at startup from env vars, CLI args, and defaults, validated by Zod, and frozen. External config libraries (node-config, convict, env-schema) add dependencies for functionality Zod already delivers.
 
-**Confidence:** HIGH -- all capabilities verified against installed packages, existing codebase patterns, and AOF constraints.
+2. **Structured logging** should NOT use pino, winston, or any external logger. AOF already has `EventLogger` for structured JSONL audit events. What it lacks is a leveled operational logger for the `console.*` replacement. Pino v10 brings 11 transitive dependencies and 664kB -- disproportionate for a project that avoids unnecessary deps. A thin `Logger` class wrapping `process.stderr.write()` with JSON output, log levels, and child logger support is ~100 lines and covers the actual need.
+
+**Confidence:** HIGH -- verified against installed packages, Node.js 22 APIs, existing codebase patterns, and AOF's zero-external-service constraint.
 
 ## Existing Stack (Confirmed Sufficient)
 
-| Technology | Installed | Purpose for v1.8 | Status |
-|------------|-----------|-------------------|--------|
-| Node.js | 22 (pinned) | `fs/promises` for subscription storage, `crypto.randomUUID` for subscription IDs | Sufficient |
-| TypeScript | 5.7.x | Type-safe subscription schemas, callback context types | Sufficient |
-| zod | 3.24.x | Subscription schema validation, callback payload schemas | Sufficient |
-| write-file-atomic | 7.x | Atomic task file writes when adding/removing subscriptions | Sufficient |
-| yaml | 2.7.x | Task frontmatter serialization (subscriptions live in frontmatter metadata) | Sufficient |
-| gray-matter | 4.0.3 | Task file parsing for subscription reads | Sufficient |
-| commander | 14.0.x | `aof subscribe` / `aof unsubscribe` CLI commands (if needed) | Sufficient |
-| vitest | 3.0.x | Unit/integration tests for subscription lifecycle, delivery, integration | Sufficient |
-| @modelcontextprotocol/sdk | 1.26.x | MCP tool registration for `aof_subscribe` / `aof_unsubscribe` | Sufficient |
+| Technology | Installed | Purpose for Config/Logging | Status |
+|------------|-----------|---------------------------|--------|
+| Node.js | 22.22.0 (pinned) | `process.env`, `process.stderr.write()`, `performance.now()` | Sufficient |
+| TypeScript | 5.7.x | Typed config schema, logger interfaces | Sufficient |
+| zod | 3.24.x | Config schema validation, env var parsing | Sufficient |
+| vitest | 3.0.x | Unit tests for registry and logger | Sufficient |
 
-## What Each v1.8 Feature Needs
+## Recommended Stack
 
-### 1. Subscription Storage
+### Config Registry
 
-**What:** Store which agents want to be notified about which task outcomes. Two granularity levels: `"completion"` (success/failure only) and `"all"` (every state transition).
+| Technology | Version | Purpose | Why |
+|------------|---------|---------|-----|
+| Zod | 3.24.x (existing) | Config schema definition, env var coercion, validation | Already AOF's schema layer. `z.coerce.number()` handles string-to-number for env vars. No new dep needed. |
+| Node.js `process.env` | 22.x (built-in) | Env var source | Already used in 11+ files -- consolidation, not replacement |
+| Custom `ConfigRegistry` class | N/A (internal) | Typed singleton with `.get()` accessor | ~150 lines. Zod parse at startup, freeze object, export typed accessors |
 
-**Stack needed:** Existing only.
-
-**Storage approach -- task frontmatter metadata:**
-
-Subscriptions are stored as a `subscriptions` array in the watched task's frontmatter metadata. This is the natural choice because:
-- Subscriptions are per-task data (co-located with the task they watch)
-- No new storage system needed (no SQLite table, no separate JSON file)
-- Atomic with task state transitions (write-file-atomic)
-- Survives restarts (filesystem-based, same as all AOF state)
-- Cleaned up automatically when tasks reach terminal states
+**Architecture:**
 
 ```typescript
-// New Zod schema for subscription records
-const TaskSubscription = z.object({
-  id: z.string().uuid(),
-  subscriberAgent: z.string().min(1),       // Agent ID to notify
-  subscriberTaskId: z.string().optional(),   // Task that triggered the subscription (for context)
-  granularity: z.enum(["completion", "all"]),
-  createdAt: z.string().datetime(),
-  createdBy: z.string(),                     // Agent that created the subscription
-});
-```
+// src/config/registry.ts — the entire config surface in one place
 
-**Why NOT a separate subscription store:**
-- A separate `subscriptions.json` or SQLite table introduces a second source of truth
-- Subscriptions must survive task moves between status directories -- frontmatter moves with the file
-- The task file is already atomically written on every state change via `write-file-atomic`
-- No cross-task subscription queries are needed (subscriptions fire when the watched task changes)
+import { z } from "zod";
 
-**Why NOT the MCP SubscriptionManager:**
-- The existing `src/mcp/subscriptions.ts` handles MCP resource subscriptions (real-time, in-session, protocol-level)
-- Task notification subscriptions are durable (persist across restarts) and trigger agent sessions
-- These are fundamentally different: MCP subscriptions = protocol notification within an active session; task subscriptions = spawn a new session when a task completes
+const AofConfigSchema = z.object({
+  // Paths
+  dataDir: z.string().default("~/.openclaw/aof"),
+  aofRoot: z.string().optional(),
 
-### 2. Subscription Registration (MCP Tool)
+  // Daemon
+  pollIntervalMs: z.coerce.number().default(5000),
+  defaultLeaseTtlMs: z.coerce.number().default(300_000),
+  heartbeatTtlMs: z.coerce.number().default(60_000),
+  maxConcurrentDispatches: z.coerce.number().min(1).max(50).default(5),
+  daemonSocketPath: z.string().optional(),
 
-**What:** Let agents subscribe to task outcomes via `aof_subscribe` and unsubscribe via `aof_unsubscribe`.
+  // Feature flags
+  dryRun: z.coerce.boolean().default(false),
+  modules: z.object({
+    memory: z.object({ enabled: z.coerce.boolean().default(true) }),
+    dispatch: z.object({ enabled: z.coerce.boolean().default(true) }),
+    murmur: z.object({ enabled: z.coerce.boolean().default(true) }),
+    linter: z.object({ enabled: z.coerce.boolean().default(true) }),
+  }).default({}),
 
-**Stack needed:** Existing only.
-- `@modelcontextprotocol/sdk` for tool registration (same pattern as `aof_dispatch`, `aof_task_complete`)
-- `zod` for input validation
-- `write-file-atomic` for atomic task file update
+  // Memory / embedding
+  openaiApiKey: z.string().optional(),
 
-**Tool signatures:**
+  // Runtime (set programmatically, not from env)
+  callbackDepth: z.coerce.number().default(0),
 
-```typescript
-// aof_subscribe
-const subscribeInput = z.object({
-  taskId: z.string(),                          // Task to watch
-  granularity: z.enum(["completion", "all"]).default("completion"),
-  actor: z.string().optional(),                // Subscribing agent (auto-detected from session)
+  // Logging
+  logLevel: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
 });
 
-// aof_unsubscribe
-const unsubscribeInput = z.object({
-  taskId: z.string(),                          // Task being watched
-  subscriptionId: z.string().optional(),       // Specific subscription (or remove all for this agent)
-  actor: z.string().optional(),
-});
+export type AofConfig = z.infer<typeof AofConfigSchema>;
 ```
 
-**Integration:** Follows exact pattern of `aof_task_dep_add` / `aof_task_dep_remove` -- read task, mutate metadata, write atomically.
+**Key design decisions:**
 
-### 3. Notification Delivery (Session Dispatch)
+1. **Single Zod schema** defines all config with defaults -- replaces 11+ scattered `process.env` reads
+2. **Populated at startup** from env vars + explicit overrides (CLI flags, plugin config) -- NOT lazily on each access
+3. **Frozen after init** -- `Object.freeze()` prevents runtime mutation
+4. **Testable** -- `createConfig(overrides)` factory for tests, no global singleton in test code
+5. **Env var mapping** is explicit: `AOF_DATA_DIR -> dataDir`, `AOF_ROOT -> aofRoot`, etc. -- a simple mapping object, not convention-based
 
-**What:** When a watched task reaches a notifiable state, spawn a new agent session to the subscribing agent with the outcome as context.
+**Why NOT external config libraries:**
 
-**Stack needed:** Existing only.
-- `GatewayAdapter.spawnSession()` -- the same mechanism used for task dispatch and DAG hop dispatch
-- `EventLogger` -- for logging delivery events
-- Task context builder -- formats the notification payload as task instructions
+| Library | Why Not |
+|---------|---------|
+| `node-config` | YAML/JSON file-based config meant for multi-environment deployments. AOF config comes from env vars + plugin config object, not config files. |
+| `convict` | Schema+validation+coercion -- but Zod already does all three. Adds 5+ deps for no new capability. |
+| `@fastify/env-schema` | Fastify ecosystem dependency. Thin wrapper around ajv. Zod is already AOF's validator. |
+| `dotenv` | AOF runs as an OpenClaw plugin or daemon -- env vars are set by the runtime, not a `.env` file. |
+| `typed-config` | Wraps node-config with TypeScript decorators. Unnecessary indirection over Zod. |
 
-**Delivery mechanism:**
+### Structured Logging
 
-The scheduler already has the `onRunComplete` callback pattern (used in `dag-transition-handler.ts` and `assign-executor.ts`). When a task transitions to a notifiable state:
+| Technology | Version | Purpose | Why |
+|------------|---------|---------|-----|
+| Custom `Logger` class | N/A (internal) | Leveled JSON logger for operational logs | ~100-150 lines. Replaces `console.*` in core modules. Zero deps. |
+| `process.stderr` | Node.js built-in | Output stream | Operational logs to stderr (not stdout). Stdout reserved for CLI output. |
 
-1. Read the task's `subscriptions` from frontmatter metadata
-2. For each subscription matching the granularity:
-   a. Build a `TaskContext` with the outcome as context (task ID, final status, summary, outputs)
-   b. Call `executor.spawnSession()` to dispatch a notification session to the subscribing agent
-   c. Log a `notification.delivered` event
-   d. Remove the subscription (one-shot for `"completion"`, keep for `"all"`)
-
-**Why spawn a session (not a push notification):**
-- OpenClaw constraint: no nested sessions. The subscribing agent cannot receive a callback during an active session.
-- Spawning a session IS the callback. The agent wakes up, gets the notification context, and can act on it.
-- This reuses 100% of existing dispatch infrastructure (lease management, timeout handling, failure tracking).
-- The subscribing agent gets the same environment it would for any other task -- tools, memory, org chart access.
-
-**Notification context (passed as task instructions):**
+**Architecture:**
 
 ```typescript
-const notificationContext = {
-  type: "task_notification",
-  watchedTaskId: string,
-  watchedTaskStatus: TaskStatus,
-  watchedTaskTitle: string,
-  outcome: "completed" | "failed" | "transitioned",
-  summary?: string,           // From aof_task_complete summary
-  outputs?: string[],         // Task output artifacts
-  transition?: { from: string; to: string },  // For "all" granularity
-  subscriberTaskId?: string,  // The subscriber's own task context
-};
+// src/logging/logger.ts — structured operational logger
+
+export type LogLevel = "trace" | "debug" | "info" | "warn" | "error" | "fatal";
+
+export interface LogEntry {
+  level: LogLevel;
+  time: number;        // epoch ms
+  msg: string;
+  module?: string;     // e.g., "scheduler", "dispatch", "daemon"
+  taskId?: string;     // correlation
+  [key: string]: unknown;
+}
+
+export class Logger {
+  private readonly module: string;
+  private readonly minLevel: number;
+  private readonly fields: Record<string, unknown>;
+
+  constructor(module: string, level?: LogLevel, fields?: Record<string, unknown>);
+
+  // Core methods
+  trace(msg: string, data?: Record<string, unknown>): void;
+  debug(msg: string, data?: Record<string, unknown>): void;
+  info(msg: string, data?: Record<string, unknown>): void;
+  warn(msg: string, data?: Record<string, unknown>): void;
+  error(msg: string, data?: Record<string, unknown>): void;
+  fatal(msg: string, data?: Record<string, unknown>): void;
+
+  // Child logger (inherits module + fields, adds new fields)
+  child(fields: Record<string, unknown>): Logger;
+}
 ```
 
-### 4. Event Integration
+**Key design decisions:**
 
-**What:** Hook notification delivery into the existing event pipeline so subscriptions fire at the right time.
+1. **JSON to stderr** -- operational logs are structured JSON, one object per line, written to stderr. This is the same format pino/bunyan use, compatible with any log aggregator. Stdout remains clean for CLI output.
+2. **Module-scoped loggers** -- each module creates `new Logger("scheduler")`, `new Logger("dispatch")`. No global logger instance (except a default for convenience).
+3. **Child loggers** for request context -- `logger.child({ taskId, correlationId })` carries correlation through a dispatch cycle.
+4. **Level filtering at creation** -- level comes from config registry. Below-level calls are no-ops (no string formatting, no object allocation).
+5. **NOT replacing EventLogger** -- `EventLogger` writes structured audit events to JSONL files for the event pipeline. The new `Logger` writes operational logs to stderr. Different purpose, different output, different consumers.
+6. **NOT replacing CLI `console.*`** -- CLI commands (`src/cli/`) use `console.log` for user-facing output (tables, progress, results). This is correct and should not change. Only core modules (`dispatch/`, `service/`, `protocol/`, `daemon/`, `store/`) get the structured logger.
 
-**Stack needed:** Existing only.
-- `EventLogger.onEvent` callback -- already used for notification dispatch
-- New event types in `EventType` Zod enum
-- `NotificationPolicyEngine` -- can route subscription delivery events for operator visibility
+**Why NOT external logging libraries:**
 
-**Integration points:**
+| Library | Why Not |
+|---------|---------|
+| `pino` v10 | 11 transitive dependencies, 664kB. High quality but disproportionate for AOF's needs. AOF doesn't need pino's worker-thread async transport, HTTP serializers, or redaction. The actual need is "JSON to stderr with levels." |
+| `winston` | 9 dependencies, even heavier. Transport architecture is overkill -- AOF writes to stderr and optionally a file. |
+| `bunyan` | Unmaintained since 2019. |
+| `log4js` | Complex appender/category system. Java-style API. |
+| `roarr` | Clever but unconventional. Small community. |
+| `logtape` | Zero-dep and library-first (good properties), but still an external dependency for ~100 lines of functionality. Would consider if AOF were a library consumed by others. |
+| `console.*` with `util.formatWithOptions` | Not structured. The whole point is moving from unstructured to structured. |
 
-**A. Task state transition hook (primary trigger):**
-The `TaskStore.transition()` method emits `task.transitioned` events. The scheduler's `action-executor.ts` handles completion transitions. The notification check hooks in at the same point where `cascadeOnCompletion()` runs in `dep-cascader.ts` -- after a task reaches a terminal or notifiable state.
+**Migration scope (where structured logger replaces console.*):**
 
-**B. DAG hop completion hook:**
-For DAG workflows, `handleDAGHopCompletion()` in `dag-transition-handler.ts` processes hop completions. Subscriptions should also fire when the entire DAG completes (not per-hop).
-
-**C. New event types:**
-
-```typescript
-// Add to EventType enum in schemas/event.ts:
-"notification.subscription_created",   // Agent subscribed to a task
-"notification.subscription_removed",   // Subscription removed (manual or one-shot consumed)
-"notification.delivered",              // Notification session dispatched
-"notification.delivery_failed",        // Notification dispatch failed
-```
-
-**D. Notification policy rules:**
-Add rules to `DEFAULT_RULES` for the new event types so operators see subscription activity in their notification channels.
-
-### 5. Scheduler Integration
-
-**What:** The scheduler must check for pending notification deliveries during each poll cycle.
-
-**Stack needed:** Existing only.
-
-**Approach:** Add a notification delivery step to the scheduler's `poll()` function, after the existing action execution and DAG hop dispatch steps. This follows the same pattern as murmur evaluation (step 9 in `scheduler.ts`).
-
-The scheduler already lists all tasks each poll. For tasks that just transitioned to a notifiable state, check for subscriptions and queue delivery actions.
-
-**Trigger detection:** Use the `task.transitioned` events logged during the current poll cycle (available in the `actions` array) to identify which tasks just changed state. For each, check the task's `subscriptions` metadata.
+| Module | Current `console.*` calls | Action |
+|--------|--------------------------|--------|
+| `src/dispatch/action-executor.ts` | 15 | Replace with `Logger("dispatch")` |
+| `src/dispatch/assign-executor.ts` | ~10 | Replace with `Logger("dispatch")` |
+| `src/dispatch/scheduler.ts` | ~8 | Replace with `Logger("scheduler")` |
+| `src/service/aof-service.ts` | 15 | Replace with `Logger("service")` |
+| `src/daemon/daemon.ts` | ~10 | Replace with `Logger("daemon")` |
+| `src/daemon/index.ts` | ~5 | Replace with `Logger("daemon")` |
+| `src/protocol/router.ts` | ~8 | Replace with `Logger("protocol")` |
+| `src/store/task-store.ts` | ~5 | Replace with `Logger("store")` |
+| `src/mcp/server.ts` | ~5 | Replace with `Logger("mcp")` |
+| `src/openclaw/adapter.ts` | ~8 | Replace with `Logger("openclaw")` |
+| `src/cli/commands/*.ts` | 200+ | **Keep as console.\*** -- CLI output is for humans |
 
 ## What NOT to Add
 
 | Library | Why Not |
 |---------|---------|
-| `bullmq` / `bee-queue` | No Redis, no external queue -- filesystem-based constraint. Notification delivery IS session dispatch. |
-| `node-cron` / `agenda` | Scheduler already polls on interval. No separate scheduling system needed. |
-| `ws` / `socket.io` | No WebSocket push. Agents receive notifications as spawned sessions. |
-| `nodemailer` / `sendgrid` | Notifications go to agents (session dispatch), not humans (email). |
-| `eventemitter3` | Node.js built-in `EventEmitter` sufficient, but not even needed -- the EventLogger's `onEvent` callback is the hook. |
-| `uuid` | Node.js 22 has `crypto.randomUUID()` built-in. |
-| `rxjs` | Reactive patterns add complexity. The poll-based scheduler is the right delivery loop. |
-| Any pub/sub library | AOF is single-machine, single-process. No inter-process messaging needed. |
+| `pino` | 11 deps, 664kB. AOF needs ~100 lines of logging, not a logging framework. |
+| `winston` | Even heavier than pino. Transport system unnecessary. |
+| `dotenv` | AOF is a plugin/daemon, not a standalone app with `.env` files. |
+| `node-config` | File-based config for multi-environment. AOF uses env vars + plugin config. |
+| `convict` | Zod already does schema + validation + coercion. |
+| `@opentelemetry/*` | Explicitly deferred to v2 in PROJECT.md. |
+| `debug` | The `DEBUG=*` pattern is for development tracing. AOF needs production structured logging. |
+| `cls-hooked` / `AsyncLocalStorage` | Tempting for automatic context propagation, but AOF's dispatch loop is explicit -- `taskId` and `correlationId` are passed through function args, not ambient context. Adding ALS would be over-engineering for the current single-process architecture. |
 
 ## Alternatives Considered
 
 | Category | Recommended | Alternative | Why Not |
 |----------|-------------|-------------|---------|
-| Subscription storage | Task frontmatter metadata | Separate subscriptions.json | Second source of truth; doesn't move with task file |
-| Subscription storage | Task frontmatter metadata | SQLite table | Violates filesystem-based principle; adds query complexity for simple per-task data |
-| Delivery mechanism | Session dispatch via `spawnSession()` | MCP notification (`sendNotification`) | MCP notifications only work within active sessions; subscriptions need to wake agents |
-| Delivery mechanism | Session dispatch via `spawnSession()` | Write to agent's "inbox" directory | Agent would need to poll; session dispatch is immediate and reuses existing infra |
-| Trigger mechanism | Scheduler poll cycle check | `EventLogger.onEvent` callback | Callback fires synchronously during event logging; dispatch should be in scheduler's async context |
-| Trigger mechanism | Scheduler poll cycle check | Filesystem watcher (like MCP SubscriptionManager) | Adds another watcher; scheduler already scans all tasks every poll |
-| Subscription scope | Per-task (frontmatter) | Global registry | Per-task is simpler; no cross-referencing needed; cleaned up with task lifecycle |
+| Config schema | Zod (existing) | JSON Schema + ajv | Already have Zod everywhere. Two validators is worse than one. |
+| Config source | Env vars + explicit overrides | YAML config file | AOF config comes from OpenClaw plugin config (JSON) or env vars. Adding a config file format creates a third source. |
+| Config access | Typed singleton with `.get()` | Global `process.env` reads (status quo) | No validation, no defaults, no typing. Current state causes bugs. |
+| Config access | Typed singleton with `.get()` | Dependency-injected config object | DI is cleaner but requires threading config through 20+ call sites. Singleton is pragmatic for a single-process app. |
+| Log output | JSON to stderr | JSON to file | stderr is captured by launchd/systemd. File rotation adds complexity. Can pipe stderr to file if needed. |
+| Log output | JSON to stderr | Human-readable to stderr | Structured is greppable and parseable. Use `pino-pretty` or `jq` for human reading. |
+| Logger scope | Module-scoped (`new Logger("dispatch")`) | Single global logger | Module scope enables per-module log levels and clear origin tagging. |
+| Logger scope | Module-scoped | Per-function logger | Too granular. Module is the right boundary. |
 
-## Integration Points with Existing Stack
+## Integration Points with Existing AOF
 
-### TaskFrontmatter Schema Extension
+### Config Registry Integration
 
-Add `subscriptions` field to task frontmatter metadata (not a top-level field -- use the existing `metadata` bag to avoid schema migration):
+**Replace `process.env` in 11 files:**
+
+| File | Current | After |
+|------|---------|-------|
+| `src/config/paths.ts` | `process.env["AOF_DATA_DIR"]` | `config.dataDir` (or keep env fallback in `resolveDataDir` for backward compat) |
+| `src/projects/resolver.ts` | `process.env["AOF_ROOT"]` | `config.aofRoot` |
+| `src/mcp/server.ts` | `process.env["AOF_ROOT"]` | `config.aofRoot` |
+| `src/daemon/index.ts` | `process.env["AOF_ROOT"]`, `process.env["AOF_DAEMON_SOCKET"]` | `config.aofRoot`, `config.daemonSocketPath` |
+| `src/cli/program.ts` | `process.env["AOF_ROOT"]` | `config.aofRoot` |
+| `src/mcp/shared.ts` | `process.env.AOF_CALLBACK_DEPTH` | `config.callbackDepth` |
+| `src/memory/index.ts` | `process.env.OPENAI_API_KEY` | `config.openaiApiKey` |
+| `src/openclaw/openclaw-executor.ts` | `process.env.OPENCLAW_STATE_DIR` etc. | Keep as-is (OpenClaw env vars, not AOF config) |
+| `src/daemon/standalone-adapter.ts` | `process.env.OPENCLAW_GATEWAY_URL` etc. | Keep as-is (OpenClaw env vars) |
+| `src/dispatch/callback-delivery.ts` | Sets `process.env.AOF_CALLBACK_DEPTH` | Sets on config or uses a different mechanism |
+| `src/cli/commands/memory.ts` | `process.env["AOF_VAULT_ROOT"]` etc. | `config.vaultRoot` or keep (OpenClaw env var) |
+
+**Note:** OpenClaw-specific env vars (`OPENCLAW_STATE_DIR`, `OPENCLAW_GATEWAY_URL`, etc.) should NOT be in AOF's config registry. They belong to the OpenClaw runtime. Only AOF-owned env vars (`AOF_*`) go in the registry.
+
+**Bootstrap order:**
+
+1. Parse CLI args (if CLI entry) or receive plugin config (if OpenClaw entry)
+2. Read env vars
+3. Merge: CLI args > env vars > defaults
+4. Validate with Zod schema
+5. Freeze config object
+6. Export for module consumption
+
+### Structured Logger Integration
+
+**Relationship to EventLogger:**
+
+| Concern | EventLogger | New Logger |
+|---------|-------------|------------|
+| Purpose | Audit trail (task lifecycle events) | Operational logs (debug, errors, progress) |
+| Output | `events/YYYY-MM-DD.jsonl` files | stderr (JSON) |
+| Consumer | Event pipeline, notification rules, `aof trace` | Operators, log aggregation, debugging |
+| Format | `BaseEvent` schema (eventId, type, actor, taskId, payload) | `LogEntry` (level, time, msg, module, fields) |
+| Lifecycle | Per-project, lives in data directory | Process-wide, lives in process stderr |
+
+These are complementary, not competing. A dispatch cycle produces both:
+- EventLogger: `dispatch.assigned`, `dispatch.completed` (auditable business events)
+- Logger: `info("Spawning session", { taskId, agentId, correlationId })` (operational detail)
+
+**Injection pattern:**
+
+Core modules that currently accept `logger: EventLogger` will gain a second logger parameter or use the module-scoped singleton:
 
 ```typescript
-// In task metadata (no schema migration needed):
-metadata: {
-  subscriptions: TaskSubscription[],
-  // ... existing metadata fields
+// Before (action-executor.ts)
+console.error(`[AOF] Spawn failed for ${action.taskId}`);
+await logger.logDispatch("dispatch.error", "scheduler", ...);
+
+// After
+log.error("Spawn failed", { taskId: action.taskId, error: err.message });
+await eventLogger.logDispatch("dispatch.error", "scheduler", ...);
+```
+
+### Silent Catch Block Fix
+
+The 36 `catch { // Logging errors should not crash }` blocks in dispatch become:
+
+```typescript
+// Before
+try { await logger.logDispatch(...); } catch { /* Logging errors should not crash */ }
+
+// After
+try { await eventLogger.logDispatch(...); } catch (err) {
+  log.warn("Event logging failed", { error: String(err) });
 }
 ```
 
-**Why metadata, not a top-level field:** Adding a top-level frontmatter field would require a schema version bump (v2 -> v3), migration logic, and backward compatibility handling. The `metadata` bag is `z.record(z.string(), z.unknown())` -- it accepts arbitrary keys with no migration needed.
-
-### EventType Enum Extension
-
-Add four new event types to `src/schemas/event.ts`. No schema changes beyond enum extension.
-
-### Scheduler Extension
-
-Add a new step after DAG hop dispatch (step 6.5) and before murmur evaluation (step 9). Pattern mirrors `evaluateMurmurTriggers()`:
-
-```
-Step 6.7: Notification delivery
-  - For each task that transitioned this poll cycle:
-    - Read task subscriptions from metadata
-    - For each matching subscription:
-      - Build notification TaskContext
-      - Call executor.spawnSession() (respects concurrency limits)
-      - Log notification.delivered event
-      - Remove subscription if one-shot (completion granularity)
-```
-
-### MCP Tool Registration
-
-Register `aof_subscribe` and `aof_unsubscribe` in `src/mcp/tools.ts` following the exact pattern of `aof_task_dep_add` / `aof_task_dep_remove`.
-
-### NotificationPolicyEngine Rules
-
-Add four new rules to `DEFAULT_RULES` in `src/events/notification-policy/rules.ts` for operator visibility of subscription activity.
-
-### SKILL.md Update
-
-Add `aof_subscribe` and `aof_unsubscribe` tool descriptions to the compressed SKILL.md. Budget impact: ~50-80 tokens (two one-liner tool descriptions). Well within the 2150-token ceiling.
+This addresses quality issue #7a (swallowed errors) as a natural consequence of having a fallback logger.
 
 ## File Organization (Recommended)
 
 ```
 src/
-  notifications/
-    schemas.ts            # TaskSubscription Zod schema
-    subscription-store.ts # Read/write subscriptions in task metadata
-    delivery.ts           # Build notification context, dispatch sessions
-    index.ts              # Public API
+  config/
+    paths.ts          # Existing — keep, but have it read from registry
+    manager.ts        # Existing — org chart config CRUD (separate concern)
+    registry.ts       # NEW — AofConfigSchema, createConfig(), getConfig()
+    env-map.ts        # NEW — AOF_DATA_DIR -> dataDir mapping
     __tests__/
-      schemas.test.ts
-      subscription-store.test.ts
-      delivery.test.ts
-      integration.test.ts
+      registry.test.ts
+      env-map.test.ts
+
+  logging/
+    logger.ts         # NEW — Logger class, LogLevel, LogEntry
+    index.ts          # NEW — barrel export + default logger factory
+    __tests__/
+      logger.test.ts
 ```
 
-## Concurrency and Edge Cases
+## Performance Considerations
 
-**Concurrency limit awareness:** Notification deliveries must respect the same `maxConcurrentDispatches` limit as regular task dispatch. If the scheduler is at capacity, notifications queue for the next poll cycle (subscriptions persist in frontmatter, so nothing is lost).
+**Config registry:** Zero runtime cost after startup. Frozen object access is a property lookup -- faster than `process.env["KEY"]` (which is a libc `getenv()` call on each access).
 
-**Terminal state cleanup:** When a task reaches `done` or `cancelled`, all `"all"` granularity subscriptions should be removed. `"completion"` subscriptions are consumed on delivery.
-
-**Self-subscription prevention:** An agent should not be able to subscribe to its own currently-dispatched task (it will get the completion result via `aof_task_complete`). Validate at subscription time.
-
-**Delivery failure handling:** If `spawnSession()` fails for a notification, the subscription persists (not consumed). The scheduler retries on the next poll cycle, same as failed task dispatches. After N failures, log `notification.delivery_failed` and remove the subscription to prevent infinite retries.
+**Structured logger:** `process.stderr.write()` with `JSON.stringify()` is comparable to pino's synchronous mode. For AOF's volume (hundreds of log lines per poll cycle, not thousands per second), the performance difference between a custom logger and pino is unmeasurable. If AOF ever needs pino-level throughput (async worker thread logging), the `Logger` interface is compatible -- swap the implementation without changing call sites.
 
 ## Sources
 
-- Task schema: `src/schemas/task.ts` -- TaskFrontmatter with `metadata: z.record(z.string(), z.unknown())`
-- Event schema: `src/schemas/event.ts` -- EventType Zod enum
-- Scheduler: `src/dispatch/scheduler.ts` -- poll cycle structure, murmur evaluation pattern
-- DAG transition handler: `src/dispatch/dag-transition-handler.ts` -- `handleDAGHopCompletion()`, `dispatchDAGHop()`
-- Action executor: `src/dispatch/action-executor.ts` -- `executeActions()`, completion cascade
-- GatewayAdapter: `src/dispatch/executor.ts` -- `spawnSession()` contract
-- MCP subscriptions (different purpose): `src/mcp/subscriptions.ts` -- protocol-level resource subscriptions
-- Notification policy: `src/events/notification-policy/rules.ts` -- DEFAULT_RULES pattern
-- Existing MCP tools: `src/mcp/tools.ts` -- tool registration pattern
-- PROJECT.md: v1.8 milestone scope, constraints
-- Package.json: Verified installed dependencies and versions
+- Pino v10 npm page: https://www.npmjs.com/package/pino -- 11 deps, 664kB, 21M weekly downloads
+- AOF package.json: verified existing dependencies (zod 3.24.x, no logging deps)
+- AOF `src/config/paths.ts`: current `process.env` access pattern
+- AOF `src/events/logger.ts`: existing EventLogger JSONL audit system
+- AOF `.planning/codebase/QUALITY.md`: 751 `console.*` calls, 150+ silent catch blocks
+- AOF `.planning/codebase/ARCHITECTURE.md`: 11 files with scattered `process.env` access
+- Node.js 22 docs: `process.stderr.write()`, `process.env` semantics

@@ -1,474 +1,752 @@
-# Architecture: Task Notification Subscriptions (v1.8)
+# Architecture Patterns
 
-**Domain:** Agent orchestration platform -- task notification/callback integration
-**Researched:** 2026-03-09
-**Confidence:** HIGH (based on direct codebase analysis of all integration points)
-
-## Design Premise
-
-Agent sessions are ephemeral. When Agent A dispatches Task X and wants to know when it completes, Agent A's session will have ended long before Task X finishes. Therefore, "notification delivery" means **spawning a new agent session** with the task outcome as context -- the same mechanism the scheduler already uses for DAG hop dispatch and Murmur reviews.
-
-This is not a pub/sub system in the traditional sense. It is a **subscription-triggered dispatch** system: the scheduler checks subscriptions at state transition time and spawns callback sessions.
+**Domain:** Centralized config registry + structured logging integration into existing agent orchestration platform
+**Researched:** 2026-03-12
 
 ## Recommended Architecture
 
+### High-Level Integration Map
+
+```
+                        EXISTING                              NEW
+                        -------                              ---
+  src/schemas/          (leaf -- no deps)
+       |
+  src/config/paths.ts   (pure path functions)
+       |
+  src/config/registry.ts --------------------------------> NEW: Config Registry
+       |                                                   (typed, cached, validated)
+  src/logging/          ---------------------------------> NEW: Structured Logger
+       |                                                   (leveled, contextual)
+  src/events/logger.ts  (audit JSONL -- unchanged)
+       |
+  src/store/            (persistence)
+       |
+  src/dispatch/         (orchestration core)
+  src/protocol/         (agent comms)
+  src/service/          (lifecycle)
+       |
+  src/daemon/           (entry point)
+  src/cli/              (entry point)
+  src/mcp/              (entry point)
+```
+
+### Design Principle: Two Logging Systems, Not One
+
+The structured logger and EventLogger serve fundamentally different purposes and must remain separate:
+
+| Concern | EventLogger (existing) | Structured Logger (new) |
+|---------|----------------------|------------------------|
+| **Purpose** | Audit trail + notification trigger | Operational observability |
+| **Audience** | Post-hoc analysis, notification engine, future UI | Operators watching daemon logs, debugging |
+| **Format** | Append-only JSONL files (daily rotation) | Leveled text/JSON to stderr |
+| **Persistence** | Always written to disk | Ephemeral (stderr/stdout) |
+| **Schema** | Typed `BaseEvent` with `EventType` enum (60+ event types) | Freeform structured fields |
+| **Replaces** | Nothing (stays as-is) | ~120 `console.*` calls in core modules |
+
+Do NOT merge these. EventLogger is a domain audit log (task.transitioned, dispatch.matched). The structured logger is operational logging (debug, info, warn, error for operators).
+
 ### Component Boundaries
 
-| Component | Responsibility | New/Modified | Communicates With |
-|-----------|---------------|--------------|-------------------|
-| **SubscriptionStore** | Persist/query task notification subscriptions as JSON co-located with task | NEW | TaskStore, Scheduler |
-| **SubscriptionSchema** | Zod schema for subscription records | NEW | SubscriptionStore, MCP tools |
-| **NotificationDispatcher** | Evaluate subscriptions on state transition, build `notify_subscriber` actions | NEW | SubscriptionStore, GatewayAdapter, EventLogger |
-| **MCP tool: `aof_task_subscribe`** | Agent-facing API for creating subscriptions | NEW | SubscriptionStore |
-| **MCP tool: `aof_dispatch`** | Extended with optional `subscribe` parameter | MODIFIED (additive) | SubscriptionStore |
-| **Scheduler poll cycle** | Trigger notification evaluation after state transitions | MODIFIED (hook point) | NotificationDispatcher |
-| **Action executor** | Execute `notify_subscriber` actions alongside existing action types | MODIFIED (new case in switch) | NotificationDispatcher, GatewayAdapter |
-| **DAG transition handler** | Evaluate subscriptions on DAG completion | MODIFIED (hook after `persistWorkflowState`) | NotificationDispatcher |
-| **EventLogger / Event schema** | New event types for subscription lifecycle | MODIFIED (additive) | NotificationDispatcher |
+| Component | Location | Responsibility | Communicates With |
+|-----------|----------|---------------|-------------------|
+| **Config Schema** | `src/config/config-schema.ts` | Zod schemas for all config keys | Config Registry |
+| **Config Registry** | `src/config/registry.ts` | Typed env var access, defaults, validation, caching | Every module that reads process.env |
+| **Structured Logger** | `src/logging/logger.ts` | Leveled logging with structured context | Every module that calls console.* |
+| **Log Formatters** | `src/logging/formatters.ts` | Human-readable + JSON output | Logger |
+| **EventLogger** | `src/events/logger.ts` (existing) | Audit JSONL -- NO CHANGES | Notification engine, metrics |
 
-### Data Flow
+## New Module: Config Registry (`src/config/`)
 
-```
-Agent A calls aof_dispatch(title, ..., subscribe: "completion")
-  |
-  v
-TaskStore.create() --> task file written to tasks/ready/TASK-xxx.md
-SubscriptionStore.create() --> subscriptions.json written alongside task
-  |
-  v
-[time passes, scheduler dispatches, agent completes task]
-  |
-  v
-Task transitions to "done" (via aof_task_complete or DAG completion)
-  |
-  v
-Post-transition hook:
-  NotificationDispatcher.evaluate(taskId, newStatus)
-    |
-    v
-  SubscriptionStore.getForTask(taskId) --> finds Agent A's subscription
-    |
-    v
-  Builds callback TaskContext (task outcome, original subscription context)
-    |
-    v
-  Returns notify_subscriber SchedulerAction
-    |
-    v
-  Action executor: GatewayAdapter.spawnSession() --> new session for Agent A
-    |
-    v
-  SubscriptionStore.markDelivered(subscriptionId)
-  EventLogger.log("notification.delivered", ...)
-```
+### Why a Registry, Not Just Consolidating process.env
 
----
+The 11 files with `process.env` access have different patterns:
+- `paths.ts`: fallback chain (explicit arg > env > default)
+- `resolver.ts`: env with computed default
+- `standalone-adapter.ts`: env with hardcoded default
+- `mcp/shared.ts`: env with parseInt and fallback
+- `memory/index.ts`: pass-through to library
+- `callback-delivery.ts`: env MUTATION (sets/deletes process.env)
+- `cli/memory.ts`: multiple env vars with different fallback chains
 
-## Integration Points: Detailed Analysis
+A registry provides: one place for defaults, one place for validation, one place for typing, zero process.env reads at call sites.
 
-### 1. Where Subscriptions Are Stored
-
-**Recommendation: Filesystem JSON, co-located with the subscribed task.**
+### Placement in Module Hierarchy
 
 ```
-tasks/{status}/TASK-xxx.md                    -- task file (existing)
-tasks/{status}/TASK-xxx/                      -- task artifacts dir (existing)
-tasks/{status}/TASK-xxx/subscriptions.json    -- NEW
+src/config/
+  paths.ts             <-- exists, no change (pure path functions)
+  manager.ts           <-- exists, no change (org chart CRUD)
+  config-schema.ts     <-- NEW: Zod schemas for all config keys
+  registry.ts          <-- NEW: ConfigRegistry class
+  index.ts             <-- NEW or updated: barrel export
 ```
 
-**Rationale:**
-- Follows existing filesystem patterns (trace files in `TASK-xxx/trace-N.json`, work dirs in `TASK-xxx/work/`)
-- Moves with the task during status transitions (the `store.transition()` method uses `rename()` which moves the entire directory atomically)
-- No new storage mechanism -- reads/writes via `node:fs` + `write-file-atomic`
-- Natural cleanup: when a task is deleted, subscriptions go with it
-- Human-readable for debugging
+The config registry sits at the same layer as `paths.ts` -- below store, events, dispatch. It depends only on Zod (already a dependency) and Node.js builtins. Everything above can import it.
 
-**Schema (in `src/schemas/subscription.ts`):**
+### Config Registry Design
 
 ```typescript
-const TaskSubscription = z.object({
-  id: z.string().uuid(),
-  taskId: z.string(),                       // Subscribed task ID
-  subscriberId: z.string(),                 // Agent ID to callback
-  subscriberRole: z.string().optional(),    // Role for dispatch routing
-  granularity: z.enum(["completion", "all"]),
-  createdAt: z.string().datetime(),
-  createdBy: z.string(),                    // Agent that created subscription
-  callbackContext: z.record(z.string(), z.unknown()).optional(),
-  status: z.enum(["active", "delivered", "failed", "expired"]),
-  deliveredAt: z.string().datetime().optional(),
-  deliverySessionId: z.string().optional(),
-  deliveryError: z.string().optional(),
+// src/config/config-schema.ts
+import { z } from "zod";
+
+export const AofConfigSchema = z.object({
+  // Data directories
+  dataDir: z.string().default("~/.openclaw/aof"),
+  aofRoot: z.string().optional(),
+  vaultRoot: z.string().optional(),
+
+  // Daemon
+  daemonSocket: z.string().optional(),
+  pollIntervalMs: z.number().int().positive().default(30_000),
+  pollTimeoutMs: z.number().int().positive().default(30_000),
+  maxConcurrentDispatches: z.number().int().positive().default(3),
+
+  // Gateway (standalone mode)
+  gatewayUrl: z.string().url().default("http://localhost:3000"),
+  gatewayToken: z.string().optional(),
+
+  // External services
+  openaiApiKey: z.string().optional(),
+
+  // Callback safety
+  callbackDepth: z.number().int().min(0).default(0),
+
+  // Logging
+  logLevel: z.enum(["debug", "info", "warn", "error"]).default("info"),
+
+  // OpenClaw integration
+  openclawStateDir: z.string().optional(),
 });
+
+export type AofConfig = z.infer<typeof AofConfigSchema>;
 ```
 
-**Why not a central subscription index?** A central file creates a synchronization problem. Task state lives in filesystem directories (`tasks/ready/`, `tasks/done/`). If subscriptions lived in a separate index, every `store.transition()` (which does an atomic `rename()`) would need to update the index -- fragile coupling. Co-location means subscriptions move with the task automatically.
-
-**Trade-off acknowledged:** The query "show all subscriptions for Agent A" requires scanning task directories. This is acceptable because:
-1. It is a rare diagnostic query, not a hot path
-2. The hot path ("get subscriptions for task X that just transitioned") is O(1) file read
-3. A diagnostic CLI command can afford the scan
-
-### 2. How the Scheduler Delivers Notifications
-
-**Recommendation: New `notify_subscriber` action type in the scheduler action pipeline.**
-
-The scheduler has a clean separation: `poll()` builds `SchedulerAction[]`, `executeActions()` runs them. Notifications follow this exact pattern.
-
-**Where evaluation happens -- two transition paths need hooks:**
-
-**Path A: Simple task completion (non-DAG)**
-
-The completion flow for non-DAG tasks:
-1. Agent calls `aof_task_complete` tool
-2. `task-workflow-tools.ts::aofTaskComplete()` transitions task to `done`
-3. `dep-cascader.ts::cascadeOnCompletion()` promotes dependents
-
-Hook point: After `cascadeOnCompletion()` returns. The cascader already runs synchronously after task completion. Add notification evaluation here.
-
-Actually, this is cleaner: the **scheduler poll cycle** already detects tasks that transitioned to `done` between polls. Step 6.5 of `poll()` (lines 297-350 in `scheduler.ts`) already scans in-progress DAG tasks. Add a parallel step 6.6 that scans recently-completed tasks for pending notifications.
-
-But there is a subtlety: completion happens **during agent sessions** (via `aof_task_complete` tool call), not during the poll cycle. The task transitions to `done` inside the MCP tool handler. The scheduler only discovers this on the next poll.
-
-**Recommended approach: Evaluate notifications at two points:**
-
-1. **Inline at completion time** (in `task-workflow-tools.ts::aofTaskComplete` or the protocol router): Read `subscriptions.json`, build notification actions, but do NOT dispatch inline. Instead, write a `pendingNotifications` array to task metadata.
-
-2. **Scheduler poll executes notifications**: Step 6.6 scans tasks with `metadata.pendingNotifications`, creates `notify_subscriber` actions, and the action executor dispatches them.
-
-Wait -- this is overcomplicating it. The simpler pattern (and what the codebase already does for DAG hops) is:
-
-**Simplest viable approach: Post-completion hook that returns actions.**
-
-The `handleDAGHopCompletion()` function already returns `readyHops` which the scheduler then dispatches. Similarly, notification evaluation should return actions that the scheduler dispatches. The key question is: where does the evaluation run?
-
-**Final recommendation: NotificationDispatcher called from three hook points:**
-
 ```typescript
-// Hook 1: In assign-executor onRunComplete (after enforcement/completion check)
-// This catches BOTH happy path and enforcement path
-const notifyActions = await notificationDispatcher.evaluate(taskId, newStatus);
-// Store in a queue that the next poll() picks up
+// src/config/registry.ts
+import { AofConfigSchema, type AofConfig } from "./config-schema.js";
 
-// Hook 2: In handleDAGHopCompletion (after DAG completes)
-if (evalResult.dagStatus === "complete" || evalResult.dagStatus === "failed") {
-  const notifyActions = await notificationDispatcher.evaluate(taskId, dagStatus);
+// ENV_MAP: config key -> env var name(s), tried in order
+const ENV_MAP: Record<string, string[]> = {
+  dataDir: ["AOF_DATA_DIR"],
+  aofRoot: ["AOF_ROOT"],
+  vaultRoot: ["AOF_VAULT_ROOT", "OPENCLAW_VAULT_ROOT"],
+  daemonSocket: ["AOF_DAEMON_SOCKET"],
+  gatewayUrl: ["OPENCLAW_GATEWAY_URL"],
+  gatewayToken: ["OPENCLAW_GATEWAY_TOKEN"],
+  openaiApiKey: ["OPENAI_API_KEY"],
+  callbackDepth: ["AOF_CALLBACK_DEPTH"],
+  openclawStateDir: ["OPENCLAW_STATE_DIR", "CLAWDBOT_STATE_DIR"],
+  logLevel: ["AOF_LOG_LEVEL"],
+};
+
+export class ConfigRegistry {
+  private readonly config: AofConfig;
+
+  constructor(overrides?: Partial<AofConfig>) {
+    const fromEnv = this.readEnvVars();
+    const merged = { ...fromEnv, ...overrides };
+    this.config = AofConfigSchema.parse(merged);
+  }
+
+  get<K extends keyof AofConfig>(key: K): AofConfig[K] {
+    return this.config[key];
+  }
+
+  private readEnvVars(): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
+    for (const [key, envNames] of Object.entries(ENV_MAP)) {
+      for (const envName of envNames) {
+        const val = process.env[envName];
+        if (val !== undefined) {
+          result[key] = this.coerce(key, val);
+          break;
+        }
+      }
+    }
+    return result;
+  }
+
+  private coerce(key: string, value: string): unknown {
+    // Numeric fields
+    if (["pollIntervalMs", "pollTimeoutMs", "maxConcurrentDispatches",
+         "callbackDepth"].includes(key)) {
+      const n = parseInt(value, 10);
+      return isNaN(n) ? undefined : n;
+    }
+    return value;
+  }
 }
 
-// Hook 3: Scheduler poll step 6.6 (picks up any queued notifications)
-// Process notify_subscriber actions
-```
+// Singleton
+let _instance: ConfigRegistry | undefined;
 
-Actually, the cleanest approach that aligns with existing patterns:
-
-**Use the `onRunComplete` callback.** It already fires after every session completion. It already re-reads the task to check current status. It is the single point where AOF knows a session ended. Add notification evaluation here:
-
-```typescript
-// In onRunComplete callback (assign-executor.ts):
-// After existing logic (enforcement, trace capture, etc.):
-const freshTask = await store.get(taskId);
-if (freshTask && isTerminalStatus(freshTask.frontmatter.status)) {
-  await notificationDispatcher.evaluateAndDispatch(freshTask, executor);
+export function initConfig(overrides?: Partial<AofConfig>): ConfigRegistry {
+  _instance = new ConfigRegistry(overrides);
+  return _instance;
 }
-```
 
-This fires for simple tasks. For DAG tasks, the equivalent hook is in `dag-transition-handler.ts::dispatchDAGHop`'s `onRunComplete` callback. When the last hop completes and the DAG reaches terminal state, evaluate notifications.
+export function getConfig(): ConfigRegistry {
+  if (!_instance) {
+    _instance = new ConfigRegistry();
+  }
+  return _instance;
+}
 
-**Important: The dispatcher itself calls `executor.spawnSession()` directly, not through the scheduler action pipeline.** This avoids the poll-cycle latency. It follows the same pattern as `dispatchDAGHop()` which also calls `executor.spawnSession()` directly.
-
-The notification dispatch is best-effort: if `spawnSession()` fails, log the error and mark the subscription as `failed`. Do not retry (the subscriber can re-subscribe if needed). This keeps the system simple and avoids infinite retry loops for notification delivery.
-
-### 3. Interaction with DAG Workflows
-
-DAG workflows create interesting notification semantics. A task with a DAG goes through multiple hop completions before reaching terminal state.
-
-| Granularity | Hop completion | DAG complete | DAG failed | Task blocked/deadletter |
-|-------------|---------------|--------------|------------|------------------------|
-| `completion` | No | Yes | Yes | No |
-| `all` | Yes (with hop context) | Yes | Yes | Yes |
-
-**For `completion` granularity:** Only fires when DAG reaches terminal state (`complete` or `failed`). The hook is in `handleDAGHopCompletion()` when `evalResult.dagStatus` is set.
-
-**For `all` granularity:** Fires on every hop state change. The hook is in `handleDAGHopCompletion()` after every evaluation, regardless of DAG status. Each notification includes hop-specific context:
-
-```typescript
-{
-  type: "hop_completed",
-  hopId: "implement",
-  hopOutcome: "complete",
-  hopResult: { ... },
-  dagStatus: "running",
-  readyHops: ["review"],
+/** Reset for testing */
+export function resetConfig(): void {
+  _instance = undefined;
 }
 ```
 
-**Integration in `handleDAGHopCompletion()`:**
+### Key Design Decisions
+
+**Singleton with explicit init.** Entry points (daemon, CLI, MCP) call `initConfig()` with their CLI flag overrides. Everything else calls `getConfig()`. This matches the existing pattern where `resolveDataDir()` in paths.ts already centralizes one env var.
+
+**Lazy initialization.** `getConfig()` creates a default instance if `initConfig()` was never called. This means existing code that imports config functions continues to work even if an entry point forgets to call `initConfig()`.
+
+**Env var mutation for AOF_CALLBACK_DEPTH.** `callback-delivery.ts` currently SETS `process.env.AOF_CALLBACK_DEPTH` to propagate depth across the MCP boundary (inter-process communication). The registry does NOT replace this -- it is a cross-process mechanism, not config. Document this as a known exception.
+
+**Fallback chains preserved.** `cli/memory.ts` reads `AOF_VAULT_ROOT` then `OPENCLAW_VAULT_ROOT`. The ENV_MAP supports multiple env var names per key, tried in order.
+
+**No runtime config reloading.** AOF is a daemon with clean restart. Config changes require restart. This is the existing behavior and matches the deterministic control plane philosophy.
+
+### Integration with Existing paths.ts
+
+`paths.ts` stays as pure path functions. `resolveDataDir()` evolves to use the registry:
 
 ```typescript
-// After evaluateDAG and persistWorkflowState:
-const subscriptions = await subscriptionStore.getForTask(task.frontmatter.id);
+// Updated paths.ts -- resolveDataDir becomes thinner
+export function resolveDataDir(explicit?: string): string {
+  const raw = explicit ?? getConfig().get("dataDir");
+  return normalizePath(raw);
+}
+```
 
-for (const sub of subscriptions) {
-  if (sub.status !== "active") continue;
+All other functions in paths.ts (orgChartPath, eventsDir, etc.) remain pure functions taking a base directory -- no changes needed.
 
-  const shouldNotify =
-    sub.granularity === "all" ||
-    (sub.granularity === "completion" && evalResult.dagStatus !== undefined);
+### Migration Strategy for process.env Access
 
-  if (shouldNotify) {
-    await notificationDispatcher.deliver(sub, task, {
-      hopId, outcome: hopEvent.outcome, dagStatus: evalResult.dagStatus,
-    });
+| File | Current | After | Notes |
+|------|---------|-------|-------|
+| `src/config/paths.ts` | `process.env["AOF_DATA_DIR"]` | `getConfig().get("dataDir")` | |
+| `src/projects/resolver.ts` | `process.env["AOF_ROOT"]` | `getConfig().get("aofRoot")` | |
+| `src/daemon/index.ts` | `process.env["AOF_ROOT"]`, `process.env["AOF_DAEMON_SOCKET"]` | `getConfig().get(...)` | Entry point calls `initConfig()` |
+| `src/daemon/standalone-adapter.ts` | `process.env.OPENCLAW_GATEWAY_URL` | Constructor reads from `getConfig()` | |
+| `src/mcp/server.ts` | `process.env["AOF_ROOT"]` | `getConfig().get("aofRoot")` | Entry point calls `initConfig()` |
+| `src/mcp/shared.ts` | `process.env.AOF_CALLBACK_DEPTH` | `getConfig().get("callbackDepth")` | |
+| `src/memory/index.ts` | `process.env.OPENAI_API_KEY` | `getConfig().get("openaiApiKey")` | |
+| `src/openclaw/openclaw-executor.ts` | `process.env.OPENCLAW_STATE_DIR` | `getConfig().get("openclawStateDir")` | |
+| `src/cli/program.ts` | `process.env["AOF_ROOT"]` | `getConfig().get("aofRoot")` | Entry point calls `initConfig()` |
+| `src/cli/commands/memory.ts` | Multiple env vars | `getConfig().get("vaultRoot")` | Collapse 3 env reads into 1 |
+| `src/dispatch/callback-delivery.ts` | Sets/deletes `process.env` | **EXCEPTION -- keeps direct env mutation** | Cross-process IPC, not config |
+
+Each migration is independent and can be done one file at a time with its own test run.
+
+## New Module: Structured Logger (`src/logging/`)
+
+### Why a New Module, Not Extending EventLogger
+
+EventLogger is a domain audit log with:
+- Typed `EventType` enum (60+ event types like task.transitioned, dispatch.matched)
+- Append-only JSONL to disk with daily rotation and symlink management
+- Event callbacks wired to notification policy engine
+- Query interface for event replay
+
+Operational logging needs:
+- Log levels (debug/info/warn/error)
+- Contextual fields (component, taskId, correlationId)
+- Output to stderr (not files)
+- Cheap to call (synchronous, no I/O on filtered-out levels)
+- Different output format for daemon (JSON) vs CLI (human-readable)
+
+These are orthogonal concerns. Merging them would bloat EventLogger and conflate audit events with debug output.
+
+### Placement in Module Hierarchy
+
+```
+src/logging/
+  logger.ts           <-- Logger interface + createLogger factory
+  formatters.ts       <-- Human-readable + JSON formatters
+  index.ts            <-- barrel
+```
+
+`src/logging/` sits at the same layer as `src/events/` -- above schemas and config, below store and dispatch. It depends on `src/config/registry.ts` for log level only.
+
+### Logger Design
+
+```typescript
+// src/logging/logger.ts
+export type LogLevel = "debug" | "info" | "warn" | "error";
+
+export interface LogContext {
+  component?: string;    // "scheduler", "protocol-router", "assign-executor"
+  taskId?: string;
+  projectId?: string;
+  correlationId?: string;
+  sessionId?: string;
+  [key: string]: unknown;
+}
+
+export interface Logger {
+  debug(msg: string, ctx?: LogContext): void;
+  info(msg: string, ctx?: LogContext): void;
+  warn(msg: string, ctx?: LogContext): void;
+  error(msg: string, ctx?: LogContext): void;
+  child(defaultCtx: LogContext): Logger;
+}
+
+export type LogFormat = "json" | "human";
+
+export interface LoggerOptions {
+  level?: LogLevel;
+  format?: LogFormat;
+  output?: (line: string) => void;  // Default: process.stderr.write
+}
+
+export function createLogger(opts?: LoggerOptions): Logger {
+  // Implementation: level filtering, format selection, child() merging
+}
+```
+
+**Synchronous API.** `console.*` calls are synchronous. The replacement must be too -- no async overhead for debug-level logging that gets filtered out. Write to stderr via `process.stderr.write()`.
+
+**`child()` for component scoping.** Each module creates a child logger with its component name baked in:
+
+```typescript
+// In src/dispatch/scheduler.ts
+const log = logger.child({ component: "scheduler" });
+// ...
+log.info("Poll complete", { taskCount: 5, durationMs: 120 });
+```
+
+**Formatter output examples:**
+
+JSON format (daemon/MCP mode):
+```json
+{"ts":"2026-03-12T10:00:00.123Z","level":"info","component":"scheduler","msg":"Poll complete","taskCount":5,"durationMs":120}
+```
+
+Human format (CLI mode):
+```
+2026-03-12 10:00:00 INFO  [scheduler] Poll complete taskCount=5 durationMs=120
+```
+
+### How Logger Flows Through the System
+
+The logger is NOT a global singleton. It flows through dependency injection, matching the existing pattern where `EventLogger` is passed through constructors:
+
+1. **Entry points create the root logger:**
+   - `src/daemon/daemon.ts`: `createLogger({ format: "json", level: getConfig().get("logLevel") })`
+   - `src/cli/program.ts`: `createLogger({ format: "human", level: "info" })`
+   - `src/mcp/server.ts`: `createLogger({ format: "json", level: getConfig().get("logLevel") })`
+
+2. **AOFService accepts logger in dependencies:**
+   ```typescript
+   export interface AOFServiceDependencies {
+     logger?: EventLogger;           // audit (existing)
+     operationalLogger?: Logger;     // structured (new)
+     // ... other existing deps
+   }
+   ```
+
+3. **Scheduler, ProtocolRouter, etc. receive child loggers:**
+   Already dependency-injected -- `SchedulerConfig` and `ProtocolRouterDependencies` accept deps. Add `Logger` to these interfaces.
+
+4. **CLI commands keep console.log for user output:**
+   CLI output (console.log for user-facing messages) stays as console.log. Only diagnostic/error output in CLI internals migrates to logger.
+
+### Interaction with EventLogger
+
+They coexist, not compete:
+
+```typescript
+// BEFORE (in action-executor.ts):
+console.error(`[AOF] Spawn failed for ${action.taskId}: ${error}`);
+await logger.logDispatch("dispatch.error", "scheduler", action.taskId, { error });
+
+// AFTER:
+log.error("Spawn failed", { taskId: action.taskId, error });
+await eventLogger.logDispatch("dispatch.error", "scheduler", action.taskId, { error });
+```
+
+Both fire. The structured logger goes to stderr for operators. The EventLogger goes to JSONL for audit/notifications. The `[AOF]` prefix in console calls becomes the `component` field in structured output.
+
+### Migration Path for 751 console.* Calls
+
+**Triage by module type:**
+
+| Module Type | console.* Count | Migration Strategy |
+|-------------|----------------|--------------------|
+| CLI commands | ~540 | **Keep most as console.log** -- user-facing output. Only migrate error/diagnostic calls. |
+| dispatch/ | ~76 (non-test) | **Full migration** to structured logger |
+| service/ | ~15 | **Full migration** to structured logger |
+| daemon/ | ~8 | **Full migration** to structured logger |
+| protocol/ | ~4 | **Full migration** to structured logger |
+| memory/ | varies | **Partial** -- user-facing stays, internal migrates |
+| packaging/ | varies | **Keep** -- installer output is user-facing |
+
+**Realistic scope: ~120 console.* calls in core modules need migration.** The remaining ~630 in CLI are intentional user output and stay as-is. Do not boil the ocean.
+
+**Migration is mechanical:**
+```
+console.info(`[AOF] ${message}`)  -->  log.info(message, { component: "aof" })
+console.warn(`[AOF] ${message}`)  -->  log.warn(message)
+console.error(`[AOF] ${message}`) -->  log.error(message)
+```
+
+### Handling the 36 Silent Catch Blocks
+
+The silent catches in dispatch/ (`catch { // Logging errors should not crash the scheduler }`) are specifically about EventLogger failures. With a structured logger, these become visible:
+
+```typescript
+try {
+  await eventLogger.logDispatch("dispatch.error", ...);
+} catch (logErr) {
+  log.warn("EventLogger write failed", { error: String(logErr), taskId });
+}
+```
+
+The structured logger write to stderr is synchronous and will not fail in normal operation (stderr is always available). This makes previously invisible failures visible without changing error handling semantics.
+
+## Data Flow
+
+### Config Registry Data Flow
+
+```
+Process start
+  |
+  v
+Entry point (daemon/CLI/MCP) calls initConfig({ overrides from CLI flags })
+  |
+  v
+ConfigRegistry reads process.env for all mapped keys via ENV_MAP
+  |
+  v
+Zod schema validates + applies defaults
+  |
+  v
+Cached AofConfig object stored in singleton
+  |
+  v
+All modules call getConfig().get("key") instead of process.env
+```
+
+### Logger Data Flow
+
+```
+Entry point creates root Logger (format + level from config)
+  |
+  +-- AOFService receives Logger in deps
+  |     |
+  |     +-- Scheduler gets child({ component: "scheduler" })
+  |     +-- ProtocolRouter gets child({ component: "protocol" })
+  |     +-- ActionExecutor gets child({ component: "action-executor" })
+  |     +-- AssignExecutor gets child({ component: "assign-executor" })
+  |
+  +-- Per-call context enrichment: log.info("msg", { taskId, correlationId })
+  |
+  v
+Formatter serializes to stderr
+  - daemon: JSON line per message
+  - CLI: human-readable with timestamp + level + component
+```
+
+## Patterns to Follow
+
+### Pattern 1: Config Access via Registry
+
+**What:** All environment variable reads go through `getConfig().get(key)`.
+**When:** Any module needs runtime configuration from environment.
+**Example:**
+```typescript
+import { getConfig } from "../config/registry.js";
+
+// Instead of: const root = process.env["AOF_ROOT"] ?? DEFAULT_AOF_ROOT;
+const root = getConfig().get("aofRoot") ?? DEFAULT_AOF_ROOT;
+```
+
+### Pattern 2: Child Logger per Component
+
+**What:** Each module/class creates a child logger with baked-in component name.
+**When:** Any class or module that logs operationally.
+**Example:**
+```typescript
+import type { Logger } from "../logging/logger.js";
+
+export class ProtocolRouter {
+  private readonly log: Logger;
+
+  constructor(deps: ProtocolRouterDependencies) {
+    this.log = deps.operationalLogger?.child({ component: "protocol-router" })
+      ?? createNullLogger();
+  }
+
+  async route(envelope: ProtocolEnvelope): Promise<void> {
+    this.log.debug("Routing message", { type: envelope.type, taskId: envelope.taskId });
   }
 }
 ```
 
-### 4. Interaction with Completion Enforcement
+### Pattern 3: Dual Logging (Audit + Operational)
 
-Completion enforcement (v1.5) catches agents exiting without `aof_task_complete`. The task transitions to `blocked` or `deadletter`.
-
-**Rule: Do NOT dispatch notification callbacks during enforcement.**
-
-The enforcement callback (`onRunComplete`) runs in the GatewayAdapter's completion context. Spawning new sessions from within it is safe (the DAG hop dispatch already does this), BUT notification callbacks for enforcement transitions should only fire for `granularity: "all"` subscriptions. A task that gets enforcement-blocked is not "completed" -- notifying completion subscribers would be misleading.
-
-For `all` subscribers, enforcement transitions ARE delivered:
+**What:** Important events are logged to BOTH EventLogger (audit) and structured logger (operational).
+**When:** Dispatch errors, state transitions, system events.
+**Example:**
 ```typescript
-{
-  type: "task_enforcement",
-  taskId: "TASK-xxx",
-  newStatus: "blocked",
-  reason: "agent_exited_without_completion",
-  enforcementAt: "...",
-}
+// Audit log (persisted JSONL, triggers notifications)
+await eventLogger.logDispatch("dispatch.error", "scheduler", taskId, { error: msg });
+
+// Operational log (stderr for operators)
+log.error("Dispatch failed", { taskId, error: msg, agent });
 ```
 
-### 5. Interaction with Dependency Cascade
+### Pattern 4: CLI Output vs Logger Output
 
-When Task X completes, `cascadeOnCompletion()` promotes dependent tasks from backlog/blocked to ready. If Agent A subscribed to Task X with `completion` granularity, the notification callback should include information about what was promoted:
-
+**What:** User-facing CLI output stays as `console.log()`. Diagnostic output uses logger.
+**When:** CLI commands producing user-visible output.
+**Example:**
 ```typescript
-{
-  type: "task_completed",
-  taskId: "TASK-xxx",
-  finalStatus: "done",
-  cascadeResult: {
-    promoted: ["TASK-yyy", "TASK-zzz"],
-    skipped: [],
-  },
-}
+// User-facing output -- stays as console.log
+console.log(`Task ${taskId} created successfully`);
+
+// Diagnostic -- uses logger
+log.debug("Store initialized", { projectRoot, taskCount: 42 });
 ```
 
-This requires `cascadeOnCompletion()` to return its `CascadeResult` (it already does -- line 38 of `dep-cascader.ts`) and passing it to the notification context.
+### Pattern 5: Graceful Logger Fallback
 
-### 6. MCP Tool Design
-
-**New tool: `aof_task_subscribe`**
-
+**What:** Components that receive an optional logger fall back to a null/no-op logger.
+**When:** Any component that may be used without a logger (tests, standalone usage).
+**Example:**
 ```typescript
-const subscribeInputSchema = z.object({
-  taskId: z.string().min(1),
-  granularity: z.enum(["completion", "all"]).default("completion"),
-  callbackContext: z.record(z.string(), z.unknown()).optional(),
-  actor: z.string().optional(),
-});
+this.log = deps.operationalLogger?.child({ component: "scheduler" })
+  ?? createNullLogger();
 ```
-
-Return value:
-```typescript
-{
-  subscriptionId: "uuid",
-  taskId: "TASK-xxx",
-  granularity: "completion",
-  status: "active",
-}
-```
-
-**Extended `aof_dispatch` tool:**
-
-Add optional `subscribe` field:
-```typescript
-const dispatchInputSchema = z.object({
-  // ... existing fields ...
-  subscribe: z.enum(["completion", "all"]).optional(),
-});
-```
-
-When `subscribe` is set, `handleAofDispatch()` creates both the task and a subscription atomically. This is the primary UX -- Agent A dispatches and subscribes in one call.
-
-**SKILL.md update:**
-
-Add guidance for when agents should subscribe:
-```
-When dispatching tasks you need results from, use subscribe: "completion" to
-receive a callback with the outcome. Do not poll for task status.
-```
-
----
-
-## Patterns to Follow
-
-### Pattern 1: Filesystem Co-location
-
-**What:** Store related data alongside the entity it belongs to.
-**When:** Data lifecycle is coupled to the entity.
-**Existing examples:**
-- Task work artifacts in `TASK-xxx/work/` directory
-- Trace files in `TASK-xxx/trace-N.json`
-- Subscriptions in `TASK-xxx/subscriptions.json` (new, follows same pattern)
-
-### Pattern 2: Scheduler Action Types
-
-**What:** Define action types, build them in evaluation, execute in action-executor.
-**When:** Any new scheduler-driven operation.
-**Example in codebase:** `SchedulerAction.type` union includes `assign`, `expire_lease`, `promote`, `murmur_create_task`, etc.
-**Apply:** Add `notify_subscriber` to the union, with execution in action-executor's switch.
-
-However, as noted above, the recommended approach for low-latency notification delivery is to dispatch directly from the `onRunComplete` callback, bypassing the poll cycle. The `notify_subscriber` action type is still useful as a **fallback** -- if inline dispatch fails, the scheduler can retry on the next poll.
-
-### Pattern 3: Best-Effort Delivery (Never Block State Transitions)
-
-**What:** Notification delivery failures must never prevent task state advancement.
-**Existing example:** Trace capture (v1.5) wraps every call in try/catch: "Trace capture must never crash the scheduler."
-**Apply:** Same pattern for notification dispatch:
-```typescript
-try {
-  await notificationDispatcher.deliver(subscription, task, executor);
-} catch {
-  // Log failure, mark subscription as failed, continue
-}
-```
-
-### Pattern 4: Schema-First with Zod
-
-**What:** Define Zod schema, derive TypeScript types, validate at boundaries.
-**Existing pattern:** Every schema in `src/schemas/` follows this.
-**Apply:** `TaskSubscription` schema, callback context shape.
-
----
 
 ## Anti-Patterns to Avoid
 
-### Anti-Pattern 1: In-Memory Subscription Registry
+### Anti-Pattern 1: Global Logger Singleton
 
-**What:** Store subscriptions in a `Map` within the scheduler process.
-**Why bad:** Lost on restart. AOF is restart-safe by design -- all state must survive daemon restarts via filesystem persistence.
-**Instead:** `subscriptions.json` co-located with task files.
+**What:** Making the logger a global singleton like `getLogger()`.
+**Why bad:** Breaks testability, hides dependencies, makes it impossible to set different log levels per test. The existing codebase correctly uses dependency injection for EventLogger -- follow the same pattern.
+**Instead:** Pass logger through constructors/config objects. Entry points create it, pass it down.
 
-### Anti-Pattern 2: Dispatch During `onRunComplete` Without Concurrency Awareness
+### Anti-Pattern 2: Merging Structured Logger into EventLogger
 
-**What:** Spawning callback sessions from `onRunComplete` without checking the concurrency limit.
-**Why bad:** If 3 tasks complete simultaneously and each has 2 subscribers, that is 6 new sessions -- potentially exceeding `maxConcurrentDispatches`.
-**Instead:** Check concurrency before dispatching. If at limit, queue for next poll cycle via task metadata flag.
+**What:** Adding log levels to EventLogger or making it handle operational logging.
+**Why bad:** EventLogger has specific semantics: typed event schema, JSONL persistence, notification callbacks, query interface. Operational logging has none of these. Merging conflates audit with debug output, bloats the event log with noise, and couples notification triggering to log level.
+**Instead:** Keep them separate. They serve different audiences and have different lifecycles.
 
-### Anti-Pattern 3: Central Subscription Database
+### Anti-Pattern 3: Async Logger API
 
-**What:** Separate SQLite or JSON file indexing all subscriptions globally.
-**Why bad:** Creates synchronization between task state (filesystem directories) and subscription state (database). Task `rename()` transitions must update the index -- fragile coupling. AOF explicitly chose "no external database" (project constraint).
-**Instead:** Co-locate with task files.
+**What:** Making `log.info()` return a Promise.
+**Why bad:** console.* is synchronous. Replacing it with async calls changes control flow, risks unhandled rejections, and adds overhead for filtered-out log levels. The primary output target (stderr) is synchronous.
+**Instead:** Synchronous API. Write to stderr with `process.stderr.write()`.
 
-### Anti-Pattern 4: Unbounded Callback Chains
+### Anti-Pattern 4: Replacing CLI console.log with Logger
 
-**What:** A callback session subscribes to another task, which triggers another callback, ad infinitum.
-**Why bad:** Resource exhaustion, unpredictable behavior.
-**Instead:** Track subscription depth in metadata. Callback sessions can create new subscriptions (agents need this), but enforce a maximum chain depth (3 levels). The `callbackContext` carries a `depth` counter incremented on each callback dispatch.
+**What:** Migrating all 540 CLI console.* calls to the structured logger.
+**Why bad:** CLI commands intentionally write user-facing output to stdout. `console.log("Task created")` IS the user interface. Routing it through a leveled logger adds complexity for zero benefit.
+**Instead:** Only migrate diagnostic/error output in CLI internals. Leave user-facing output as console.log.
 
-### Anti-Pattern 5: Notifications That Block Task State
+### Anti-Pattern 5: Config Registry Watching for Changes
 
-**What:** Making task state transitions depend on successful notification delivery.
-**Why bad:** A failed callback spawn would prevent task completion.
-**Instead:** Notifications are fire-and-forget with logging. Failed delivery is recorded in `subscriptions.json` (status: "failed"), task state advances regardless.
+**What:** Adding file watchers or env polling to detect config changes at runtime.
+**Why bad:** AOF is a daemon that restarts cleanly. Config changes should require restart (current behavior). Runtime config watching adds complexity, race conditions, and is unnecessary for a single-machine system supervised by launchd/systemd.
+**Instead:** Read-once at startup, cache forever. Restart to pick up changes.
 
----
+### Anti-Pattern 6: Using Third-Party Logging Libraries
+
+**What:** Pulling in pino, winston, bunyan, or similar.
+**Why bad:** AOF has zero external dependencies for core infrastructure (filesystem store, EventLogger, etc.). The logging needs are simple: level filter, format, write to stderr. This is ~100 lines of code. A third-party library adds dependency weight, API surface, and configuration complexity for no benefit.
+**Instead:** Build a minimal Logger in-house. The interface is 6 methods (debug/info/warn/error/child + createLogger factory).
+
+## Integration Points with Existing Architecture
+
+### AOFService (composition root)
+
+AOFService is the natural wiring point. It already creates EventLogger, store, scheduler config, and protocol router. Extension is additive:
+
+```typescript
+export interface AOFServiceDependencies {
+  // ... existing fields unchanged
+  operationalLogger?: Logger;  // NEW -- optional for backward compat
+}
+```
+
+AOFService creates child loggers for each subsystem it wires:
+
+```typescript
+constructor(deps: AOFServiceDependencies, config: AOFServiceConfig) {
+  // Existing
+  this.logger = deps.logger ?? new EventLogger(...);
+
+  // New: operational logger (no-op if not provided)
+  this.log = deps.operationalLogger?.child({ component: "aof-service" })
+    ?? createNullLogger();
+
+  // Pass to scheduler config
+  this.schedulerConfig = {
+    ...existingConfig,
+    operationalLogger: this.log,
+  };
+
+  // Pass to protocol router
+  this.protocolRouter = new ProtocolRouter({
+    ...existingDeps,
+    operationalLogger: this.log,
+  });
+}
+```
+
+### SchedulerConfig Extension
+
+```typescript
+export interface SchedulerConfig {
+  // ... existing fields unchanged
+  operationalLogger?: Logger;  // NEW
+}
+```
+
+### ProtocolRouterDependencies Extension
+
+```typescript
+export interface ProtocolRouterDependencies {
+  // ... existing fields unchanged
+  operationalLogger?: Logger;  // NEW
+}
+```
+
+### Daemon Entry Point (`src/daemon/daemon.ts`)
+
+```typescript
+import { initConfig } from "../config/registry.js";
+import { createLogger } from "../logging/logger.js";
+
+// Init config from CLI flags + env
+const config = initConfig({ aofRoot: opts.root });
+
+// Create daemon logger (JSON to stderr)
+const log = createLogger({
+  format: "json",
+  level: config.get("logLevel"),
+});
+
+const { service } = await startAofDaemon({
+  ...opts,
+  operationalLogger: log,
+});
+```
+
+### MCP Entry Point (`src/mcp/server.ts`)
+
+```typescript
+import { initConfig } from "../config/registry.js";
+
+const config = initConfig();
+const dataDir = config.get("aofRoot") ?? config.get("dataDir");
+```
+
+### CLI Entry Point (`src/cli/program.ts`)
+
+```typescript
+import { initConfig } from "../config/registry.js";
+import { createLogger } from "../logging/logger.js";
+
+const config = initConfig({ aofRoot: opts.root });
+
+// CLI logger: human-readable, only for internal diagnostics
+const log = createLogger({ format: "human", level: "warn" });
+```
 
 ## Suggested Build Order
 
-Build order respects dependencies between components:
+Based on the dependency graph, build bottom-up. Each phase is independently testable.
 
-### Phase 1: Schema + Store (no existing code changes)
-1. `TaskSubscription` Zod schema in `src/schemas/subscription.ts`
-2. `SubscriptionStore` in `src/store/subscription-store.ts`
-   - `create(taskId, subscription)` -- writes/appends to `subscriptions.json`
-   - `getForTask(taskId)` -- reads active subscriptions for a task
-   - `markDelivered(taskId, subscriptionId, sessionId)` -- updates status
-   - `markFailed(taskId, subscriptionId, error)` -- updates status
-3. Unit tests: CRUD, co-location with task directories, status transitions
+### Phase 1: Config Registry (no dependencies on logger)
 
-### Phase 2: NotificationDispatcher (core logic, no scheduler integration)
-4. `NotificationDispatcher` in `src/dispatch/notification-dispatcher.ts`
-   - `evaluate(task, transition)` -- returns subscriptions that match
-   - `deliver(subscription, task, transition, executor)` -- spawns callback session
-   - Builds `TaskContext` for callback with subscription context
-5. Unit tests with MockAdapter: verify session spawned with correct context
+1. `src/config/config-schema.ts` -- Zod schema for all config keys
+2. `src/config/registry.ts` -- ConfigRegistry class with env reading, validation, caching
+3. Update `src/config/index.ts` barrel
+4. Tests for registry (env reading, defaults, overrides, coercion, reset)
+5. Wire into entry points (daemon/index.ts, cli/program.ts, mcp/server.ts call `initConfig()`)
+6. Migrate 11 process.env files one at a time (each is independent, each gets its own test run)
 
-### Phase 3: MCP Tools (agent-facing API)
-6. `aof_task_subscribe` tool in `src/mcp/tools.ts`
-7. `subscribe` parameter on `aof_dispatch` input schema
-8. Tool handler tests
+**Why first:** Zero risk. Registry is additive -- existing code keeps working until call sites are migrated. Each migration is a single-file change.
 
-### Phase 4: Scheduler Integration (ties everything together)
-9. New event types in `src/schemas/event.ts`: `notification.created`, `notification.delivered`, `notification.delivery_failed`
-10. Hook in `assign-executor.ts` `onRunComplete`: after task reaches terminal status, evaluate and dispatch notifications
-11. Hook in `dag-transition-handler.ts` `onRunComplete`: after DAG reaches terminal status, evaluate and dispatch
-12. Integration tests: dispatch-with-subscribe -> complete -> verify callback spawned
+### Phase 2: Structured Logger (depends on config for log level)
 
-### Phase 5: DAG `all` Granularity
-13. Hook in `handleDAGHopCompletion()` for per-hop notifications to `all` subscribers
-14. Tests: DAG task with `all` subscriber -> complete hop -> verify notification with hop context
+1. `src/logging/formatters.ts` -- human and JSON formatters
+2. `src/logging/logger.ts` -- Logger implementation with child(), level filtering, null logger
+3. `src/logging/index.ts` -- barrel
+4. Tests for logger (level filtering, child context merging, both formatters, null logger)
+5. Wire into AOFServiceDependencies, SchedulerConfig, ProtocolRouterDependencies (all optional fields)
+6. Wire into daemon entry point (creates root logger, passes to AOFService)
 
-### Phase 6: Edge Cases + Hardening
-15. Concurrency gate: check `maxConcurrentDispatches` before notification dispatch, queue if at limit
-16. Depth limiting for callback chains
-17. `aof subscriptions <task-id>` CLI command for diagnostics
-18. SKILL.md update with subscribe guidance
-19. Subscription expiry cleanup for terminal tasks older than N days
+**Why second:** Depends on config registry for log level. Infrastructure first, then consumers.
+
+### Phase 3: Core Module Migration (~120 console.* calls)
+
+1. `src/service/aof-service.ts` (15 calls) -- highest visibility, composition root
+2. `src/dispatch/action-executor.ts` (15 calls) -- core scheduler
+3. `src/dispatch/scheduler.ts` (15 calls)
+4. `src/dispatch/assign-executor.ts` (13 calls)
+5. `src/dispatch/task-dispatcher.ts` (9 calls)
+6. `src/dispatch/murmur-integration.ts` (11 calls)
+7. `src/dispatch/failure-tracker.ts` (6 calls)
+8. `src/protocol/router.ts` (4 calls)
+9. `src/daemon/*.ts` (8 calls)
+10. Remaining dispatch files (escalation, dag-transition-handler, etc.)
+
+**Why this order:** Start with AOFService (composition root, validates wiring works), then dispatch (highest call count), then protocol/daemon.
+
+### Phase 4: Silent Catch Remediation (depends on logger)
+
+1. Replace 36 empty catch blocks in dispatch/ with `log.warn("EventLogger write failed", ...)`
+2. Add catch-and-log to other bare catches where failure indicates real problems
+3. Leave intentional suppression (e.g., symlink doesn't exist, file not found) with explicit comments
+
+**Why last:** This is the highest-value application of the structured logger -- making invisible failures visible. But it depends on logger being wired through all dispatch modules first.
 
 ### Build Dependency Graph
 
 ```
-Phase 1 (schema + store)
+Phase 1 (config registry) -- no deps, safe to start
   |
   v
-Phase 2 (dispatcher) ----> Phase 3 (MCP tools)
+Phase 2 (logger implementation) -- depends on config for level
   |
   v
-Phase 4 (scheduler hooks) ----> Phase 5 (DAG all-granularity)
+Phase 3 (console.* migration) -- depends on logger wired into modules
   |
   v
-Phase 6 (hardening)
+Phase 4 (silent catch remediation) -- depends on logger in dispatch
 ```
 
-Phases 2 and 3 can run in parallel once Phase 1 is complete. Phase 5 depends on Phase 4 (needs the hook infrastructure). Phase 6 is incremental polish.
+All phases are strictly sequential. Within each phase, individual file migrations are independent.
 
----
+## Scalability Considerations
 
-## Key Architectural Constraints
-
-1. **No new storage mechanism.** Subscriptions use filesystem JSON, consistent with task store. No SQLite, no external DB.
-2. **Best-effort delivery.** Failed notification delivery does not affect task state. Logged, not retried.
-3. **Deterministic evaluation.** Subscription matching is a pure function: compare task status against subscription granularity. No LLM calls.
-4. **Restart-safe.** All subscription state persists to disk. Daemon restart picks up where it left off. Pending notifications survive restarts because they are stored in task metadata or `subscriptions.json`.
-5. **Concurrency-aware.** Notification callback sessions respect `maxConcurrentDispatches`. The dispatcher checks before spawning.
-6. **No nested sessions.** Callback sessions are independent top-level sessions, same as any other dispatch. This satisfies the OpenClaw constraint.
-
----
+| Concern | Current (v1.x) | Future (v2) |
+|---------|----------------|-------------|
+| Config source | process.env only | Could add config file, registry abstracts the source |
+| Log output | stderr only | Could add file rotation, remote shipping via custom output fn |
+| Log volume | ~120 calls in core | Stable -- not expected to grow significantly |
+| Config key count | ~15 keys | May grow with new features, Zod schema scales fine |
+| Performance | Cached config, sync logging | No bottlenecks at single-machine scale |
+| Testing | `resetConfig()` + constructor injection | Full isolation in parallel tests |
 
 ## Sources
 
-- Direct codebase analysis of `/Users/xavier/Projects/aof/src/`
-- `dispatch/scheduler.ts` -- poll cycle, action pipeline, DAG hop dispatch (step 6.5)
-- `dispatch/action-executor.ts` -- action execution switch, SchedulerAction type union
-- `dispatch/assign-executor.ts` -- `onRunComplete` callback, session lifecycle
-- `dispatch/dag-transition-handler.ts` -- DAG hop completion, `dispatchDAGHop()`, `onRunComplete`
-- `dispatch/dag-evaluator.ts` -- DAG evaluation, `evaluateDAG()`, terminal status detection
-- `dispatch/dep-cascader.ts` -- post-completion cascade, `CascadeResult` return
-- `dispatch/executor.ts` -- `GatewayAdapter` contract, `TaskContext`, `SpawnResult`
-- `store/interfaces.ts` -- `ITaskStore` contract, `transition()` method
-- `schemas/task.ts` -- `TaskFrontmatter`, status transitions, metadata
-- `schemas/workflow-dag.ts` -- `WorkflowState`, `WorkflowStatus`, hop state
-- `schemas/event.ts` -- event type enum, `BaseEvent`
-- `events/notifier.ts` -- existing system notification service (separate from task notifications)
-- `events/notification-policy/` -- existing rule-based notification engine (for system alerts)
-- `mcp/subscriptions.ts` -- existing MCP resource subscriptions (different feature: live resource updates over MCP protocol, not task outcome callbacks)
-- `mcp/tools.ts` -- MCP tool registration patterns, `dispatchInputSchema`
-- `tools/task-workflow-tools.ts` -- `aofTaskComplete` flow
-- Confidence: HIGH -- all findings from direct code inspection with module-level references
+- Direct codebase analysis of AOF `src/` directory (HIGH confidence -- primary source)
+- `.planning/codebase/ARCHITECTURE.md` -- existing module hierarchy and dependency analysis
+- `.planning/codebase/QUALITY.md` -- identified console.* distribution and silent catch patterns
+- `process.env` grep across 11 source files (verified all env var names and fallback patterns)
+- `console.*` grep counts: dispatch/ 76 non-test, service/ 15, protocol/ 4, daemon/ 8, CLI/ 540
+- EventLogger implementation review (`src/events/logger.ts`) -- confirmed audit-only semantics
+- AOFService constructor review -- confirmed dependency injection pattern for all subsystems
+
+---
+
+*Architecture analysis: 2026-03-12*
