@@ -1,229 +1,168 @@
 # Codebase Concerns
 
-**Analysis Date:** 2026-02-25
+**Analysis Date:** 2026-03-12
 
 ## Tech Debt
 
-**Configuration Backup Proliferation:**
-- Issue: 22 backup files of `openclaw.json` accumulated in root directory (`.bak`, `.bak-api-field`, `.bak-fix-model`, numbered variants)
-- Files: `/Users/xavier/.openclaw/openclaw.json.bak*` (22 files totaling ~350KB)
-- Impact: Configuration state unclear; difficult to understand current vs. intended configuration; historical backups create confusion about which version is authoritative
-- Fix approach: Delete all numbered/dated backups except most recent one; establish versioning via git only
+**Legacy Gate System Not Removed (v1.3 Promised Removal):**
+- Issue: Five files marked `@deprecated` with "Will be removed in v1.3" still exist and are actively imported from production code. The v1.3 removal never happened; the codebase is now at v1.9.
+- Files:
+  - `src/schemas/gate.ts` — gate schema types (GateOutcome, Gate, GateHistoryEntry, ReviewContext, GateTransition, TestSpec)
+  - `src/schemas/workflow.ts` — WorkflowConfig, RejectionStrategy, validateWorkflow
+  - `src/dispatch/gate-evaluator.ts` — evaluateGateTransition (365 lines)
+  - `src/dispatch/gate-conditional.ts` — evaluateGateCondition, validateGateCondition, buildGateContext (165 lines)
+  - `src/dispatch/gate-context-builder.ts` — buildGateContext (239 lines)
+- Impact: ~900 lines of deprecated code. Gate types are still exported from `src/schemas/index.ts` (lines 94-101) and `src/dispatch/index.ts` (lines 11-18). Active production code in `src/dispatch/assign-executor.ts` (lines 150-169) still builds gate context for dispatch. `src/dispatch/scheduler.ts` imports gate symbols (lines 22, 25, 27) that are never used in the function body. `src/dispatch/escalation.ts` runs `checkGateTimeouts()` on every poll cycle even though no gate-format tasks should exist.
+- Fix approach: (1) Remove gate files: `src/schemas/gate.ts`, `src/schemas/workflow.ts`, `src/dispatch/gate-evaluator.ts`, `src/dispatch/gate-conditional.ts`, `src/dispatch/gate-context-builder.ts`. (2) Remove gate exports from `src/schemas/index.ts` and `src/dispatch/index.ts`. (3) Remove gate context injection from `src/dispatch/assign-executor.ts` lines 150-169. (4) Remove `checkGateTimeouts` from `src/dispatch/escalation.ts` and its call in `src/dispatch/scheduler.ts` line 248. (5) Remove lazy gate-to-DAG migration from `src/store/task-store.ts` and `src/migration/gate-to-dag.ts`.
 
-**Model Configuration Duplication:**
-- Issue: Multiple provider configurations define identical models (e.g., `claude-opus-4-6` appears in both `anthropic` OAuth and `anthropic-api` providers; `gpt-5.3-codex` in both `openai` OAuth and `openai-api`)
-- Files: `openclaw.json` lines 71-315 (model definitions)
-- Impact: Inconsistent model availability between auth methods; difficult to maintain parity; redundant configuration
-- Fix approach: Consolidate model definitions to single provider per API; use auth mode selector instead of duplicate provider definitions
+**Massive Unused Import Accumulation in scheduler.ts:**
+- Issue: `src/dispatch/scheduler.ts` imports 18+ symbols that are never used in its function body. These were likely used before extraction to sub-modules (assign-executor.ts, action-executor.ts, scheduler-helpers.ts) but never cleaned up.
+- Files: `src/dispatch/scheduler.ts` lines 8-27
+- Unused imports: `FilesystemTaskStore`, `serializeTask` (line 8), `acquireLease`, `expireLeases`, `releaseLease` (line 11), `markRunArtifactExpired`, `readRunResult` (line 12), `resolveCompletionTransitions` (line 13), `relative` (line 15), `writeFileAtomic` (line 19), `TaskContext`, `GatewayAdapter` (line 20), `evaluateGateTransition`, `GateEvaluationInput`, `GateEvaluationResult` (line 22), `validateWorkflow`, `WorkflowConfig` (line 23), `ProjectManifest` (line 24), `GateOutcome`, `GateTransition` (line 25), `parseDuration` (line 26), `buildGateContext` (line 27)
+- Impact: Slower module loading, misleading dependency graph, approximately 15 unnecessary module resolutions on every import.
+- Fix approach: Delete all unused import lines. TypeScript compiler will validate correctness.
 
-**Missing API Field Warnings in History:**
-- Issue: Configuration shows history of `.bak-api-field` and `.bak-fix-model` backups, suggesting recurring problems with model API field configuration
-- Files: `openclaw.json.bak-api-field`, `openclaw.json.bak-fix-model`
-- Impact: Indicates custom providers may have missing or incorrect `"api"` field specification; OpenAI custom providers need `"api": "openai-responses"`, Anthropic need `"api": "anthropic-messages"`
-- Fix approach: Add validation in gateway to enforce required `api` field on all model definitions; document required fields per provider type
+**Deprecated Type Aliases Still Exported:**
+- Issue: `DispatchExecutor`, `ExecutorResult`, `MockExecutor` are deprecated type aliases still exported from `src/dispatch/index.ts` (lines 3, 5-8) and defined in `src/dispatch/executor.ts` (lines 49-50, 115-116, 284-285). No non-test code imports these deprecated names.
+- Files: `src/dispatch/executor.ts`, `src/dispatch/index.ts`
+- Impact: Public API surface includes deprecated symbols that could confuse consumers.
+- Fix approach: Remove the deprecated aliases and their re-exports.
+
+**Lazy Gate-to-DAG Migration on Every Read:**
+- Issue: Every `get()`, `getByPrefix()`, and `list()` call in `FilesystemTaskStore` checks for gate fields and potentially writes back a migrated task file. This runs on every single task read.
+- Files: `src/store/task-store.ts` lines 251-258 (get), 292-298 (getByPrefix), 343-352 (list)
+- Impact: Unnecessary I/O overhead on every task read. Also uses dynamic `import()` for `node:fs/promises` and `yaml` inside `loadWorkflowConfig()` (lines 92-94) despite both already being statically imported at the top of the file.
+- Fix approach: Remove the gate-to-DAG migration code from the task store. No gate-format tasks should exist post-v1.3.
 
 ## Known Bugs
 
-**Stuck Session Incidents (Active/Recurring):**
-- Symptoms: Sessions report `state=processing age=XXXs` persisting for minutes (up to 8+ minutes observed in Feb 25 logs)
-- Files: `/Users/xavier/.openclaw/logs/gateway.err.log`
-- Trigger: Occurs during agent execution, especially cron-spawned tasks (`cron:*` session keys) and main agent processing
-- Evidence:
-  - `2026-02-25T16:47:30.660Z` session age 138s
-  - `2026-02-25T16:53:00.686Z` session age 468s (7m 48s)
-  - Multiple agents affected: `personal-admin`, `researcher`, `main`
-- Workaround: Gateway drain timeout forces restart at 180s (`2026-02-25T13:16:46.387Z [gateway] drain timeout reached`)
-- Root cause likely: Slow model responses, compaction/memory flush blocking, or timeout in external API calls
+**UpdatePatch `blockers` Field Misplaced Inside `routing` Type:**
+- Symptoms: The `blockers` field in the `UpdatePatch` interface is nested inside the `routing` object type due to incorrect indentation/placement. It appears to be a stray field that should be at the top level of `UpdatePatch` or removed entirely.
+- Files: `src/store/task-mutations.ts` lines 14-25
+- Trigger: `patch.routing.blockers` is never accessed anywhere in `updateTask()` (lines 31-108). If a caller passes `{ routing: { blockers: [...] } }`, the blockers are silently discarded.
+- Workaround: Field is unused, so no runtime impact currently. But the type signature is misleading.
 
-**Cron Task Delivery Failures:**
-- Symptoms: `cron announce delivery failed` error in gateway logs
-- Files: `logs/gateway.err.log`
-- Trigger: Appears during cron job scheduling/execution
-- Evidence: `2026-02-25T16:57:21.299-05:00 [cron:c07f3fb1-7f37-4e4b-9997-23ee30f39e8a] cron announce delivery failed`
-- Impact: Scheduled tasks may not execute reliably; cron job outcomes unreliable
-- Workaround: None documented; delivery queue accumulates (40 items currently queued)
+**`buildTaskStats` Missing `cancelled` and `deadletter` Status Counts:**
+- Symptoms: `stats.total` includes all tasks but the status breakdown only counts 6 of the 8 status types (backlog, ready, in-progress, blocked, review, done). Tasks in `cancelled` or `deadletter` are silently untracked, making `stats.total > sum(individual counts)`.
+- Files: `src/dispatch/scheduler-helpers.ts` lines 13-35; same issue in recalculation at `src/dispatch/scheduler.ts` lines 386-403
+- Trigger: When tasks exist in cancelled or deadletter status, the "all active tasks blocked" alert at `src/dispatch/scheduler.ts` line 477 uses `activeTasks = stats.total - stats.done` which incorrectly includes cancelled/deadletter tasks as "active," potentially triggering false alerts or missing real alerts.
+- Workaround: Currently low impact in normal operation but produces incorrect stats in PollResult.
 
-**Deleted Session Files Accumulation:**
-- Symptoms: 751 `.deleted.*` session files in agents/*/sessions/
-- Files: `/Users/xavier/.openclaw/agents/*/sessions/*.jsonl.deleted.*`
-- Impact: Orphaned session history consuming disk space; difficult to audit session lifecycle; unclear deletion strategy
-- Fix approach: Implement automatic cleanup of `.deleted` files after retention period; document session deletion retention policy
+**Daemon `startTime` Set at Module Load, Not Daemon Start:**
+- Symptoms: `const startTime = Date.now()` is a module-level constant at `src/daemon/daemon.ts` line 34. The uptime calculation at line 101 (`Date.now() - startTime`) measures time since module import, not since `startAofDaemon()` was called.
+- Files: `src/daemon/daemon.ts` line 34, used at line 101
+- Trigger: If the daemon module is imported early (e.g., during test setup or CLI initialization) but the daemon is started later, uptime will be artificially inflated.
+- Workaround: Move `startTime` initialization into `startAofDaemon()`.
+
+**Duplicate JSDoc Comment on `create()` Method:**
+- Symptoms: Two identical `/** Create a new task. Returns the created Task. */` comments on consecutive lines.
+- Files: `src/store/task-store.ts` lines 170-171
+- Trigger: Cosmetic only, no runtime impact.
 
 ## Security Considerations
 
-**Environment Variables in Configuration:**
-- Risk: `openclaw.json` contains references to unencrypted credential references like `"apiKey": "op://AI Ops/Google AI Studio/swe-team"`
-- Files: `openclaw.json` lines 335-359 (Google AI Studio provider config)
-- Current mitigation: Uses 1Password CLI reference syntax (`op://...`), requires 1Password vault access
-- Recommendations:
-  - Ensure `.env` files are never committed to git (check `.gitignore`)
-  - Consider validating that all sensitive config goes through 1Password references
-  - Audit whether any plaintext credentials exist in config backups
-
-**Ollama Local Network Exposure:**
-- Risk: Ollama service exposed on local network `http://100.91.2.71:11434` without documented authentication
-- Files: `openclaw.json` line 317 (ollama baseUrl)
-- Current mitigation: Limited to internal network only
-- Recommendations: Verify firewall rules restrict Ollama port; consider TLS/authentication for Ollama endpoint if accessible outside trusted network
-
-**Browser Evaluation Enabled:**
-- Risk: Browser evaluation feature enabled globally (`"evaluateEnabled": true`)
-- Files: `openclaw.json` lines 40-43 (browser config)
-- Impact: Agents can execute arbitrary JavaScript in browser context; potential RCE via malicious prompts
-- Recommendations: Consider restricting browser evaluation to specific agents or use content security policies
+**Gate Conditional Uses `new Function()` for Expression Evaluation:**
+- Risk: `evaluateGateCondition` in `src/dispatch/gate-conditional.ts` lines 98-113 uses `new Function()` constructor to evaluate user-provided `when` field expressions from task files. While this is deprecated code, the lazy migration path in the task store means gate-format tasks could still trigger this code.
+- Files: `src/dispatch/gate-conditional.ts` lines 94-131
+- Current mitigation: `"use strict"` mode, parameters limited to `tags`, `metadata`, `gateHistory`. However, the timeout check (lines 117-121) runs AFTER execution, so it cannot prevent a synchronous malicious expression from completing.
+- Recommendations: Remove this code as part of gate system cleanup. The DAG condition evaluator (`src/dispatch/dag-condition-evaluator.ts`) uses a safe JSON DSL approach.
 
 ## Performance Bottlenecks
 
-**Memory Directory Excessive Growth:**
-- Problem: Memory directory at 121MB; memory backup at 119MB (242MB total for redundant memory)
-- Files: `/Users/xavier/.openclaw/memory/`, `/Users/xavier/.openclaw/memory-backup-20260223/`
-- Cause: Agent memory accumulating without pruning; agents storing full session history, learnings, and per-day context files
-- Scaling path:
-  - Implement automatic memory archival (compress files >90 days old)
-  - Reduce memory retention window from 30+ days to 14 days
-  - Add memory size budgets per agent workspace
-  - Delete backup-20260223 directory after validation of current state
+**229 Swallowed Catch Blocks Across 72 Files:**
+- Problem: 229 instances of `} catch {` (empty catch with no error variable or logging) across 72 source files. While many are intentional ("logging/delivery/trace errors should not crash the scheduler"), this pattern makes debugging extremely difficult.
+- Files: Highest concentrations in `src/dispatch/assign-executor.ts` (15 instances), `src/dispatch/action-executor.ts` (13), `src/packaging/installer.ts` (9), `src/cli/commands/setup.ts` (9), `src/packaging/updater.ts` (8), `src/dispatch/escalation.ts` (7)
+- Cause: Defensive "never crash the scheduler" pattern applied pervasively.
+- Improvement path: Replace `} catch {` with `} catch (err) { if (process.env.AOF_DEBUG) console.debug(err); }` or a `safeLog()` wrapper. This preserves crash safety while enabling debugging.
 
-**Agents Directory Excessive Size:**
-- Problem: `/Users/xavier/.openclaw/agents/` consuming 599MB of disk space
-- Cause: Accumulated session logs (20 agent workspaces × ~30MB each of deleted JSONL session logs)
-- Scaling path:
-  - Implement log rotation on agent session JSONL files
-  - Archive/compress deleted sessions older than 14 days
-  - Set maximum session log file size (currently unbounded)
-  - Current deleted sessions: 751 files suggests no cleanup strategy
-
-**Workspace Directory Growth (1.1GB):**
-- Problem: `/Users/xavier/.openclaw/workspace/` at 1.1GB with 2693 markdown files
-- Cause: Accumulated reports, analysis documents, and kanban task history
-- Scaling path:
-  - Archive completed task directories monthly
-  - Implement file size limits on report generation
-  - Compress archived reports to .gz
-  - Consider external archive/retrieval system
-
-**Cron Logs Unbounded:**
-- Problem: Cron run logs accumulating without rotation (runs directory has multiple JSONL files with no size limits)
-- Impact: Future cron execution costs increase linearly with accumulated logs
-- Fix approach: Implement cron log rotation (keep last 30 days, compress older)
-
-**Compaction + Memory Flush Causes Long Processing Delays:**
-- Problem: Session memory flush on compaction takes 4-7 minutes, causes stuck session warnings and webchat disconnects
-- Files: `openclaw.json` lines 451-466 (compaction config)
-- Impact: Users experience timeouts and session interruptions
-- Current config: `"softThresholdTokens": 40000`, `"ttl": "15m"` on context pruning
-- Fix approach:
-  - Reduce memory flush prompt complexity
-  - Implement incremental memory flushing instead of blocking flush
-  - Increase session timeout threshold to handle compaction delays
-  - Consider background memory flush on session idle instead of during active processing
+**`nextTaskId` Scans All Status Directories on Every Create:**
+- Problem: `FilesystemTaskStore.nextTaskId()` in `src/store/task-store.ts` lines 111-137 reads all 8 status directories and scans all `.md` filenames to find the max sequence number for the current date.
+- Cause: No index or counter maintained; every `create()` does 8 `readdir()` calls.
+- Improvement path: Maintain a `.aof/task-counter` file or in-memory counter that syncs on startup.
 
 ## Fragile Areas
 
-**Custom Provider Configuration:**
-- Files: `openclaw.json` lines 333-380 (google-swe, google-shared, ollama providers)
-- Why fragile: Missing `api` field specification caused past issues (evidenced by `.bak-api-field` backups); no schema validation on provider definitions
-- Safe modification: Add schema validator before gateway startup; require explicit `api` field on all providers
-- Test coverage: No visible validation tests for model provider configuration
+**Module-Level Mutable State in Dispatch:**
+- Files:
+  - `src/dispatch/scheduler.ts` line 110: `let effectiveConcurrencyLimit: number | null = null` — global concurrency limit with no reset mechanism
+  - `src/dispatch/throttle.ts` lines 13-17: `const throttleState` — global throttle state with `resetThrottleState()` for testing
+  - `src/dispatch/lease-manager.ts` line 15: `const leaseRenewalTimers = new Map<string, NodeJS.Timeout>()` — active interval timers with no full-reset function
+- Why fragile: Three separate module-level mutable singletons persist across poll cycles. `effectiveConcurrencyLimit` is never reset (only updated when a new platform limit is detected). If tests import these modules, state leaks between test cases.
+- Safe modification: Always call `resetThrottleState()` in test cleanup. Consider encapsulating all dispatch state in a `SchedulerState` class passed to `poll()`.
+- Test coverage: `resetThrottleState()` exists for throttle; `cleanupLeaseRenewals()` partially handles timers; no equivalent for `effectiveConcurrencyLimit`.
 
-**Model Fallback Chain:**
-- Files: `openclaw.json` lines 385-427 (agents.defaults with empty fallbacks array)
-- Why fragile: `"fallbacks": []` means if primary model fails, no retry logic; single point of failure
-- Current state: Primary model `openai/gpt-5.3-codex` has no fallback defined
-- Safe modification: Add at least two fallback models per agent (suggest: `anthropic-api/claude-opus-4-6`, `openai-api/gpt-5.2`)
-- Impact: Session will fail completely if primary model unavailable
+**Task Transition TOCTOU Race Condition:**
+- Files: `src/store/task-mutations.ts` lines 135-219 (transitionTask), `src/store/lease.ts` lines 45-103 (acquireLease)
+- Why fragile: `transitionTask` reads a task, validates status, writes, then renames. Between the read and the rename, another concurrent caller could read the same task and attempt a conflicting transition. `acquireLease` has the same pattern: read, check lease status, write. The `InMemoryTaskLockManager` in `src/protocol/task-lock.ts` exists but is only used in the protocol router — scheduler-initiated transitions via `store.transition()` bypass it entirely.
+- Safe modification: Route all state-mutating operations through the task lock manager, or move to compare-and-swap file operations.
+- Test coverage: `src/protocol/__tests__/concurrent-handling.test.ts` tests the lock manager, but scheduler-path concurrent transitions are not tested.
 
-**Cron Task Execution Reliability:**
-- Files: `logs/gateway.err.log` (cron delivery failures), `logs/gateway.log` (cron scheduler polling)
-- Why fragile: Delivery failures logged but no retry mechanism visible; 40 items in delivery-queue suggests backlog
-- Safe modification: Implement exponential backoff retry on delivery failures; add dead-letter queue for failed deliveries after N retries
-- Monitor: Track delivery-queue depth; alert if > 100 items
+**Duplicate `loadProjectManifest` Implementations:**
+- Files:
+  - `src/dispatch/assign-executor.ts` lines 34-49 — checks `store.projectId === projectId` for path optimization (reads from project root or projects/ subdir)
+  - `src/dispatch/escalation.ts` lines 34-46 — always uses `projects/<projectId>/project.yaml` path (no self-project check)
+- Why fragile: The escalation version will fail to find the manifest for the store's own project if its `project.yaml` is at the project root. Behavior diverges silently.
+- Safe modification: Extract to a shared `loadProjectManifest` utility used by both modules.
 
-**Session Timeout Configuration:**
-- Files: `openclaw.json` line 469 (`"timeoutSeconds": 600`)
-- Why fragile: 600s (10 minute) timeout insufficient for long-running tasks; compaction causes stuck sessions that trigger timeout
-- Safe modification: Increase timeout to 1200s (20 minutes); implement progressive timeout increase for retried operations
-- Test: Verify timeout doesn't break short tasks
+**Concurrent Task ID Generation:**
+- Files: `src/store/task-store.ts` lines 111-137 (nextTaskId)
+- Why fragile: Two concurrent `create()` calls within the same event loop tick could both scan directories, compute the same next ID, and one would silently overwrite the other via `writeFileAtomic`. No locking mechanism exists.
+- Safe modification: Use an atomic increment file or in-memory counter with file-system persistence.
 
-## Scaling Limits
+## Stale Code
 
-**Session Concurrency Cap:**
-- Current capacity: `"maxConcurrent": 4` agents per host
-- Limit: System can handle 4 agent sessions simultaneously; 5th session must wait
-- Scaling path: Evaluate if limiting is hardware constraint or architectural choice; consider: CPU/memory per agent, network connections to AI APIs
+**Reference to Non-Existent `gate-transition-handler.ts`:**
+- Problem: `src/dispatch/dag-transition-handler.ts` line 6 JSDoc says "Mirrors the gate-transition-handler.ts pattern" but no file named `gate-transition-handler.ts` exists anywhere in the codebase.
+- Files: `src/dispatch/dag-transition-handler.ts` line 6
+- Fix: Remove the stale reference from the JSDoc comment.
 
-**Subagent Spawning Depth:**
-- Current capacity: `"maxSpawnDepth": 2` (agents can spawn subagents 2 levels deep)
-- Limit: Prevents runaway spawning; also limits parallel task decomposition
-- Scaling path: Monitor subagent spawn failures; consider increasing depth if decomposition tasks require 3+ levels
+**Commented-Out Code in `promotion.ts`:**
+- Problem: Lines 72-76 contain commented-out code for a "Phase 2" approval gate check that was never implemented.
+- Files: `src/dispatch/promotion.ts` lines 72-76
+- Fix: Delete the commented-out code. Track the feature as a task if needed.
 
-**Delivery Queue Capacity:**
-- Current queue: 40 items pending delivery
-- Risk: No visible max size; unbounded queue could consume memory
-- Fix approach: Add circuit breaker at queue size 1000; implement dead-letter queue; monitor queue depth metrics
+**Commented-Out Import in `event.ts`:**
+- Problem: Line 14 contains `// import type { TaskStatus } from "./task.js";` with comment "will be used when we add typed event constructors."
+- Files: `src/schemas/event.ts` lines 13-14
+- Fix: Delete the commented-out import.
 
-## Dependencies at Risk
+**Stale `@deprecated` JSDoc Saying "Will be removed in v1.3":**
+- Problem: Five deprecated files promise removal in v1.3, but the codebase is at v1.9. The notices are misleading and create false urgency.
+- Files: `src/schemas/gate.ts:12`, `src/schemas/workflow.ts:9`, `src/dispatch/gate-evaluator.ts:14`, `src/dispatch/gate-conditional.ts:16`, `src/dispatch/gate-context-builder.ts:12`
+- Fix: Either remove the files (preferred) or update the deprecation notice to reflect the actual timeline.
 
-**Ollama Local Model Provider:**
-- Risk: Ollama endpoint at `100.91.2.71:11434` is non-standard IP (not localhost); single point of failure for local model inference
-- Impact: If Ollama service down, `qwen3-coder:30b` model unavailable; no fallback defined
-- Migration plan: Add fallback to cloud model if Ollama unavailable; implement health check before session start
-
-**1Password CLI Integration:**
-- Risk: All sensitive configuration references `op://` paths; system dependent on `op` CLI being available and authenticated
-- Files: `openclaw.json` API key references use `op://` paths
-- Impact: If 1Password vault inaccessible or CLI broken, all API calls fail
-- Recommendations: Implement local env var fallback for 1Password references
-
-**Memory Search Local-Only Mode:**
-- Risk: `"provider": "local"` means all memory search happens in-process; no distributed search capability
-- Files: `openclaw.json` lines 430-449 (memorySearch config)
-- Impact: Large workspaces (121MB memory) cause slow searches; cannot distribute across machines
-- Migration plan: When scaling to multiple hosts, implement remote vector search (Pinecone, Weaviate, etc.)
-
-## Missing Critical Features
-
-**Session State Recovery:**
-- Problem: No visible session persistence or recovery mechanism; stuck sessions (5+ min old) indicate no graceful recovery
-- Blocks: Long-running tasks, reliable task scheduling, fault tolerance across gateway restarts
-- Recommendation: Implement session state snapshots to durable storage; resume on gateway restart
-
-**Audit Log for Configuration Changes:**
-- Problem: 22 backup files suggest manual config edits without formal change tracking
-- Blocks: Understanding when/why configuration changed; rolling back bad changes safely
-- Recommendation: Implement configuration version control with change descriptions; log all config modifications with timestamp/reason
-
-**Health Check Endpoints:**
-- Problem: No visible health check mechanism for dependent services (Ollama, 1Password, Model APIs)
-- Blocks: Proactive failure detection; graceful degradation when services down
-- Recommendation: Add health check endpoint that verifies all critical service dependencies
+**Gate Test Files Still Maintained:**
+- Problem: Test files for the deprecated gate system still exist and presumably still run in CI, consuming test time for dead code:
+  - `src/dispatch/__tests__/gate-evaluator.test.ts` (776 lines)
+  - `src/dispatch/__tests__/gate-enforcement.test.ts` (542 lines)
+  - `src/dispatch/__tests__/gate-conditional.test.ts` (~300 lines)
+  - `src/dispatch/__tests__/gate-context-builder.test.ts`
+  - `src/dispatch/__tests__/gate-timeout.test.ts`
+  - `src/schemas/__tests__/gate.test.ts`
+  - `src/schemas/__tests__/task-gate-extensions.test.ts`
+- Files: Listed above, totaling ~2000+ lines of test code for deprecated functionality.
+- Fix: Remove alongside the gate source files.
 
 ## Test Coverage Gaps
 
-**Configuration Validation:**
-- What's not tested: No schema validation for `openclaw.json`; no tests for model provider `api` field requirement
-- Files: `openclaw.json` (all provider definitions)
-- Risk: Invalid configuration silently fails at runtime; model provider misconfiguration goes undetected
-- Priority: High (prevents API field issues documented in backups)
+**Scheduler Concurrent Transition Safety:**
+- What's not tested: The scheduler calls `store.transition()` directly without going through the task lock manager. No tests verify that two concurrent scheduler poll cycles cannot create conflicting transitions.
+- Files: `src/dispatch/action-executor.ts`, `src/dispatch/assign-executor.ts`
+- Risk: Double-dispatch of same task, or conflicting status transitions under load.
+- Priority: Medium (single-process Node.js makes true concurrency rare, but async interleaving is possible).
 
-**Cron Delivery Reliability:**
-- What's not tested: No visible tests for cron task delivery; failure modes not documented
-- Files: `logs/gateway.log` (cron scheduler polling), `logs/gateway.err.log` (cron announce delivery failed)
-- Risk: Scheduled tasks fail silently; delivery-queue accumulates with no alert
-- Priority: High (currently experiencing delivery failures)
+**Stats Accuracy with Terminal States:**
+- What's not tested: No test verifies that `PollResult.stats` correctly accounts for `cancelled` and `deadletter` tasks.
+- Files: `src/dispatch/scheduler-helpers.ts` (buildTaskStats), `src/dispatch/scheduler.ts` (poll)
+- Risk: Monitoring dashboards consuming PollResult stats will show incorrect task counts.
+- Priority: Low (cosmetic, but could lead to incorrect alerting).
 
-**Session Stuck State Recovery:**
-- What's not tested: No tests for session recovery after timeout; stuck session behavior not validated
-- Files: `logs/gateway.err.log` (stuck session diagnostics)
-- Risk: Stuck sessions block users; forced timeout restarts may lose work
-- Priority: High (actively occurring, blocks user workflow)
-
-**Model Fallback Behavior:**
-- What's not tested: No tests for primary model failure triggering fallback chain
-- Files: `openclaw.json` agents.defaults.model (fallbacks array empty)
-- Risk: Single model failure = session failure; no graceful degradation
-- Priority: Medium (would improve resilience)
+**Gate Timeout Code Path Under DAG-Only Regime:**
+- What's not tested: `checkGateTimeouts()` runs on every scheduler poll but should never find gate-format tasks post-migration. No test verifies it's a safe no-op.
+- Files: `src/dispatch/escalation.ts` lines 169-229
+- Risk: Wasted I/O per poll cycle; if it does fire unexpectedly, it mutates task state without the task lock manager.
+- Priority: Medium (remove with gate cleanup).
 
 ---
 
-*Concerns audit: 2026-02-25*
+*Concerns audit: 2026-03-12*
