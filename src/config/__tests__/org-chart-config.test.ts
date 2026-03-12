@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { stringify as stringifyYaml } from "yaml";
-import { getConfigValue, setConfigValue } from "../manager.js";
+import { getConfigValue, setConfigValue } from "../org-chart-config.js";
 
 describe("Config manager", () => {
   let tmpDir: string;
