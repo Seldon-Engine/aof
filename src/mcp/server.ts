@@ -2,9 +2,9 @@
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { AofMcpServer } from "./adapter.js";
-import { DEFAULT_AOF_ROOT } from "../projects/resolver.js";
+import { getConfig } from "../config/registry.js";
 
-const dataDir = process.env["AOF_ROOT"] ?? DEFAULT_AOF_ROOT;
+const dataDir = getConfig().core.dataDir;
 
 const server = new AofMcpServer({
   dataDir,

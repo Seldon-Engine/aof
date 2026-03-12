@@ -36,23 +36,22 @@ import { registerViewCommands } from "./commands/views.js";
 import { registerSystemCommands } from "./commands/system.js";
 import { registerSetupCommand } from "./commands/setup.js";
 import { registerTraceCommand } from "./commands/trace.js";
-import { DEFAULT_AOF_ROOT } from "../projects/resolver.js";
 import { normalizePath } from "../config/paths.js";
-
-const AOF_ROOT = process.env["AOF_ROOT"] ?? DEFAULT_AOF_ROOT;
+import { getConfig } from "../config/registry.js";
 
 const program = new Command()
   .name("aof")
   .version(VERSION)
   .description("Agentic Ops Fabric — deterministic orchestration for multi-agent systems")
-  .option("--root <path>", "AOF root directory", AOF_ROOT);
+  .option("--root <path>", "AOF root directory");
 
-// Normalize --root to absolute path before any command runs
+// Default --root to config registry value and normalize to absolute path
 program.hook("preAction", (thisCommand) => {
   const opts = thisCommand.opts();
-  if (opts["root"]) {
-    opts["root"] = normalizePath(opts["root"] as string);
+  if (!opts["root"]) {
+    opts["root"] = getConfig().core.dataDir;
   }
+  opts["root"] = normalizePath(opts["root"] as string);
 });
 
 // --- init (integration wizard) ---

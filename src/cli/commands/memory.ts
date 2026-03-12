@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
 import type { Command } from "commander";
+import { getConfig } from "../../config/registry.js";
 import type { SqliteDb } from "../../memory/types.js";
 import type { HnswIndex } from "../../memory/store/hnsw-index.js";
 import { generateMemoryConfigFile, auditMemoryConfigFile } from "../../commands/memory.js";
@@ -130,7 +131,7 @@ export function registerMemoryCommands(program: Command): void {
       const root = program.opts()["root"] as string;
       const orgPath = path ?? join(root, "org", "org-chart.yaml");
       const outputPath = opts?.out ?? join(root, "org", "generated", "memory-config.json");
-      const vaultRoot = opts?.vaultRoot ?? process.env["AOF_VAULT_ROOT"] ?? process.env["OPENCLAW_VAULT_ROOT"];
+      const vaultRoot = opts?.vaultRoot ?? getConfig().core.vaultRoot;
 
       await generateMemoryConfigFile({
         orgChartPath: orgPath,
@@ -147,10 +148,11 @@ export function registerMemoryCommands(program: Command): void {
     .action(async (path?: string, opts?: { config?: string; vaultRoot?: string }) => {
       const root = program.opts()["root"] as string;
       const orgPath = path ?? join(root, "org", "org-chart.yaml");
-      const vaultRoot = opts?.vaultRoot ?? process.env["AOF_VAULT_ROOT"] ?? process.env["OPENCLAW_VAULT_ROOT"];
+      const cfg = getConfig();
+      const vaultRoot = opts?.vaultRoot ?? cfg.core.vaultRoot;
       const configPath = opts?.config
-        ?? process.env["OPENCLAW_CONFIG"]
-        ?? join(homedir(), ".openclaw", "openclaw.json");
+        ?? cfg.openclaw.configPath
+        ?? join(cfg.openclaw.stateDir, "openclaw.json");
 
       await auditMemoryConfigFile({
         orgChartPath: orgPath,
@@ -297,7 +299,7 @@ export function registerMemoryCommands(program: Command): void {
 
       // Build inventory
       const { resolvePoolPath } = await import("../../memory/generator.js");
-      const vaultRoot = process.env["AOF_VAULT_ROOT"] ?? process.env["OPENCLAW_VAULT_ROOT"] ?? root;
+      const vaultRoot = getConfig().core.vaultRoot ?? root;
       const scopes: Array<import("../../memory/curation-generator.js").CurationScope> = [];
 
       if (detection.backend === "memory-lancedb") {

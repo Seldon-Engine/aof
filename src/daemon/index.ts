@@ -3,18 +3,20 @@
 import { resolve } from "node:path";
 import { Command } from "commander";
 import { startAofDaemon } from "./daemon.js";
-import { DEFAULT_AOF_ROOT } from "../projects/resolver.js";
-
-const AOF_ROOT = process.env["AOF_ROOT"] ?? DEFAULT_AOF_ROOT;
+import { getConfig } from "../config/registry.js";
 
 const program = new Command()
   .name("aof-daemon")
   .description("AOF scheduler daemon (poll-only)")
-  .option("--root <path>", "AOF root directory", AOF_ROOT)
+  .option("--root <path>", "AOF root directory")
   .option("--interval <ms>", "Poll interval in ms", "30000")
   .option("--dry-run", "Dry-run mode (log only, no mutations)", false);
 
-program.action(async (opts: { root: string; interval: string; dryRun: boolean }) => {
+program.action(async (opts: { root?: string; interval: string; dryRun: boolean }) => {
+  const cfg = getConfig();
+  const root = opts.root ?? cfg.core.dataDir;
+  opts.root = root;
+
   const pollIntervalMs = Number(opts.interval);
   if (Number.isNaN(pollIntervalMs) || pollIntervalMs <= 0) {
     console.error("Invalid --interval (must be positive number)");
@@ -22,8 +24,8 @@ program.action(async (opts: { root: string; interval: string; dryRun: boolean })
     return;
   }
 
-  // Socket path from environment or default
-  const socketPath = process.env["AOF_DAEMON_SOCKET"] ?? undefined;
+  // Socket path from config registry
+  const socketPath = cfg.daemon.socketPath;
 
   const { service, healthServer } = await startAofDaemon({
     dataDir: opts.root,
