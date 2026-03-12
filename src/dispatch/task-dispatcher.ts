@@ -14,6 +14,7 @@ import type { Task, TaskStatus } from "../schemas/task.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import type { EventLogger } from "../events/logger.js";
 import type { GatewayAdapter } from "./executor.js";
+import type { TaskLockManager } from "../protocol/task-lock.js";
 import { isLeaseActive } from "./lease-manager.js";
 import { checkThrottle, updateThrottleState } from "./throttle.js";
 import { loadOrgChart } from "../org/loader.js";
@@ -31,6 +32,8 @@ export interface DispatchConfig {
   maxConcurrentDispatches?: number;
   minDispatchIntervalMs?: number;
   maxDispatchesPerPoll?: number;
+  /** Task lock manager for serializing per-task operations. Shared with ProtocolRouter. */
+  lockManager?: TaskLockManager;
 }
 
 export interface SchedulerAction {

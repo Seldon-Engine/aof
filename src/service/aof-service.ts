@@ -7,6 +7,7 @@ import type { AOFMetrics } from "../metrics/exporter.js";
 import type { NotificationService } from "../events/notifier.js";
 import type { NotificationPolicyEngine } from "../events/notification-policy/index.js";
 import { parseProtocolMessage, ProtocolRouter } from "../protocol/router.js";
+import { InMemoryTaskLockManager } from "../protocol/task-lock.js";
 import { discoverProjects, type ProjectRecord } from "../projects/index.js";
 import { createMurmurHook } from "../dispatch/murmur-hooks.js";
 
@@ -101,11 +102,15 @@ export class AOFService {
     this.pollIntervalMs = config.pollIntervalMs ?? 30_000;
     this.pollTimeoutMs = config.pollTimeoutMs ?? 30_000;
 
+    // BUG-04: Shared lock manager for serializing per-task operations between
+    // protocol router (message handling) and scheduler (dispatch/lease expiry).
+    const lockManager = new InMemoryTaskLockManager();
+
     // Build project store resolver for protocol router
     const projectStoreResolver = this.vaultRoot
       ? (projectId: string) => this.projectStores.get(projectId)
       : undefined;
-    
+
     this.protocolRouter = deps.protocolRouter ?? new ProtocolRouter({
       store: storeWithHooks,
       logger: this.logger,
@@ -114,8 +119,9 @@ export class AOFService {
       cascadeBlocks: config.cascadeBlocks,
       executor: deps.executor,
       spawnTimeoutMs: config.spawnTimeoutMs,
+      lockManager,
     });
-    
+
     this.schedulerConfig = {
       dataDir: config.dataDir,
       dryRun: config.dryRun ?? false,
@@ -125,6 +131,7 @@ export class AOFService {
       cascadeBlocks: config.cascadeBlocks,
       pollTimeoutMs: config.pollTimeoutMs,
       taskActionTimeoutMs: config.taskActionTimeoutMs,
+      lockManager,
     };
   }
 

@@ -64,88 +64,98 @@ export async function executeActions(
         let executed = false;  // BUG-002 fix: only "assign" actions count as executed
         let failed = false;
         switch (action.type) {
-          case "expire_lease":
+          case "expire_lease": {
             // BUG-AUDIT-001/002: Handle lease expiry for both in-progress and blocked tasks
-            const expiringTask = await store.get(action.taskId);
-            if (expiringTask) {
-              // Clear the lease first
-              expiringTask.frontmatter.lease = undefined;
-              const serialized = serializeTask(expiringTask);
-              const taskPath = expiringTask.path ?? join(store.tasksDir, expiringTask.frontmatter.status, `${expiringTask.frontmatter.id}.md`);
-              await writeFileAtomic(taskPath, serialized);
+            // BUG-04: Wrap in lockManager to serialize with concurrent protocol messages
+            const expireBody = async () => {
+              const expiringTask = await store.get(action.taskId);
+              if (expiringTask) {
+                // Clear the lease first
+                expiringTask.frontmatter.lease = undefined;
+                const serialized = serializeTask(expiringTask);
+                const taskPath = expiringTask.path ?? join(store.tasksDir, expiringTask.frontmatter.status, `${expiringTask.frontmatter.id}.md`);
+                await writeFileAtomic(taskPath, serialized);
 
-              // BUG-AUDIT-002: For blocked tasks, check spawn failure + dependencies before requeueing
-              if (expiringTask.frontmatter.status === "blocked") {
-                const blockReason = expiringTask.frontmatter.metadata?.blockReason as string | undefined;
-                const isSpawnFailed = blockReason?.includes("spawn_failed") ?? false;
+                // BUG-AUDIT-002: For blocked tasks, check spawn failure + dependencies before requeueing
+                if (expiringTask.frontmatter.status === "blocked") {
+                  const blockReason = expiringTask.frontmatter.metadata?.blockReason as string | undefined;
+                  const isSpawnFailed = blockReason?.includes("spawn_failed") ?? false;
 
-                if (isSpawnFailed) {
-                  // Spawn-failed task: use shared guard to prevent infinite retry loop
-                  const maxRetries = config.maxDispatchRetries ?? DEFAULT_MAX_DISPATCH_RETRIES;
-                  const guard = shouldAllowSpawnFailedRequeue(expiringTask, maxRetries);
+                  if (isSpawnFailed) {
+                    // Spawn-failed task: use shared guard to prevent infinite retry loop
+                    const maxRetries = config.maxDispatchRetries ?? DEFAULT_MAX_DISPATCH_RETRIES;
+                    const guard = shouldAllowSpawnFailedRequeue(expiringTask, maxRetries);
 
-                  if (guard.shouldDeadletter) {
-                    const lastError = (expiringTask.frontmatter.metadata?.lastError as string) ?? blockReason ?? "unknown";
-                    await transitionToDeadletter(store, logger, action.taskId, lastError);
-                    try {
-                      await logger.logTransition(action.taskId, "blocked", "deadletter", "scheduler",
-                        `Lease expired on spawn-failed task — ${guard.reason}`);
-                    } catch {
-                      // Logging errors should not crash the scheduler
-                    }
-                  } else if (guard.allow) {
-                    await store.transition(action.taskId, "ready", {
-                      reason: "lease_expired_spawn_retry"
-                    });
-                    try {
-                      await logger.logTransition(action.taskId, "blocked", "ready", "scheduler",
-                        `Lease expired — ${guard.reason}`);
-                    } catch {
-                      // Logging errors should not crash the scheduler
+                    if (guard.shouldDeadletter) {
+                      const lastError = (expiringTask.frontmatter.metadata?.lastError as string) ?? blockReason ?? "unknown";
+                      await transitionToDeadletter(store, logger, action.taskId, lastError);
+                      try {
+                        await logger.logTransition(action.taskId, "blocked", "deadletter", "scheduler",
+                          `Lease expired on spawn-failed task — ${guard.reason}`);
+                      } catch {
+                        // Logging errors should not crash the scheduler
+                      }
+                    } else if (guard.allow) {
+                      await store.transition(action.taskId, "ready", {
+                        reason: "lease_expired_spawn_retry"
+                      });
+                      try {
+                        await logger.logTransition(action.taskId, "blocked", "ready", "scheduler",
+                          `Lease expired — ${guard.reason}`);
+                      } catch {
+                        // Logging errors should not crash the scheduler
+                      }
+                    } else {
+                      // Backoff not elapsed — stay blocked, just clear the lease
+                      console.info(`[AOF] Lease expired on spawn-failed task ${action.taskId} — backoff pending (${guard.reason})`);
                     }
                   } else {
-                    // Backoff not elapsed — stay blocked, just clear the lease
-                    console.info(`[AOF] Lease expired on spawn-failed task ${action.taskId} — backoff pending (${guard.reason})`);
+                    // Non-spawn-failure blocked task: check dependencies
+                    const deps = expiringTask.frontmatter.dependsOn ?? [];
+                    const allDepsResolved = deps.length === 0 || deps.every(depId => {
+                      const dep = allTasks.find(t => t.frontmatter.id === depId);
+                      return dep?.frontmatter.status === "done";
+                    });
+
+                    if (allDepsResolved) {
+                      await store.transition(action.taskId, "ready", {
+                        reason: "lease_expired_requeue"
+                      });
+                      try {
+                        await logger.logTransition(action.taskId, "blocked", "ready", "scheduler",
+                          `Lease expired and dependencies satisfied - requeued`);
+                      } catch {
+                        // Logging errors should not crash the scheduler
+                      }
+                    } else {
+                      console.warn(`[AOF] Lease expired on blocked task ${action.taskId} but dependencies not satisfied - staying blocked`);
+                    }
                   }
                 } else {
-                  // Non-spawn-failure blocked task: check dependencies
-                  const deps = expiringTask.frontmatter.dependsOn ?? [];
-                  const allDepsResolved = deps.length === 0 || deps.every(depId => {
-                    const dep = allTasks.find(t => t.frontmatter.id === depId);
-                    return dep?.frontmatter.status === "done";
-                  });
+                  // In-progress task - transition back to ready
+                  await store.transition(action.taskId, "ready", { reason: "lease_expired" });
 
-                  if (allDepsResolved) {
-                    await store.transition(action.taskId, "ready", {
-                      reason: "lease_expired_requeue"
-                    });
-                    try {
-                      await logger.logTransition(action.taskId, "blocked", "ready", "scheduler",
-                        `Lease expired and dependencies satisfied - requeued`);
-                    } catch {
-                      // Logging errors should not crash the scheduler
-                    }
-                  } else {
-                    console.warn(`[AOF] Lease expired on blocked task ${action.taskId} but dependencies not satisfied - staying blocked`);
+                  try {
+                    await logger.logTransition(action.taskId, "in-progress", "ready", "scheduler",
+                      `Lease expired - task requeued`);
+                  } catch {
+                    // Logging errors should not crash the scheduler
                   }
                 }
-              } else {
-                // In-progress task - transition back to ready
-                await store.transition(action.taskId, "ready", { reason: "lease_expired" });
-
-                try {
-                  await logger.logTransition(action.taskId, "in-progress", "ready", "scheduler",
-                    `Lease expired - task requeued`);
-                } catch {
-                  // Logging errors should not crash the scheduler
-                }
+                leasesExpired++;
+                tasksRequeued++;  // BUG-AUDIT-004: Count both requeue paths
               }
-              leasesExpired++;
-              tasksRequeued++;  // BUG-AUDIT-004: Count both requeue paths
+            };
+
+            if (config.lockManager) {
+              await config.lockManager.withLock(action.taskId, expireBody);
+            } else {
+              await expireBody();
             }
             // BUG-002 fix: Don't count non-dispatch actions in actionsExecuted
             // executed remains false
             break;
+          }
             
           case "stale_heartbeat":
             // TASK-2026-02-10-061: Consult run_result.json for deterministic recovery

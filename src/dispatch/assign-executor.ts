@@ -66,13 +66,17 @@ export async function executeAssignAction(
   allTasks: Task[],
   effectiveConcurrencyLimitRef: { value: number | null }
 ): Promise<{ executed: boolean; failed: boolean }> {
-  let executed = false;
-  let failed = false;
-
   if (!config.executor) {
     console.error(`[AOF] Cannot dispatch task ${action.taskId}: no executor configured (agent: ${action.agent})`);
-    return { executed, failed };
+    return { executed: false, failed: false };
   }
+
+  // Capture executor before closure to preserve type narrowing
+  const executor = config.executor;
+
+  const executeBody = async (): Promise<{ executed: boolean; failed: boolean }> => {
+  let executed = false;
+  let failed = false;
 
   // Generate correlation ID for end-to-end dispatch tracing (before try so catch can use it)
   const correlationId = randomUUID();
@@ -147,7 +151,7 @@ export async function executeAssignAction(
     };
 
     // Spawn agent session with correlation ID and fallback completion callback
-    const result = await config.executor.spawnSession(context, {
+    const result = await executor.spawnSession(context, {
       timeoutMs: config.spawnTimeoutMs ?? 30_000,
       correlationId,
       onRunComplete: async (outcome) => {
@@ -192,7 +196,7 @@ export async function executeAssignAction(
             taskId: action.taskId,
             store,
             subscriptionStore,
-            executor: config.executor!,
+            executor,
             logger,
           };
           try {
@@ -504,6 +508,12 @@ export async function executeAssignAction(
   }
 
   return { executed, failed };
+  }; // end executeBody
+
+  if (config.lockManager) {
+    return config.lockManager.withLock(action.taskId, executeBody);
+  }
+  return executeBody();
 }
 
 /**
