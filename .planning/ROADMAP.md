@@ -256,7 +256,7 @@ Phases execute in numeric order: 34 -> 35 -> 36 -> 37 -> 38 -> 39 -> 40
 | 31. Granularity, Safety, Hardening | v1.8 | 2/2 | Complete | 2026-03-11 |
 | 32. Agent Guidance | v1.8 | 1/1 | Complete | 2026-03-11 |
 | 33. Callback Wiring Fixes | v1.8 | 1/1 | Complete | 2026-03-12 |
-| 34. Dead Code Removal | 2/2 | Complete   | 2026-03-12 | - |
+| 34. Dead Code Removal | 2/2 | Complete    | 2026-03-12 | - |
 | 35. Bug Fixes | v1.10 | 0/? | Not started | - |
 | 36. Config Registry | v1.10 | 0/? | Not started | - |
 | 37. Structured Logging | v1.10 | 0/? | Not started | - |
