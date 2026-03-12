@@ -448,6 +448,8 @@ export class AOFService {
         blocked: 0,
         review: 0,
         done: 0,
+        cancelled: 0,
+        deadletter: 0,
       },
     };
     
@@ -460,6 +462,8 @@ export class AOFService {
       aggregated.stats.blocked += result.stats.blocked;
       aggregated.stats.review += result.stats.review;
       aggregated.stats.done += result.stats.done;
+      aggregated.stats.cancelled += result.stats.cancelled;
+      aggregated.stats.deadletter += result.stats.deadletter;
     }
     
     return aggregated;

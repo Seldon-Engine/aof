@@ -19,6 +19,8 @@ export function buildTaskStats(allTasks: Task[]) {
     blocked: 0,
     review: 0,
     done: 0,
+    cancelled: 0,
+    deadletter: 0,
   };
 
   for (const task of allTasks) {
@@ -29,6 +31,8 @@ export function buildTaskStats(allTasks: Task[]) {
     else if (s === "blocked") stats.blocked++;
     else if (s === "review") stats.review++;
     else if (s === "done") stats.done++;
+    else if (s === "cancelled") stats.cancelled++;
+    else if (s === "deadletter") stats.deadletter++;
   }
 
   return stats;

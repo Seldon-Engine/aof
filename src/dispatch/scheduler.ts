@@ -28,6 +28,7 @@ import { checkHopTimeouts } from "./escalation.js";
 import { buildDispatchActions } from "./task-dispatcher.js";
 import { checkPromotionEligibility } from "./promotion.js";
 import { executeActions } from "./action-executor.js";
+import type { TaskLockManager } from "../protocol/task-lock.js";
 import { buildTaskStats, buildChildrenMap, checkExpiredLeases, buildResourceOccupancyMap, checkBacklogPromotion, checkBlockedTaskRecovery } from "./scheduler-helpers.js";
 import { dispatchDAGHop } from "./dag-transition-handler.js";
 import { retryPendingDeliveries } from "./callback-delivery.js";
@@ -65,6 +66,8 @@ export interface SchedulerConfig {
   pollTimeoutMs?: number;
   /** Maximum time for a single task action in ms (default: 10_000). */
   taskActionTimeoutMs?: number;
+  /** Task lock manager for serializing per-task operations. Shared with ProtocolRouter. */
+  lockManager?: TaskLockManager;
 }
 
 export interface SchedulerAction {
@@ -95,6 +98,8 @@ export interface PollResult {
     blocked: number;
     review: number;
     done: number;
+    cancelled: number;
+    deadletter: number;
   };
 }
 
@@ -382,6 +387,8 @@ export async function poll(
     stats.blocked = 0;
     stats.review = 0;
     stats.done = 0;
+    stats.cancelled = 0;
+    stats.deadletter = 0;
 
     for (const task of updatedTasks) {
       const s = task.frontmatter.status;
@@ -391,6 +398,8 @@ export async function poll(
       else if (s === "blocked") stats.blocked++;
       else if (s === "review") stats.review++;
       else if (s === "done") stats.done++;
+      else if (s === "cancelled") stats.cancelled++;
+      else if (s === "deadletter") stats.deadletter++;
     }
   }
 
@@ -465,7 +474,7 @@ export async function poll(
   // BUG-003: Task progression telemetry and alerting
   if (!config.dryRun && stats.total > 0) {
     // Alert when all non-done tasks are blocked
-    const activeTasks = stats.total - stats.done;
+    const activeTasks = stats.total - stats.done - stats.cancelled - stats.deadletter;
     if (activeTasks > 0 && stats.blocked === activeTasks) {
       console.error(`[AOF] ALERT: All active tasks are blocked (${stats.blocked} tasks)`);
       console.error(`[AOF] ALERT: No tasks can progress - manual intervention required`);
