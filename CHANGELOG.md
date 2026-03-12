@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.9.1](https://github.com/d0labs/aof/compare/v1.9.0...v1.9.1) (2026-03-12)
+
+### Features
+
+* **34-02:** remove 15 unused MCP output schemas from mcp/tools.ts ([3dc90cf](https://github.com/d0labs/aof/commit/3dc90cf4e4a483565e056b3353ba4360a17d2ef1))
+* **34-02:** remove deprecated aliases, commented-out code, and stale references ([b1ae340](https://github.com/d0labs/aof/commit/b1ae3406838b65c2e5ed81df2c4b34fa21ad357f))
+
+### Bug Fixes
+
+* **34:** revise plan based on checker feedback ([8fc6a04](https://github.com/d0labs/aof/commit/8fc6a0420debad9eb9f82bf279b5820e5ecf77e8))
+* unify path defaults to ~/.aof and add reconciliation migration ([db47041](https://github.com/d0labs/aof/commit/db47041f32e2b8957f5c94b15bd9f787d1d8ee65))
+
+### Refactor
+
+* **34-01:** delete gate source files and clean import cascades ([97cdc5e](https://github.com/d0labs/aof/commit/97cdc5e5f2f80e63738e52bf888ad7f73301beee))
+* **34-01:** inline gate schemas into task.ts and project.ts ([69a2b2d](https://github.com/d0labs/aof/commit/69a2b2d23e213afdf8f92c506066e676539372b7))
+
 ## [1.9.0](https://github.com/d0labs/aof/compare/v1.8.0...v1.9.0) (2026-03-12)
 
 ### Bug Fixes
