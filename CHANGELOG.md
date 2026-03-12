@@ -1,5 +1,38 @@
 # Changelog
 
+## [1.8.0](https://github.com/d0labs/aof/compare/v1.7.0...v1.8.0) (2026-03-12)
+
+### Features
+
+* **28-01:** implement SubscriptionStore with CRUD and atomic persistence ([bd0d4e9](https://github.com/d0labs/aof/commit/bd0d4e9a5288117b010855578648b67241f7dfce))
+* **29-01:** extend aof_dispatch with subscribe-at-dispatch param ([c667194](https://github.com/d0labs/aof/commit/c667194d9d73bd76f1489df4db95d3a462ca1dcc))
+* **29-01:** wire SubscriptionStore into MCP context and add subscribe/unsubscribe tools ([40a982e](https://github.com/d0labs/aof/commit/40a982e4f7c5becb69bb2dd421d94b76b604856f))
+* **30-01:** extend subscription schema and store with delivery tracking ([26edcff](https://github.com/d0labs/aof/commit/26edcff23fabdbfe910e558073b21764ab0ae444))
+* **30-01:** implement callback delivery with retry and prompt builder ([a7ac0d6](https://github.com/d0labs/aof/commit/a7ac0d684f043de2cc3d25f1c73a04c307c408e3))
+* **30-02:** add org chart validation to subscribe operations ([a6cd2fa](https://github.com/d0labs/aof/commit/a6cd2fa8ca8d9f060132c65fe07b0ca9a64a5679))
+* **30-02:** wire delivery triggers into onRunComplete and scheduler poll ([88d5289](https://github.com/d0labs/aof/commit/88d52890b8046fee3b93c438969fa3ffb7a30b3e))
+* **30-03:** wire captureTrace into callback delivery onRunComplete ([a1b307f](https://github.com/d0labs/aof/commit/a1b307f4968ef88c9f9f27483fa7bda8bc9fa103))
+* **31-01:** implement all-granularity callback delivery with batched transitions ([2d99c61](https://github.com/d0labs/aof/commit/2d99c614b3a2773cb33cde44a3a389ee58118e46))
+* **31-02:** implement callback depth limiting and restart recovery ([9aa20d0](https://github.com/d0labs/aof/commit/9aa20d01ec75289e59b3070a22de5d031da51908))
+* **32-01:** document subscription tools and callback behavior in agent guidance ([1430904](https://github.com/d0labs/aof/commit/1430904468a0fce227361eec51b3132af627843c))
+* **33-01:** propagate callbackDepth through MCP session boundary ([6b9d0f4](https://github.com/d0labs/aof/commit/6b9d0f413bc68e5bf568ac40abae75c2f42ef7f1))
+* **33-01:** wire deliverAllGranularityCallbacks into assign-executor onRunComplete ([b5bf9f3](https://github.com/d0labs/aof/commit/b5bf9f340194988b51aac384523e579af4b28815))
+
+### Bug Fixes
+
+* **28-01:** resolve TypeScript errors in SubscriptionStore.cancel() ([b3b7827](https://github.com/d0labs/aof/commit/b3b78278605a4220cd006c7e10ab3b5c75097681))
+* **30-01:** resolve TypeScript errors in callback-delivery and integration tests ([083dd59](https://github.com/d0labs/aof/commit/083dd59a615c0f561553211b5286e6f750497416))
+* **30-01:** resolve TypeScript errors in callback-delivery and subscription-store ([95cf449](https://github.com/d0labs/aof/commit/95cf44991192073daa8404dad3d24b66eab46632))
+
+### Tests
+
+* **28-01:** add subscription schema with validation tests ([eca7506](https://github.com/d0labs/aof/commit/eca7506678baf296ea9731d774ec26538712edbb))
+* **29-01:** add failing tests for dispatch subscribe-at-dispatch ([d0539f6](https://github.com/d0labs/aof/commit/d0539f65958c04f32de4827e4f1df299c58dd033))
+* **29-01:** add failing tests for subscribe/unsubscribe tools ([771ea52](https://github.com/d0labs/aof/commit/771ea52b300a36f6ddb54627991ac25c34e28f13))
+* **30-03:** add failing tests for captureTrace in callback delivery ([034b237](https://github.com/d0labs/aof/commit/034b2376b6d160a32d72cd6e06e6bf2421150782))
+* **31-01:** add failing tests for all-granularity callback delivery ([22c14d0](https://github.com/d0labs/aof/commit/22c14d0e995249f4535e105712cb2dde83a8a351))
+* **31-02:** add failing tests for callback depth limiting and restart recovery ([2f63ac6](https://github.com/d0labs/aof/commit/2f63ac6b1a26c2d7a4ef19a9b5d419951a3b261a))
+
 ## [1.7.0](https://github.com/d0labs/aof/compare/v1.6.2...v1.7.0) (2026-03-09)
 
 ### Features
