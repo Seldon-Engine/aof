@@ -9,6 +9,7 @@
 - ✅ **v1.4 Context Optimization** — Phases 21-24 (shipped 2026-03-04)
 - ✅ **v1.5 Event Tracing** — Phases 25-27 (shipped 2026-03-08)
 - ✅ **v1.8 Task Notifications** — Phases 28-33 (shipped 2026-03-12)
+- 🚧 **v1.10 Codebase Cleanups** — Phases 34-40 (in progress)
 
 ## Phases
 
@@ -101,7 +102,103 @@ See: `.planning/milestones/v1.8-ROADMAP.md` for full details
 
 </details>
 
+### 🚧 v1.10 Codebase Cleanups (In Progress)
+
+**Milestone Goal:** Eliminate accumulated entropy from 8 milestones of agent-built code — dead code removal, bug fixes, architectural refactoring, centralized config, structured logging, and test infrastructure improvements.
+
+- [ ] **Phase 34: Dead Code Removal** - Remove ~2,900 lines of legacy gate system code, unused exports, deprecated aliases, and commented-out code
+- [ ] **Phase 35: Bug Fixes** - Fix buildTaskStats counts, daemon startTime initialization, UpdatePatch.blockers, and TOCTOU race mitigation
+- [ ] **Phase 36: Config Registry** - Centralize all process.env reads into a Zod-validated, typed config singleton
+- [ ] **Phase 37: Structured Logging** - Replace core module console.* calls with leveled JSON logger, remediate silent catch blocks
+- [ ] **Phase 38: Code Refactoring** - Extract helpers from god functions, unify tool registration, deduplicate patterns
+- [ ] **Phase 39: Architecture Fixes** - Break circular dependencies, fix store abstraction bypass, fix layering violations
+- [ ] **Phase 40: Test Infrastructure** - Shared test harness, typed mock factories, coverage config expansion, temp dir cleanup
+
+## Phase Details
+
+### Phase 34: Dead Code Removal
+**Goal**: Codebase reduced by ~2,900 lines with clean TypeScript compilation and no legacy gate symbols remaining
+**Depends on**: Nothing (first phase of v1.10)
+**Requirements**: DEAD-01, DEAD-02, DEAD-03, DEAD-04, DEAD-05, DEAD-06, DEAD-07, DEAD-08, DEAD-09
+**Success Criteria** (what must be TRUE):
+  1. `tsc --noEmit` passes with zero errors after all gate system source files, test files, and barrel re-exports are deleted
+  2. `grep -r` for gate-evaluator, gate-conditional, gate-context-builder, GateSchema, WorkflowGateSchema across src/ and tests/ returns zero hits (excluding migration stubs)
+  3. No unused imports remain in scheduler.ts, no deprecated type aliases exist in executor.ts or dispatch/index.ts, no commented-out code blocks remain in event.ts or promotion.ts
+  4. All existing tests pass (vitest full suite green) — no regressions from removals
+**Plans**: TBD
+
+### Phase 35: Bug Fixes
+**Goal**: Known correctness bugs fixed — task statistics accurate, daemon timing correct, type definitions clean, race conditions mitigated
+**Depends on**: Phase 34
+**Requirements**: BUG-01, BUG-02, BUG-03, BUG-04
+**Success Criteria** (what must be TRUE):
+  1. `buildTaskStats()` includes cancelled and deadletter statuses in its counts — a project with deadlettered tasks no longer triggers false "all tasks blocked" alerts
+  2. Daemon startTime reflects actual daemon start (inside `startAofDaemon()`) not module import time — `/status` endpoint reports correct uptime after restart
+  3. `UpdatePatch.blockers` is correctly positioned in the type definition (or removed if unused) — no type errors when using task update operations
+  4. Scheduler-initiated state transitions (transitionTask, acquireLease) go through the task lock manager — concurrent operations on the same task are serialized
+**Plans**: TBD
+
+### Phase 36: Config Registry
+**Goal**: All AOF configuration resolved through a single typed registry — no scattered process.env reads outside src/config/
+**Depends on**: Phase 35
+**Requirements**: CFG-01, CFG-02, CFG-03, CFG-04
+**Success Criteria** (what must be TRUE):
+  1. `getConfig()` returns a frozen, Zod-validated object with typed access to all AOF_* env vars — invalid config at startup produces a clear error listing all issues
+  2. `resetConfig()` provides complete test isolation — tests can override config values without affecting other tests
+  3. `grep -r "process.env" src/` returns zero hits outside src/config/ (except the documented AOF_CALLBACK_DEPTH cross-process mutation in callback-delivery.ts)
+  4. The config module imports nothing from dispatch/, service/, store/, or any module above it in the dependency hierarchy
+**Plans**: TBD
+
+### Phase 37: Structured Logging
+**Goal**: Core modules emit leveled, structured JSON logs to stderr — silent catch blocks remediated, CLI output unchanged
+**Depends on**: Phase 36
+**Requirements**: LOG-01, LOG-02, LOG-03, LOG-04, LOG-05, LOG-06, LOG-07
+**Success Criteria** (what must be TRUE):
+  1. Running the daemon with `AOF_LOG_LEVEL=debug` produces JSON log lines on stderr with level, timestamp, component, and message fields — setting level to `error` suppresses info/warn/debug output
+  2. Each core module (dispatch, scheduler, protocol, daemon, service) uses a child logger with its component name — log output is filterable by component
+  3. The 36 previously-silent catch blocks in dispatch/ now emit at least a warn-level log line with the error — no errors are silently swallowed in core modules
+  4. CLI commands (`aof status`, `aof trace`, etc.) still produce human-readable console output — CLI is not affected by the structured logger
+  5. EventLogger (audit JSONL) continues to write to its own files unchanged — operational logging and audit events remain separate systems
+**Plans**: TBD
+
+### Phase 38: Code Refactoring
+**Goal**: God functions decomposed into testable helpers, tool registration unified, duplicated patterns consolidated
+**Depends on**: Phase 37
+**Requirements**: REF-01, REF-02, REF-03, REF-04, REF-05, REF-06, REF-07, REF-08
+**Success Criteria** (what must be TRUE):
+  1. `executeAssignAction()` and `executeActions()` are decomposed — each contains no more than ~50 lines of orchestration logic, with business logic in named helper functions that can be tested independently
+  2. Tool registration for OpenClaw adapter and MCP server shares handler functions through a common layer — adding a new tool requires implementing the handler once, not twice
+  3. Callback delivery and trace capture code each exist in exactly one place (single helper function) — no copy-paste duplication in assign-executor.ts
+  4. MCP tools.ts inline schemas are moved to a shared location — the god file is split into focused modules
+**Plans**: TBD
+
+### Phase 39: Architecture Fixes
+**Goal**: Module dependency graph is clean — no circular imports, no store abstraction bypass, no layering violations
+**Depends on**: Phase 37 (can run after or alongside Phase 38)
+**Requirements**: ARCH-01, ARCH-02, ARCH-03, ARCH-04, ARCH-05, ARCH-06
+**Success Criteria** (what must be TRUE):
+  1. `madge --circular src/` reports zero circular dependencies — the dispatch/protocol cycle is broken via extracted shared utility
+  2. Zero direct `serializeTask()` + `writeFileAtomic()` call sites exist outside the store module — all 14 bypass sites route through ITaskStore methods
+  3. Config module does not import from org/ — the lintOrgChart dependency is inverted or relocated
+  4. MCP server does not import from CLI — `createProjectStore()` lives in projects/ or store/, and `loadProjectManifest()` has a single implementation
+  5. memory/index.ts barrel exports are separated from `registerMemoryModule()` initialization logic
+**Plans**: TBD
+
+### Phase 40: Test Infrastructure
+**Goal**: Test utilities standardized — shared harness eliminates setup duplication, typed mocks replace as-any casts, coverage tracks all modules
+**Depends on**: Phase 38, Phase 39
+**Requirements**: TEST-01, TEST-02, TEST-03, TEST-04, TEST-05
+**Success Criteria** (what must be TRUE):
+  1. `createTestHarness()` / `withTestProject()` utility exists and is adopted by at least 10 test files — setup/teardown boilerplate reduced
+  2. `createMockStore()` and `createMockLogger()` factories return properly typed mocks — test files using them have zero `as any` casts for store/logger construction
+  3. Vitest coverage config tracks all src/ modules (not just the current 6 files) — `vitest run --coverage` produces a report covering the full source tree
+  4. The 8 test files with missing temp dir cleanup have proper `afterEach` blocks that remove temporary directories
+**Plans**: TBD
+
 ## Progress
+
+**Execution Order:**
+Phases execute in numeric order: 34 -> 35 -> 36 -> 37 -> 38 -> 39 -> 40
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -138,3 +235,10 @@ See: `.planning/milestones/v1.8-ROADMAP.md` for full details
 | 31. Granularity, Safety, Hardening | v1.8 | 2/2 | Complete | 2026-03-11 |
 | 32. Agent Guidance | v1.8 | 1/1 | Complete | 2026-03-11 |
 | 33. Callback Wiring Fixes | v1.8 | 1/1 | Complete | 2026-03-12 |
+| 34. Dead Code Removal | v1.10 | 0/? | Not started | - |
+| 35. Bug Fixes | v1.10 | 0/? | Not started | - |
+| 36. Config Registry | v1.10 | 0/? | Not started | - |
+| 37. Structured Logging | v1.10 | 0/? | Not started | - |
+| 38. Code Refactoring | v1.10 | 0/? | Not started | - |
+| 39. Architecture Fixes | v1.10 | 0/? | Not started | - |
+| 40. Test Infrastructure | v1.10 | 0/? | Not started | - |

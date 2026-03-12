@@ -2,12 +2,12 @@
 gsd_state_version: 1.0
 milestone: v1.10
 milestone_name: Codebase Cleanups
-status: defining_requirements
+status: ready_to_plan
 stopped_at: null
-last_updated: "2026-03-12T16:00:00.000Z"
-last_activity: 2026-03-12 — Milestone v1.10 started
+last_updated: "2026-03-12T17:00:00.000Z"
+last_activity: 2026-03-12 — Roadmap created for v1.10 (7 phases, 43 requirements)
 progress:
-  total_phases: 0
+  total_phases: 7
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -21,14 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-12)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** Defining requirements for v1.10 Codebase Cleanups
+**Current focus:** Phase 34 - Dead Code Removal (v1.10 Codebase Cleanups)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 34 of 40 (Dead Code Removal) — first of 7 phases in v1.10
 Plan: —
-Status: Defining requirements
-Last activity: 2026-03-12 — Milestone v1.10 started
+Status: Ready to plan
+Last activity: 2026-03-12 — Roadmap created for v1.10
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -49,6 +51,7 @@ All decisions logged in PROJECT.md Key Decisions table.
 - v1.4: Phases 21-24 (Tool API, Compressed Skill, Tiered Delivery, Budget Gate)
 - v1.5: Phases 25-27 (Completion Enforcement, Trace Infrastructure, Trace CLI)
 - v1.8: Phases 28-33 (Schema+Storage, Subscription API, Callback Delivery, Safety+Hardening, Agent Guidance, Callback Wiring Fixes)
+- v1.10: Phases 34-40 (Dead Code, Bug Fixes, Config Registry, Structured Logging, Code Refactoring, Architecture Fixes, Test Infrastructure)
 
 ### Pending Todos
 
@@ -56,10 +59,11 @@ None.
 
 ### Blockers/Concerns
 
-None.
+- Phase 39 (Architecture Fixes): Circular dependency graph requires `madge` analysis before planning — research flag from SUMMARY.md.
+- REF-06 (gate-to-DAG migration dedup) may be fully resolved by DEAD-04 (lazy migration removal) — verify during Phase 38 planning.
 
 ## Session Continuity
 
-Last session: 2026-03-12T16:00:00Z
-Stopped at: Defining requirements
+Last session: 2026-03-12T17:00:00Z
+Stopped at: Roadmap created, ready to plan Phase 34
 Resume file: None

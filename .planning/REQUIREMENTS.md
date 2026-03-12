@@ -102,55 +102,55 @@ Requirements for codebase cleanup milestone. Each maps to roadmap phases.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DEAD-01 | — | Pending |
-| DEAD-02 | — | Pending |
-| DEAD-03 | — | Pending |
-| DEAD-04 | — | Pending |
-| DEAD-05 | — | Pending |
-| DEAD-06 | — | Pending |
-| DEAD-07 | — | Pending |
-| DEAD-08 | — | Pending |
-| DEAD-09 | — | Pending |
-| BUG-01 | — | Pending |
-| BUG-02 | — | Pending |
-| BUG-03 | — | Pending |
-| BUG-04 | — | Pending |
-| CFG-01 | — | Pending |
-| CFG-02 | — | Pending |
-| CFG-03 | — | Pending |
-| CFG-04 | — | Pending |
-| LOG-01 | — | Pending |
-| LOG-02 | — | Pending |
-| LOG-03 | — | Pending |
-| LOG-04 | — | Pending |
-| LOG-05 | — | Pending |
-| LOG-06 | — | Pending |
-| LOG-07 | — | Pending |
-| REF-01 | — | Pending |
-| REF-02 | — | Pending |
-| REF-03 | — | Pending |
-| REF-04 | — | Pending |
-| REF-05 | — | Pending |
-| REF-06 | — | Pending |
-| REF-07 | — | Pending |
-| REF-08 | — | Pending |
-| ARCH-01 | — | Pending |
-| ARCH-02 | — | Pending |
-| ARCH-03 | — | Pending |
-| ARCH-04 | — | Pending |
-| ARCH-05 | — | Pending |
-| ARCH-06 | — | Pending |
-| TEST-01 | — | Pending |
-| TEST-02 | — | Pending |
-| TEST-03 | — | Pending |
-| TEST-04 | — | Pending |
-| TEST-05 | — | Pending |
+| DEAD-01 | Phase 34 | Pending |
+| DEAD-02 | Phase 34 | Pending |
+| DEAD-03 | Phase 34 | Pending |
+| DEAD-04 | Phase 34 | Pending |
+| DEAD-05 | Phase 34 | Pending |
+| DEAD-06 | Phase 34 | Pending |
+| DEAD-07 | Phase 34 | Pending |
+| DEAD-08 | Phase 34 | Pending |
+| DEAD-09 | Phase 34 | Pending |
+| BUG-01 | Phase 35 | Pending |
+| BUG-02 | Phase 35 | Pending |
+| BUG-03 | Phase 35 | Pending |
+| BUG-04 | Phase 35 | Pending |
+| CFG-01 | Phase 36 | Pending |
+| CFG-02 | Phase 36 | Pending |
+| CFG-03 | Phase 36 | Pending |
+| CFG-04 | Phase 36 | Pending |
+| LOG-01 | Phase 37 | Pending |
+| LOG-02 | Phase 37 | Pending |
+| LOG-03 | Phase 37 | Pending |
+| LOG-04 | Phase 37 | Pending |
+| LOG-05 | Phase 37 | Pending |
+| LOG-06 | Phase 37 | Pending |
+| LOG-07 | Phase 37 | Pending |
+| REF-01 | Phase 38 | Pending |
+| REF-02 | Phase 38 | Pending |
+| REF-03 | Phase 38 | Pending |
+| REF-04 | Phase 38 | Pending |
+| REF-05 | Phase 38 | Pending |
+| REF-06 | Phase 38 | Pending |
+| REF-07 | Phase 38 | Pending |
+| REF-08 | Phase 38 | Pending |
+| ARCH-01 | Phase 39 | Pending |
+| ARCH-02 | Phase 39 | Pending |
+| ARCH-03 | Phase 39 | Pending |
+| ARCH-04 | Phase 39 | Pending |
+| ARCH-05 | Phase 39 | Pending |
+| ARCH-06 | Phase 39 | Pending |
+| TEST-01 | Phase 40 | Pending |
+| TEST-02 | Phase 40 | Pending |
+| TEST-03 | Phase 40 | Pending |
+| TEST-04 | Phase 40 | Pending |
+| TEST-05 | Phase 40 | Pending |
 
 **Coverage:**
 - v1.10 requirements: 43 total
-- Mapped to phases: 0
-- Unmapped: 43 ⚠️
+- Mapped to phases: 43
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-12*
-*Last updated: 2026-03-12 after initial definition*
+*Last updated: 2026-03-12 after roadmap creation*
