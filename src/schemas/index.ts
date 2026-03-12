@@ -92,21 +92,6 @@ export {
 } from "./project.js";
 
 export {
-  GateOutcome,
-  Gate,
-  GateHistoryEntry,
-  ReviewContext,
-  GateTransition,
-  TestSpec,
-} from "./gate.js";
-
-export {
-  RejectionStrategy,
-  WorkflowConfig,
-  validateWorkflow,
-} from "./workflow.js";
-
-export {
   ConditionExpr,
   Hop,
   WorkflowDefinition,

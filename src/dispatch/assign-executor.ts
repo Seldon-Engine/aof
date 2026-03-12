@@ -13,7 +13,6 @@ import { acquireLease, releaseLease } from "../store/lease.js";
 import { isLeaseActive, startLeaseRenewal, stopLeaseRenewal } from "./lease-manager.js";
 import { updateThrottleState } from "./throttle.js";
 import { serializeTask } from "../store/task-store.js";
-import { buildGateContext } from "./gate-context-builder.js";
 import { join, relative } from "node:path";
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
@@ -146,27 +145,6 @@ export async function executeAssignAction(
       projectRoot: store.projectRoot,
       taskRelpath: relative(store.projectRoot, taskPath),
     };
-
-    // AOF-ofi: Inject gate context for workflow tasks (Progressive Disclosure L2)
-    const taskForContext = leasedTask ?? task;
-    if (taskForContext.frontmatter.gate) {
-      const projectId = taskForContext.frontmatter.project;
-      const projectManifest = await loadProjectManifest(store, projectId);
-      
-      if (projectManifest?.workflow) {
-        const currentGate = projectManifest.workflow.gates.find(
-          (g) => g.id === taskForContext.frontmatter.gate?.current
-        );
-        
-        if (currentGate) {
-          context.gateContext = buildGateContext(
-            taskForContext,
-            currentGate,
-            projectManifest.workflow
-          );
-        }
-      }
-    }
 
     // Spawn agent session with correlation ID and fallback completion callback
     const result = await config.executor.spawnSession(context, {

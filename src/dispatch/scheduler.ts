@@ -19,17 +19,12 @@ import { parse as parseYaml } from "yaml";
 import writeFileAtomic from "write-file-atomic";
 import type { GatewayAdapter, TaskContext } from "./executor.js";
 import type { Task, TaskStatus } from "../schemas/task.js";
-import { evaluateGateTransition, type GateEvaluationInput, type GateEvaluationResult } from "./gate-evaluator.js";
-import { validateWorkflow, type WorkflowConfig } from "../schemas/workflow.js";
 import { ProjectManifest } from "../schemas/project.js";
-import type { GateOutcome, GateTransition } from "../schemas/gate.js";
-import { parseDuration } from "./duration-parser.js";
-import { buildGateContext } from "./gate-context-builder.js";
 import { evaluateMurmurTriggers } from "./murmur-integration.js";
 import { loadOrgChart } from "../org/loader.js";
 import { checkThrottle, updateThrottleState, resetThrottleState as resetThrottleStateInternal } from "./throttle.js";
 import { isLeaseActive, startLeaseRenewal, stopLeaseRenewal, cleanupLeaseRenewals } from "./lease-manager.js";
-import { escalateGateTimeout, checkGateTimeouts, checkHopTimeouts } from "./escalation.js";
+import { checkHopTimeouts } from "./escalation.js";
 import { buildDispatchActions } from "./task-dispatcher.js";
 import { checkPromotionEligibility } from "./promotion.js";
 import { executeActions } from "./action-executor.js";
@@ -244,11 +239,7 @@ export async function poll(
     });
   }
 
-  // 3.9. Check for gate timeouts (AOF-69l: gate timeout detection)
-  const timeoutActions = await checkGateTimeouts(store, logger, config, metrics);
-  actions.push(...timeoutActions);
-
-  // 3.10. Check for DAG hop timeouts (Phase 13: hop timeout + escalation)
+  // 3.9. Check for DAG hop timeouts (Phase 13: hop timeout + escalation)
   const hopTimeoutActions = await checkHopTimeouts(store, logger, config, metrics);
   actions.push(...hopTimeoutActions);
 
