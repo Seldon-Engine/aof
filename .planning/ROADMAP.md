@@ -125,7 +125,10 @@ See: `.planning/milestones/v1.8-ROADMAP.md` for full details
   2. `grep -r` for gate-evaluator, gate-conditional, gate-context-builder, GateSchema, WorkflowGateSchema across src/ and tests/ returns zero hits (excluding migration stubs)
   3. No unused imports remain in scheduler.ts, no deprecated type aliases exist in executor.ts or dispatch/index.ts, no commented-out code blocks remain in event.ts or promotion.ts
   4. All existing tests pass (vitest full suite green) — no regressions from removals
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 34-01-PLAN.md — Gate system removal (source, tests, re-exports, migration, imports)
+- [ ] 34-02-PLAN.md — Cleanup unused MCP schemas, deprecated aliases, commented code, notifier
 
 ### Phase 35: Bug Fixes
 **Goal**: Known correctness bugs fixed — task statistics accurate, daemon timing correct, type definitions clean, race conditions mitigated
@@ -136,7 +139,10 @@ See: `.planning/milestones/v1.8-ROADMAP.md` for full details
   2. Daemon startTime reflects actual daemon start (inside `startAofDaemon()`) not module import time — `/status` endpoint reports correct uptime after restart
   3. `UpdatePatch.blockers` is correctly positioned in the type definition (or removed if unused) — no type errors when using task update operations
   4. Scheduler-initiated state transitions (transitionTask, acquireLease) go through the task lock manager — concurrent operations on the same task are serialized
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 34-01-PLAN.md — Gate system removal (source, tests, re-exports, migration, imports)
+- [ ] 34-02-PLAN.md — Cleanup unused MCP schemas, deprecated aliases, commented code, notifier
 
 ### Phase 36: Config Registry
 **Goal**: All AOF configuration resolved through a single typed registry — no scattered process.env reads outside src/config/
@@ -147,7 +153,10 @@ See: `.planning/milestones/v1.8-ROADMAP.md` for full details
   2. `resetConfig()` provides complete test isolation — tests can override config values without affecting other tests
   3. `grep -r "process.env" src/` returns zero hits outside src/config/ (except the documented AOF_CALLBACK_DEPTH cross-process mutation in callback-delivery.ts)
   4. The config module imports nothing from dispatch/, service/, store/, or any module above it in the dependency hierarchy
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 34-01-PLAN.md — Gate system removal (source, tests, re-exports, migration, imports)
+- [ ] 34-02-PLAN.md — Cleanup unused MCP schemas, deprecated aliases, commented code, notifier
 
 ### Phase 37: Structured Logging
 **Goal**: Core modules emit leveled, structured JSON logs to stderr — silent catch blocks remediated, CLI output unchanged
@@ -159,7 +168,10 @@ See: `.planning/milestones/v1.8-ROADMAP.md` for full details
   3. The 36 previously-silent catch blocks in dispatch/ now emit at least a warn-level log line with the error — no errors are silently swallowed in core modules
   4. CLI commands (`aof status`, `aof trace`, etc.) still produce human-readable console output — CLI is not affected by the structured logger
   5. EventLogger (audit JSONL) continues to write to its own files unchanged — operational logging and audit events remain separate systems
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 34-01-PLAN.md — Gate system removal (source, tests, re-exports, migration, imports)
+- [ ] 34-02-PLAN.md — Cleanup unused MCP schemas, deprecated aliases, commented code, notifier
 
 ### Phase 38: Code Refactoring
 **Goal**: God functions decomposed into testable helpers, tool registration unified, duplicated patterns consolidated
@@ -170,7 +182,10 @@ See: `.planning/milestones/v1.8-ROADMAP.md` for full details
   2. Tool registration for OpenClaw adapter and MCP server shares handler functions through a common layer — adding a new tool requires implementing the handler once, not twice
   3. Callback delivery and trace capture code each exist in exactly one place (single helper function) — no copy-paste duplication in assign-executor.ts
   4. MCP tools.ts inline schemas are moved to a shared location — the god file is split into focused modules
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 34-01-PLAN.md — Gate system removal (source, tests, re-exports, migration, imports)
+- [ ] 34-02-PLAN.md — Cleanup unused MCP schemas, deprecated aliases, commented code, notifier
 
 ### Phase 39: Architecture Fixes
 **Goal**: Module dependency graph is clean — no circular imports, no store abstraction bypass, no layering violations
@@ -182,7 +197,10 @@ See: `.planning/milestones/v1.8-ROADMAP.md` for full details
   3. Config module does not import from org/ — the lintOrgChart dependency is inverted or relocated
   4. MCP server does not import from CLI — `createProjectStore()` lives in projects/ or store/, and `loadProjectManifest()` has a single implementation
   5. memory/index.ts barrel exports are separated from `registerMemoryModule()` initialization logic
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 34-01-PLAN.md — Gate system removal (source, tests, re-exports, migration, imports)
+- [ ] 34-02-PLAN.md — Cleanup unused MCP schemas, deprecated aliases, commented code, notifier
 
 ### Phase 40: Test Infrastructure
 **Goal**: Test utilities standardized — shared harness eliminates setup duplication, typed mocks replace as-any casts, coverage tracks all modules
@@ -193,7 +211,10 @@ See: `.planning/milestones/v1.8-ROADMAP.md` for full details
   2. `createMockStore()` and `createMockLogger()` factories return properly typed mocks — test files using them have zero `as any` casts for store/logger construction
   3. Vitest coverage config tracks all src/ modules (not just the current 6 files) — `vitest run --coverage` produces a report covering the full source tree
   4. The 8 test files with missing temp dir cleanup have proper `afterEach` blocks that remove temporary directories
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 34-01-PLAN.md — Gate system removal (source, tests, re-exports, migration, imports)
+- [ ] 34-02-PLAN.md — Cleanup unused MCP schemas, deprecated aliases, commented code, notifier
 
 ## Progress
 
