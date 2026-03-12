@@ -258,7 +258,7 @@ Phases execute in numeric order: 34 -> 35 -> 36 -> 37 -> 38 -> 39 -> 40
 | 33. Callback Wiring Fixes | v1.8 | 1/1 | Complete | 2026-03-12 |
 | 34. Dead Code Removal | 2/2 | Complete    | 2026-03-12 | - |
 | 35. Bug Fixes | 2/2 | Complete    | 2026-03-12 | - |
-| 36. Config Registry | 2/2 | Complete   | 2026-03-12 | - |
+| 36. Config Registry | 2/2 | Complete    | 2026-03-12 | - |
 | 37. Structured Logging | v1.10 | 0/? | Not started | - |
 | 38. Code Refactoring | v1.10 | 0/? | Not started | - |
 | 39. Architecture Fixes | v1.10 | 0/? | Not started | - |
