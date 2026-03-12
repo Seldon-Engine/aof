@@ -14,10 +14,10 @@ Requirements for codebase cleanup milestone. Each maps to roadmap phases.
 - [x] **DEAD-03**: Gate barrel re-exports removed from schemas/index.ts and dispatch/index.ts
 - [x] **DEAD-04**: Lazy gate-to-DAG migration removed from FilesystemTaskStore (get, getByPrefix, list) and migration/gate-to-dag.ts
 - [x] **DEAD-05**: Unused imports cleaned from scheduler.ts (18+ symbols from prior extractions)
-- [ ] **DEAD-06**: 13 unused MCP output schemas removed from mcp/tools.ts (~100 lines)
-- [ ] **DEAD-07**: Deprecated type aliases removed (DispatchResult, Executor, MockExecutor) from executor.ts and dispatch/index.ts
-- [ ] **DEAD-08**: Commented-out code removed (event.ts import, promotion.ts Phase 2 block, stale JSDoc references)
-- [ ] **DEAD-09**: Deprecated notifier param removed from AOFService constructor
+- [x] **DEAD-06**: 13 unused MCP output schemas removed from mcp/tools.ts (~100 lines)
+- [x] **DEAD-07**: Deprecated type aliases removed (DispatchResult, Executor, MockExecutor) from executor.ts and dispatch/index.ts
+- [x] **DEAD-08**: Commented-out code removed (event.ts import, promotion.ts Phase 2 block, stale JSDoc references)
+- [x] **DEAD-09**: Deprecated notifier param removed from AOFService constructor
 
 ### Bug Fixes
 
@@ -107,10 +107,10 @@ Requirements for codebase cleanup milestone. Each maps to roadmap phases.
 | DEAD-03 | Phase 34 | Complete |
 | DEAD-04 | Phase 34 | Complete |
 | DEAD-05 | Phase 34 | Complete |
-| DEAD-06 | Phase 34 | Pending |
-| DEAD-07 | Phase 34 | Pending |
-| DEAD-08 | Phase 34 | Pending |
-| DEAD-09 | Phase 34 | Pending |
+| DEAD-06 | Phase 34 | Complete |
+| DEAD-07 | Phase 34 | Complete |
+| DEAD-08 | Phase 34 | Complete |
+| DEAD-09 | Phase 34 | Complete |
 | BUG-01 | Phase 35 | Pending |
 | BUG-02 | Phase 35 | Pending |
 | BUG-03 | Phase 35 | Pending |

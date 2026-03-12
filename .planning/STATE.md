@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.10
 milestone_name: Codebase Cleanups
 status: executing
-stopped_at: Completed 34-01-PLAN.md
-last_updated: "2026-03-12T19:59:34Z"
-last_activity: 2026-03-12 — Completed 34-01 gate system removal
+stopped_at: Completed 34-02-PLAN.md
+last_updated: "2026-03-12T20:11:03.909Z"
+last_activity: 2026-03-12 — Completed 34-02 (remaining dead code removal)
 progress:
   total_phases: 7
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 1
-  percent: 5
+  completed_plans: 2
+  percent: 14
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-12)
 ## Current Position
 
 Phase: 34 of 40 (Dead Code Removal) — first of 7 phases in v1.10
-Plan: 1 of 2 complete
+Plan: 2 of 2 complete (phase complete)
 Status: Executing
-Last activity: 2026-03-12 — Completed 34-01 (gate system removal)
+Last activity: 2026-03-12 — Completed 34-02 (remaining dead code removal)
 
-Progress: [█░░░░░░░░░] 5%
+Progress: [█░░░░░░░░░] 14%
 
 ## Performance Metrics
 
@@ -44,6 +44,10 @@ All decisions logged in PROJECT.md Key Decisions table.
 
 - [34-01] Inlined gate schemas into consuming files rather than deleting types outright, preserving backward compat for persisted data
 - [34-01] Removed migration002 from migration chain since gate-to-DAG batch migration is no longer needed
+- [34-02] Removed 15 unused MCP output schemas (not 13 as estimated) -- all defined but never referenced
+- [34-02] Kept notifier field in AOFServiceDependencies (removed only @deprecated tag) because ProtocolRouter still actively uses it
+- [Phase 34]: Removed 15 unused MCP output schemas (not 13 as estimated)
+- [Phase 34]: Kept notifier field in AOFServiceDependencies because ProtocolRouter still uses it
 
 ### Roadmap Evolution
 
@@ -67,6 +71,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-12T19:59:34Z
-Stopped at: Completed 34-01-PLAN.md
-Resume file: .planning/phases/34-dead-code-removal/34-01-SUMMARY.md
+Last session: 2026-03-12T20:10:58.877Z
+Stopped at: Completed 34-02-PLAN.md
+Resume file: None

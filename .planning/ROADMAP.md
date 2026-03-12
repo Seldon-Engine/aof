@@ -106,7 +106,7 @@ See: `.planning/milestones/v1.8-ROADMAP.md` for full details
 
 **Milestone Goal:** Eliminate accumulated entropy from 8 milestones of agent-built code — dead code removal, bug fixes, architectural refactoring, centralized config, structured logging, and test infrastructure improvements.
 
-- [ ] **Phase 34: Dead Code Removal** - Remove ~2,900 lines of legacy gate system code, unused exports, deprecated aliases, and commented-out code
+- [x] **Phase 34: Dead Code Removal** - Remove ~2,900 lines of legacy gate system code, unused exports, deprecated aliases, and commented-out code (completed 2026-03-12)
 - [ ] **Phase 35: Bug Fixes** - Fix buildTaskStats counts, daemon startTime initialization, UpdatePatch.blockers, and TOCTOU race mitigation
 - [ ] **Phase 36: Config Registry** - Centralize all process.env reads into a Zod-validated, typed config singleton
 - [ ] **Phase 37: Structured Logging** - Replace core module console.* calls with leveled JSON logger, remediate silent catch blocks
@@ -125,7 +125,7 @@ See: `.planning/milestones/v1.8-ROADMAP.md` for full details
   2. `grep -r` for gate-evaluator, gate-conditional, gate-context-builder, GateSchema, WorkflowGateSchema across src/ and tests/ returns zero hits (excluding migration stubs)
   3. No unused imports remain in scheduler.ts, no deprecated type aliases exist in executor.ts or dispatch/index.ts, no commented-out code blocks remain in event.ts or promotion.ts
   4. All existing tests pass (vitest full suite green) — no regressions from removals
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 - [ ] 34-01-PLAN.md — Gate system removal (source, tests, re-exports, migration, imports)
 - [ ] 34-02-PLAN.md — Cleanup unused MCP schemas, deprecated aliases, commented code, notifier
@@ -256,7 +256,7 @@ Phases execute in numeric order: 34 -> 35 -> 36 -> 37 -> 38 -> 39 -> 40
 | 31. Granularity, Safety, Hardening | v1.8 | 2/2 | Complete | 2026-03-11 |
 | 32. Agent Guidance | v1.8 | 1/1 | Complete | 2026-03-11 |
 | 33. Callback Wiring Fixes | v1.8 | 1/1 | Complete | 2026-03-12 |
-| 34. Dead Code Removal | 1/2 | In Progress|  | - |
+| 34. Dead Code Removal | 2/2 | Complete   | 2026-03-12 | - |
 | 35. Bug Fixes | v1.10 | 0/? | Not started | - |
 | 36. Config Registry | v1.10 | 0/? | Not started | - |
 | 37. Structured Logging | v1.10 | 0/? | Not started | - |
