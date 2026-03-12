@@ -96,7 +96,7 @@ See: `.planning/milestones/v1.5-ROADMAP.md` for full details
 - [x] **Phase 30: Callback Delivery** - Scheduler-driven callback dispatch with retry and tracing (gap closure in progress) (completed 2026-03-10)
 - [x] **Phase 31: Granularity, Safety, and Hardening** - All-transitions granularity, loop prevention, and restart durability (completed 2026-03-11)
 - [x] **Phase 32: Agent Guidance** - SKILL.md update with callback behavior and idempotency expectations (completed 2026-03-11)
-- [ ] **Phase 33: Callback Wiring Fixes** - Wire deliverAllGranularityCallbacks into production and propagate callbackDepth through MCP boundary (gap closure)
+- [x] **Phase 33: Callback Wiring Fixes** - Wire deliverAllGranularityCallbacks into production and propagate callbackDepth through MCP boundary (gap closure) (completed 2026-03-12)
 
 ## Phase Details
 
@@ -220,4 +220,4 @@ Phases execute in numeric order: 28 -> 29 -> 30 -> 31 -> 32 -> 33
 | 30. Callback Delivery | v1.8 | 3/3 | Complete | 2026-03-10 |
 | 31. Granularity, Safety, and Hardening | v1.8 | 2/2 | Complete | 2026-03-11 |
 | 32. Agent Guidance | v1.8 | 1/1 | Complete | 2026-03-11 |
-| 33. Callback Wiring Fixes | v1.8 | 0/? | Not started | - |
+| 33. Callback Wiring Fixes | 1/1 | Complete   | 2026-03-12 | - |

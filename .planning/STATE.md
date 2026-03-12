@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: Task Notifications
 status: completed
-stopped_at: Completed 32-01-PLAN.md
-last_updated: "2026-03-11T20:33:03.980Z"
-last_activity: 2026-03-11 — Completed agent guidance documentation plan 01
+stopped_at: Completed 33-01-PLAN.md
+last_updated: "2026-03-12T14:20:00Z"
+last_activity: 2026-03-12 — Completed callback wiring fixes gap closure plan 01
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 8
-  completed_plans: 8
+  total_phases: 6
+  completed_phases: 6
+  total_plans: 9
+  completed_plans: 9
   percent: 100
 ---
 
@@ -21,20 +21,20 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-09)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** Phase 32 - Agent Guidance (v1.8 Task Notifications)
+**Current focus:** Phase 33 - Callback Wiring Fixes (v1.8 Gap Closure)
 
 ## Current Position
 
-Phase: 32 of 32 (Agent Guidance)
+Phase: 33 of 33 (Callback Wiring Fixes)
 Plan: 1 of 1 complete
 Status: Phase Complete
-Last activity: 2026-03-11 — Completed agent guidance documentation plan 01
+Last activity: 2026-03-12 — Completed callback wiring fixes gap closure plan 01
 
 Progress: [██████████] 100%
 
 ## Performance Metrics
 
-**All milestones:** v1.0 (7 plans), v1.1 (16 plans), v1.2 (16 plans), v1.3 (7 plans), v1.4 (6 plans), v1.5 (6 plans) -- 58 plans total across 27 phases
+**All milestones:** v1.0 (7 plans), v1.1 (16 plans), v1.2 (16 plans), v1.3 (7 plans), v1.4 (6 plans), v1.5 (6 plans), v1.8 (9 plans) -- 67 plans total across 33 phases
 
 ## Accumulated Context
 
@@ -60,6 +60,9 @@ All decisions logged in PROJECT.md Key Decisions table.
 - [Phase 31-02]: Recovery scan handles both granularities via deliverAllGranularityForSub helper
 - [Phase 32]: Relaxed budget baseline reduction from 50% to 30% for v1.8 subscription/callback content growth
 - [Phase 32]: Budget ceiling bumped to 2500 tokens providing ~10% headroom over measured 2268 total
+- [Phase 33]: Shared SubscriptionStore instance between deliverCallbacks and deliverAllGranularityCallbacks
+- [Phase 33]: AOF_CALLBACK_DEPTH env var for in-process depth propagation with finally cleanup
+- [Phase 33]: callbackDepth only spread into store.create when > 0 for backward compatibility
 
 ### Roadmap Evolution
 
@@ -70,6 +73,7 @@ All decisions logged in PROJECT.md Key Decisions table.
 - v1.4: Phases 21-24 (Tool API, Compressed Skill, Tiered Delivery, Budget Gate)
 - v1.5: Phases 25-27 (Completion Enforcement, Trace Infrastructure, Trace CLI)
 - v1.8: Phases 28-32 (Schema+Storage, Subscription API, Callback Delivery, Safety+Hardening, Agent Guidance)
+- v1.8 gap closure: Phase 33 (Callback Wiring Fixes)
 
 ### Pending Todos
 
@@ -81,6 +85,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-11T20:30:32.315Z
-Stopped at: Completed 32-01-PLAN.md
+Last session: 2026-03-12T14:20:00Z
+Stopped at: Completed 33-01-PLAN.md
 Resume file: None
