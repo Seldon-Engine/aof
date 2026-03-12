@@ -28,15 +28,6 @@ const dispatchInputSchema = z.object({
   subscribe: z.enum(["completion", "all"]).optional(),
 });
 
-const dispatchOutputSchema = z.object({
-  taskId: z.string(),
-  status: z.string(),
-  assignedAgent: z.string().optional(),
-  filePath: z.string().optional(),
-  sessionId: z.string().optional(),
-  subscriptionId: z.string().optional(),
-});
-
 const taskUpdateInputSchema = z.object({
   taskId: z.string(),
   status: z.enum(["backlog", "ready", "in-progress", "blocked", "review", "done"]).optional(),
@@ -47,26 +38,12 @@ const taskUpdateInputSchema = z.object({
   actor: z.string().optional(),
 });
 
-const taskUpdateOutputSchema = z.object({
-  success: z.boolean(),
-  taskId: z.string(),
-  newStatus: z.string(),
-  updatedAt: z.string(),
-});
-
 const taskCompleteInputSchema = z.object({
   taskId: z.string(),
   summary: z.string(),
   outputs: z.array(z.string()).optional(),
   skipReview: z.boolean().optional(),
   actor: z.string().optional(),
-});
-
-const taskCompleteOutputSchema = z.object({
-  success: z.boolean(),
-  taskId: z.string(),
-  finalStatus: z.string(),
-  completedAt: z.string().optional(),
 });
 
 const statusReportInputSchema = z.object({
@@ -77,30 +54,10 @@ const statusReportInputSchema = z.object({
   actor: z.string().optional(),
 });
 
-const statusReportOutputSchema = z.object({
-  total: z.number(),
-  byStatus: z.record(z.string(), z.number()),
-  tasks: z.array(z.object({
-    id: z.string(),
-    title: z.string(),
-    status: z.string(),
-    agent: z.string().optional(),
-  })),
-  summary: z.string().optional(),
-  details: z.string().optional(),
-});
-
 const boardInputSchema = z.object({
   team: z.string().optional(),
   status: z.string().optional(),
   priority: z.string().optional(),
-});
-
-const boardOutputSchema = z.object({
-  team: z.string(),
-  timestamp: z.string(),
-  columns: z.record(z.string(), z.array(z.record(z.string(), z.unknown()))),
-  stats: z.record(z.string(), z.unknown()),
 });
 
 async function resolveOwnerTeam(ctx: AofMcpContext, input: z.infer<typeof dispatchInputSchema>) {
@@ -331,12 +288,6 @@ const taskEditInputSchema = z.object({
   actor: z.string().optional(),
 });
 
-const taskEditOutputSchema = z.object({
-  success: z.boolean(),
-  taskId: z.string(),
-  updatedFields: z.array(z.string()),
-});
-
 export async function handleAofTaskEdit(ctx: AofMcpContext, input: z.infer<typeof taskEditInputSchema>) {
   const result = await aofTaskEdit(
     { store: ctx.store, logger: ctx.logger },
@@ -365,13 +316,6 @@ const taskCancelInputSchema = z.object({
   actor: z.string().optional(),
 });
 
-const taskCancelOutputSchema = z.object({
-  success: z.boolean(),
-  taskId: z.string(),
-  status: z.string(),
-  reason: z.string().optional(),
-});
-
 export async function handleAofTaskCancel(ctx: AofMcpContext, input: z.infer<typeof taskCancelInputSchema>) {
   const result = await aofTaskCancel(
     { store: ctx.store, logger: ctx.logger },
@@ -396,13 +340,6 @@ const taskBlockInputSchema = z.object({
   taskId: z.string(),
   reason: z.string(),
   actor: z.string().optional(),
-});
-
-const taskBlockOutputSchema = z.object({
-  success: z.boolean(),
-  taskId: z.string(),
-  status: z.string(),
-  reason: z.string(),
 });
 
 export async function handleAofTaskBlock(ctx: AofMcpContext, input: z.infer<typeof taskBlockInputSchema>) {
@@ -430,12 +367,6 @@ const taskUnblockInputSchema = z.object({
   actor: z.string().optional(),
 });
 
-const taskUnblockOutputSchema = z.object({
-  success: z.boolean(),
-  taskId: z.string(),
-  status: z.string(),
-});
-
 export async function handleAofTaskUnblock(ctx: AofMcpContext, input: z.infer<typeof taskUnblockInputSchema>) {
   const result = await aofTaskUnblock(
     { store: ctx.store, logger: ctx.logger },
@@ -458,13 +389,6 @@ const taskDepAddInputSchema = z.object({
   taskId: z.string(),
   blockerId: z.string(),
   actor: z.string().optional(),
-});
-
-const taskDepAddOutputSchema = z.object({
-  success: z.boolean(),
-  taskId: z.string(),
-  blockerId: z.string(),
-  dependsOn: z.array(z.string()),
 });
 
 export async function handleAofTaskDepAdd(ctx: AofMcpContext, input: z.infer<typeof taskDepAddInputSchema>) {
@@ -493,13 +417,6 @@ const taskDepRemoveInputSchema = z.object({
   actor: z.string().optional(),
 });
 
-const taskDepRemoveOutputSchema = z.object({
-  success: z.boolean(),
-  taskId: z.string(),
-  blockerId: z.string(),
-  dependsOn: z.array(z.string()),
-});
-
 export async function handleAofTaskDepRemove(ctx: AofMcpContext, input: z.infer<typeof taskDepRemoveInputSchema>) {
   const result = await aofTaskDepRemove(
     { store: ctx.store, logger: ctx.logger },
@@ -524,15 +441,6 @@ const taskSubscribeInputSchema = z.object({
   taskId: z.string(),
   subscriberId: z.string().min(1),
   granularity: z.enum(["completion", "all"]),
-});
-
-const taskSubscribeOutputSchema = z.object({
-  subscriptionId: z.string(),
-  taskId: z.string(),
-  granularity: z.string(),
-  status: z.string(),
-  taskStatus: z.string(),
-  createdAt: z.string(),
 });
 
 async function validateSubscriberId(orgChartPath: string, subscriberId: string): Promise<void> {
@@ -589,11 +497,6 @@ const taskUnsubscribeInputSchema = z.object({
   subscriptionId: z.string(),
 });
 
-const taskUnsubscribeOutputSchema = z.object({
-  subscriptionId: z.string(),
-  status: z.literal("cancelled"),
-});
-
 export async function handleAofTaskUnsubscribe(ctx: AofMcpContext, input: z.infer<typeof taskUnsubscribeInputSchema>) {
   const task = await resolveTask(ctx.store, input.taskId);
 
@@ -617,12 +520,6 @@ const projectCreateInputSchema = z.object({
   participants: z.array(z.string()).optional(),
 });
 
-const projectCreateOutputSchema = z.object({
-  projectId: z.string(),
-  projectRoot: z.string(),
-  directoriesCreated: z.array(z.string()),
-});
-
 export async function handleAofProjectCreate(ctx: AofMcpContext, input: z.infer<typeof projectCreateInputSchema>) {
   const { createProject } = await import("../projects/create.js");
   const result = await createProject(input.id, {
@@ -643,14 +540,6 @@ export async function handleAofProjectCreate(ctx: AofMcpContext, input: z.infer<
 // --- Project List ---
 
 const projectListInputSchema = z.object({});
-
-const projectListOutputSchema = z.object({
-  projects: z.array(z.object({
-    id: z.string(),
-    path: z.string(),
-    error: z.string().optional(),
-  })),
-});
 
 export async function handleAofProjectList(ctx: AofMcpContext) {
   const { discoverProjects } = await import("../projects/index.js");
