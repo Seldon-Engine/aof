@@ -7,8 +7,51 @@
  */
 
 import { z } from "zod";
-import { GateHistoryEntry, ReviewContext, TestSpec } from "./gate.js";
 import { TaskWorkflow } from "./workflow-dag.js";
+
+// ---------------------------------------------------------------------------
+// Inlined from gate.ts (legacy gate types, kept for backward compat of persisted data)
+// ---------------------------------------------------------------------------
+
+/** Gate outcome — the result of passing through a gate. */
+const GateOutcome = z.enum(["complete", "needs_review", "blocked"]);
+
+/** Gate history entry — audit trail record for a task passing through a gate. */
+export const GateHistoryEntry = z.object({
+  gate: z.string(),
+  role: z.string(),
+  agent: z.string().optional(),
+  entered: z.string().datetime(),
+  exited: z.string().datetime().optional(),
+  outcome: GateOutcome.optional(),
+  summary: z.string().optional(),
+  blockers: z.array(z.string()).default([]),
+  rejectionNotes: z.string().optional(),
+  duration: z.number().int().nonnegative().optional(),
+});
+export type GateHistoryEntry = z.infer<typeof GateHistoryEntry>;
+
+/** Review context — feedback from a previous gate rejection. */
+export const ReviewContext = z.object({
+  fromGate: z.string(),
+  fromAgent: z.string().optional(),
+  fromRole: z.string(),
+  timestamp: z.string().datetime(),
+  blockers: z.array(z.string()).default([]),
+  notes: z.string().optional(),
+});
+export type ReviewContext = z.infer<typeof ReviewContext>;
+
+/** Test specification — BDD-style test case for gate validation. */
+export const TestSpec = z.object({
+  given: z.string(),
+  when: z.string(),
+  then: z.object({
+    status: z.number().int().optional(),
+    body_contains: z.array(z.string()).optional(),
+  }),
+});
+export type TestSpec = z.infer<typeof TestSpec>;
 
 /** Task ID format: TASK-YYYY-MM-DD-NNN. */
 export const TaskId = z.string().regex(/^TASK-\d{4}-\d{2}-\d{2}-\d{3}(-\d{2})?$/, "Invalid task id");
