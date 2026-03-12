@@ -141,8 +141,8 @@ Plans:
   4. Scheduler-initiated state transitions (transitionTask, acquireLease) go through the task lock manager — concurrent operations on the same task are serialized
 **Plans:** 2 plans
 Plans:
-- [ ] 34-01-PLAN.md — Gate system removal (source, tests, re-exports, migration, imports)
-- [ ] 34-02-PLAN.md — Cleanup unused MCP schemas, deprecated aliases, commented code, notifier
+- [ ] 35-01-PLAN.md — Fix buildTaskStats counts, daemon startTime, remove blockers dead code (BUG-01, BUG-02, BUG-03)
+- [ ] 35-02-PLAN.md — Route scheduler transitions through shared task lock manager (BUG-04)
 
 ### Phase 36: Config Registry
 **Goal**: All AOF configuration resolved through a single typed registry — no scattered process.env reads outside src/config/
@@ -257,7 +257,7 @@ Phases execute in numeric order: 34 -> 35 -> 36 -> 37 -> 38 -> 39 -> 40
 | 32. Agent Guidance | v1.8 | 1/1 | Complete | 2026-03-11 |
 | 33. Callback Wiring Fixes | v1.8 | 1/1 | Complete | 2026-03-12 |
 | 34. Dead Code Removal | 2/2 | Complete    | 2026-03-12 | - |
-| 35. Bug Fixes | v1.10 | 0/? | Not started | - |
+| 35. Bug Fixes | v1.10 | 0/2 | Not started | - |
 | 36. Config Registry | v1.10 | 0/? | Not started | - |
 | 37. Structured Logging | v1.10 | 0/? | Not started | - |
 | 38. Code Refactoring | v1.10 | 0/? | Not started | - |
