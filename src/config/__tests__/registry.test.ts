@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { getConfig, resetConfig, ConfigError, AofConfigSchema } from "../registry.js";
+import { getConfig, resetConfig, ConfigError } from "../registry.js";
 
 describe("Config Registry", () => {
   beforeEach(() => {
