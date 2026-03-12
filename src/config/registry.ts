@@ -9,8 +9,6 @@
  */
 
 import { z, type ZodIssue } from "zod";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { normalizePath } from "./paths.js";
 
 // ---------------------------------------------------------------------------
