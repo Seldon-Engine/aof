@@ -153,7 +153,7 @@ Plans:
   2. `resetConfig()` provides complete test isolation — tests can override config values without affecting other tests
   3. `grep -r "process.env" src/` returns zero hits outside src/config/ (except the documented AOF_CALLBACK_DEPTH cross-process mutation in callback-delivery.ts)
   4. The config module imports nothing from dispatch/, service/, store/, or any module above it in the dependency hierarchy
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
 - [ ] 36-01-PLAN.md — Config registry singleton with Zod schema, rename manager.ts, barrel updates (CFG-01, CFG-02, CFG-04)
 - [ ] 36-02-PLAN.md — Consolidate all process.env reads into registry (CFG-03)
@@ -258,7 +258,7 @@ Phases execute in numeric order: 34 -> 35 -> 36 -> 37 -> 38 -> 39 -> 40
 | 33. Callback Wiring Fixes | v1.8 | 1/1 | Complete | 2026-03-12 |
 | 34. Dead Code Removal | 2/2 | Complete    | 2026-03-12 | - |
 | 35. Bug Fixes | 2/2 | Complete    | 2026-03-12 | - |
-| 36. Config Registry | v1.10 | 0/2 | Not started | - |
+| 36. Config Registry | 1/2 | In Progress|  | - |
 | 37. Structured Logging | v1.10 | 0/? | Not started | - |
 | 38. Code Refactoring | v1.10 | 0/? | Not started | - |
 | 39. Architecture Fixes | v1.10 | 0/? | Not started | - |

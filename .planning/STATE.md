@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.10
 milestone_name: Codebase Cleanups
 status: executing
-stopped_at: Phase 36 context gathered
-last_updated: "2026-03-12T23:10:59.109Z"
-last_activity: 2026-03-12 — Completed 35-02 (TOCTOU race condition fix)
+stopped_at: Completed 36-01-PLAN.md
+last_updated: "2026-03-12T23:25:20.000Z"
+last_activity: 2026-03-12 — Completed 36-01 (Config registry singleton)
 progress:
   total_phases: 7
   completed_phases: 2
-  total_plans: 4
-  completed_plans: 4
-  percent: 21
+  total_plans: 5
+  completed_plans: 5
+  percent: 29
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-12)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** Phase 35 - Bug Fixes (v1.10 Codebase Cleanups)
+**Current focus:** Phase 36 - Config Registry (v1.10 Codebase Cleanups)
 
 ## Current Position
 
-Phase: 35 of 40 (Bug Fixes) — second of 7 phases in v1.10
-Plan: 2 of 2 (35-02 complete)
+Phase: 36 of 40 (Config Registry) — third of 7 phases in v1.10
+Plan: 1 of 2 (36-01 complete)
 Status: Executing
-Last activity: 2026-03-12 — Completed 35-02 (TOCTOU race condition fix)
+Last activity: 2026-03-12 — Completed 36-01 (Config registry singleton)
 
-Progress: [██░░░░░░░░] 21%
+Progress: [██▉░░░░░░░] 29%
 
 ## Performance Metrics
 
@@ -51,6 +51,8 @@ All decisions logged in PROJECT.md Key Decisions table.
 - [35-02] Wrapped entire executeAssignAction body in withLock rather than individual call sites for complete mutation coverage
 - [35-02] Added lockManager to DispatchConfig in addition to SchedulerConfig since assign-executor uses DispatchConfig type
 - [Phase 35]: Used TDD for buildTaskStats fix to ensure regression coverage before implementation
+- [36-01] Used z.coerce.number() for numeric env vars since process.env values are always strings
+- [36-01] resetConfig(overrides) deep-merges with Zod defaults without reading process.env for test isolation
 
 ### Roadmap Evolution
 
@@ -74,6 +76,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-12T23:10:59.104Z
-Stopped at: Phase 36 context gathered
-Resume file: .planning/phases/36-config-registry/36-CONTEXT.md
+Last session: 2026-03-12T23:25:20Z
+Stopped at: Completed 36-01-PLAN.md
+Resume file: .planning/phases/36-config-registry/36-01-SUMMARY.md

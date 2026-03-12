@@ -28,10 +28,10 @@ Requirements for codebase cleanup milestone. Each maps to roadmap phases.
 
 ### Config Registry
 
-- [ ] **CFG-01**: Zod-based ConfigRegistry singleton with typed schema covering all AOF_* env vars
-- [ ] **CFG-02**: Lazy initialization with resetConfig() for test isolation
+- [x] **CFG-01**: Zod-based ConfigRegistry singleton with typed schema covering all AOF_* env vars
+- [x] **CFG-02**: Lazy initialization with resetConfig() for test isolation
 - [ ] **CFG-03**: All 11 scattered process.env reads consolidated into registry (except AOF_CALLBACK_DEPTH cross-process mutation)
-- [ ] **CFG-04**: Config module has zero upward dependencies — sits at bottom of module hierarchy alongside schemas
+- [x] **CFG-04**: Config module has zero upward dependencies — sits at bottom of module hierarchy alongside schemas
 
 ### Structured Logging
 
@@ -115,10 +115,10 @@ Requirements for codebase cleanup milestone. Each maps to roadmap phases.
 | BUG-02 | Phase 35 | Complete |
 | BUG-03 | Phase 35 | Complete |
 | BUG-04 | Phase 35 | Complete |
-| CFG-01 | Phase 36 | Pending |
-| CFG-02 | Phase 36 | Pending |
+| CFG-01 | Phase 36 | Complete |
+| CFG-02 | Phase 36 | Complete |
 | CFG-03 | Phase 36 | Pending |
-| CFG-04 | Phase 36 | Pending |
+| CFG-04 | Phase 36 | Complete |
 | LOG-01 | Phase 37 | Pending |
 | LOG-02 | Phase 37 | Pending |
 | LOG-03 | Phase 37 | Pending |
