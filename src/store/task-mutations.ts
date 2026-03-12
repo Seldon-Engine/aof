@@ -19,7 +19,6 @@ export interface UpdatePatch {
     role?: string;
     team?: string;
     agent?: string;
-  blockers?: string[];
     tags?: string[];
   };
 }
@@ -110,7 +109,6 @@ export async function updateTask(
 export interface TransitionOpts {
   reason?: string;
   agent?: string;
-  blockers?: string[];
 }
 
 export interface TaskStoreHooks {

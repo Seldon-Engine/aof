@@ -31,8 +31,6 @@ export interface AOFDaemonContext {
   healthServer?: Server;
 }
 
-const startTime = Date.now();
-
 function isProcessRunning(pid: number): boolean {
   try {
     process.kill(pid, 0); // Signal 0 checks existence
@@ -43,6 +41,7 @@ function isProcessRunning(pid: number): boolean {
 }
 
 export async function startAofDaemon(opts: AOFDaemonOptions): Promise<AOFDaemonContext> {
+  const startTime = Date.now();
   const store = opts.store ?? new FilesystemTaskStore(opts.dataDir);
   const logger = opts.logger ?? new EventLogger(eventsDir(opts.dataDir));
   const socketPath = opts.socketPath ?? daemonSocketPath(opts.dataDir);

@@ -333,6 +333,46 @@ describe("AOF daemon", () => {
     });
   });
 
+  describe("startTime correctness (BUG-02 regression)", () => {
+    it("reports uptime consistent with recent start, not module import time", async () => {
+      const poller = vi.fn(async () => makePollResult());
+      const socketPath = join(tmpDir, "daemon.sock");
+
+      const beforeStart = Date.now();
+
+      const { service, healthServer } = await startAofDaemon({
+        dataDir: tmpDir,
+        pollIntervalMs: 60_000,
+        dryRun: true,
+        store,
+        logger,
+        poller,
+        enableHealthServer: true,
+        socketPath,
+      });
+
+      // Fetch /status endpoint to check uptime
+      const http = await import("node:http");
+      const response = await new Promise<string>((resolve, reject) => {
+        const req = http.get({ socketPath, path: "/status" }, (res) => {
+          let data = "";
+          res.on("data", (chunk: Buffer) => { data += chunk; });
+          res.on("end", () => resolve(data));
+        });
+        req.on("error", reject);
+      });
+
+      const status = JSON.parse(response);
+      // Uptime should be less than 5 seconds since we just started
+      // If startTime were at module scope, uptime would be much larger
+      expect(status.uptime).toBeLessThan(5000);
+      expect(status.uptime).toBeGreaterThanOrEqual(0);
+
+      if (healthServer) healthServer.close();
+      await service.stop();
+    });
+  });
+
   describe("config forwarding", () => {
     it("forwards pollTimeoutMs and taskActionTimeoutMs to AOFService", async () => {
       const poller = vi.fn(async () => makePollResult());
