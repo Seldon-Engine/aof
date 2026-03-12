@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.10
 milestone_name: Codebase Cleanups
 status: executing
-stopped_at: Phase 35 context gathered
-last_updated: "2026-03-12T20:36:30.817Z"
-last_activity: 2026-03-12 — Completed 34-02 (remaining dead code removal)
+stopped_at: Completed 35-02-PLAN.md
+last_updated: "2026-03-12T21:26:49.168Z"
+last_activity: 2026-03-12 — Completed 35-02 (TOCTOU race condition fix)
 progress:
   total_phases: 7
-  completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
-  percent: 14
+  completed_phases: 2
+  total_plans: 4
+  completed_plans: 4
+  percent: 21
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-12)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** Phase 34 - Dead Code Removal (v1.10 Codebase Cleanups)
+**Current focus:** Phase 35 - Bug Fixes (v1.10 Codebase Cleanups)
 
 ## Current Position
 
-Phase: 34 of 40 (Dead Code Removal) — first of 7 phases in v1.10
-Plan: 2 of 2 complete (phase complete)
+Phase: 35 of 40 (Bug Fixes) — second of 7 phases in v1.10
+Plan: 2 of 2 (35-02 complete)
 Status: Executing
-Last activity: 2026-03-12 — Completed 34-02 (remaining dead code removal)
+Last activity: 2026-03-12 — Completed 35-02 (TOCTOU race condition fix)
 
-Progress: [█░░░░░░░░░] 14%
+Progress: [██░░░░░░░░] 21%
 
 ## Performance Metrics
 
@@ -48,6 +48,8 @@ All decisions logged in PROJECT.md Key Decisions table.
 - [34-02] Kept notifier field in AOFServiceDependencies (removed only @deprecated tag) because ProtocolRouter still actively uses it
 - [Phase 34]: Removed 15 unused MCP output schemas (not 13 as estimated)
 - [Phase 34]: Kept notifier field in AOFServiceDependencies because ProtocolRouter still uses it
+- [35-02] Wrapped entire executeAssignAction body in withLock rather than individual call sites for complete mutation coverage
+- [35-02] Added lockManager to DispatchConfig in addition to SchedulerConfig since assign-executor uses DispatchConfig type
 
 ### Roadmap Evolution
 
@@ -71,6 +73,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-12T20:36:30.815Z
-Stopped at: Phase 35 context gathered
-Resume file: .planning/phases/35-bug-fixes/35-CONTEXT.md
+Last session: 2026-03-12T21:25:11Z
+Stopped at: Completed 35-02-PLAN.md
+Resume file: .planning/phases/35-bug-fixes/35-02-SUMMARY.md

@@ -107,7 +107,7 @@ See: `.planning/milestones/v1.8-ROADMAP.md` for full details
 **Milestone Goal:** Eliminate accumulated entropy from 8 milestones of agent-built code — dead code removal, bug fixes, architectural refactoring, centralized config, structured logging, and test infrastructure improvements.
 
 - [x] **Phase 34: Dead Code Removal** - Remove ~2,900 lines of legacy gate system code, unused exports, deprecated aliases, and commented-out code (completed 2026-03-12)
-- [ ] **Phase 35: Bug Fixes** - Fix buildTaskStats counts, daemon startTime initialization, UpdatePatch.blockers, and TOCTOU race mitigation
+- [x] **Phase 35: Bug Fixes** - Fix buildTaskStats counts, daemon startTime initialization, UpdatePatch.blockers, and TOCTOU race mitigation (completed 2026-03-12)
 - [ ] **Phase 36: Config Registry** - Centralize all process.env reads into a Zod-validated, typed config singleton
 - [ ] **Phase 37: Structured Logging** - Replace core module console.* calls with leveled JSON logger, remediate silent catch blocks
 - [ ] **Phase 38: Code Refactoring** - Extract helpers from god functions, unify tool registration, deduplicate patterns
@@ -139,7 +139,7 @@ Plans:
   2. Daemon startTime reflects actual daemon start (inside `startAofDaemon()`) not module import time — `/status` endpoint reports correct uptime after restart
   3. `UpdatePatch.blockers` is correctly positioned in the type definition (or removed if unused) — no type errors when using task update operations
   4. Scheduler-initiated state transitions (transitionTask, acquireLease) go through the task lock manager — concurrent operations on the same task are serialized
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
 Plans:
 - [ ] 35-01-PLAN.md — Fix buildTaskStats counts, daemon startTime, remove blockers dead code (BUG-01, BUG-02, BUG-03)
 - [ ] 35-02-PLAN.md — Route scheduler transitions through shared task lock manager (BUG-04)
@@ -257,7 +257,7 @@ Phases execute in numeric order: 34 -> 35 -> 36 -> 37 -> 38 -> 39 -> 40
 | 32. Agent Guidance | v1.8 | 1/1 | Complete | 2026-03-11 |
 | 33. Callback Wiring Fixes | v1.8 | 1/1 | Complete | 2026-03-12 |
 | 34. Dead Code Removal | 2/2 | Complete    | 2026-03-12 | - |
-| 35. Bug Fixes | v1.10 | 0/2 | Not started | - |
+| 35. Bug Fixes | 2/2 | Complete   | 2026-03-12 | - |
 | 36. Config Registry | v1.10 | 0/? | Not started | - |
 | 37. Structured Logging | v1.10 | 0/? | Not started | - |
 | 38. Code Refactoring | v1.10 | 0/? | Not started | - |
