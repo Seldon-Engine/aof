@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.9.0](https://github.com/d0labs/aof/compare/v1.8.0...v1.9.0) (2026-03-12)
+
+### Bug Fixes
+
+* installer UX, path normalization, and scaffold self-healing ([10bbd59](https://github.com/d0labs/aof/commit/10bbd59cdab88ffd1b2c9f664e650aa86c36dc82))
+
 ## [1.8.0](https://github.com/d0labs/aof/compare/v1.7.0...v1.8.0) (2026-03-12)
 
 ### Features
