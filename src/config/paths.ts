@@ -21,8 +21,11 @@ export function normalizePath(p: string): string {
   return resolve(p);
 }
 
-/** Canonical default when nothing is configured. */
-export const DEFAULT_DATA_DIR = join(homedir(), ".openclaw", "aof");
+/**
+ * Canonical default when nothing is configured.
+ * Must match DEFAULT_AOF_ROOT in projects/resolver.ts — both resolve to ~/.aof.
+ */
+export const DEFAULT_DATA_DIR = join(homedir(), ".aof");
 
 /**
  * Resolve the effective data directory.

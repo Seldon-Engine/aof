@@ -49,7 +49,7 @@ const createStrictApi = (overrides: Partial<OpenClawApi> = {}) => {
   return { api, registry };
 };
 
-const DEFAULT_DATA_DIR = join(homedir(), ".openclaw", "aof");
+const DEFAULT_DATA_DIR = join(homedir(), ".aof");
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -135,7 +135,7 @@ describe("AOF OpenClaw plugin entrypoint", () => {
     const spy = vi.spyOn(adapter, "registerAofPlugin");
     const { api } = createStrictApi({
       pluginConfig: {
-        dataDir: "~/.openclaw/aof",
+        dataDir: "~/.aof",
       },
     });
 

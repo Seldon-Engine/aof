@@ -65,7 +65,7 @@ export type CommsConfig = z.infer<typeof CommsConfig>;
 export const AofConfig = z.object({
   schemaVersion: z.union([z.literal(1), z.literal(2)]),
   /** Root data directory for AOF runtime data. */
-  dataDir: z.string().default("~/.openclaw/aof"),
+  dataDir: z.string().default("~/.aof"),
   /** Path to org chart YAML file. */
   orgChartPath: z.string().default("org/org-chart.yaml"),
   /** Root directory for vault (Projects/, Resources/). */

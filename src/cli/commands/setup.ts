@@ -19,6 +19,7 @@ import { createSnapshot, restoreSnapshot, pruneSnapshots } from "../../packaging
 import { migration001 } from "../../packaging/migrations/001-default-workflow-template.js";
 import { migration003 } from "../../packaging/migrations/003-version-metadata.js";
 import { migration004 } from "../../packaging/migrations/004-scaffold-repair.js";
+import { migration005 } from "../../packaging/migrations/005-path-reconciliation.js";
 import {
   detectOpenClaw,
   isAofPluginRegistered,
@@ -61,7 +62,7 @@ export interface SetupOptions {
  * Returns all registered migrations in order.
  */
 function getAllMigrations(): Migration[] {
-  return [migration001, migration003, migration004];
+  return [migration001, migration003, migration004, migration005];
 }
 
 // --- Helpers ---

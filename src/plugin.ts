@@ -11,7 +11,7 @@ type AofPluginConfig = {
   dryRun?: boolean;
 };
 
-const DEFAULT_DATA_DIR = join(homedir(), ".openclaw", "aof");
+const DEFAULT_DATA_DIR = join(homedir(), ".aof");
 const DEFAULT_POLL_INTERVAL_MS = 30_000;
 const DEFAULT_LEASE_TTL_MS = 300_000;
 const DEFAULT_DRY_RUN = false;
