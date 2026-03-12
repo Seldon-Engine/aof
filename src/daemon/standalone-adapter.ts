@@ -12,6 +12,7 @@ import type {
   SessionStatus,
   AgentRunOutcome,
 } from "../dispatch/executor.js";
+import { getConfig } from "../config/registry.js";
 
 export interface StandaloneAdapterOptions {
   gatewayUrl?: string;
@@ -24,12 +25,12 @@ export class StandaloneAdapter implements GatewayAdapter {
   private gatewayVerified = false;
 
   constructor(opts: StandaloneAdapterOptions = {}) {
+    const cfg = getConfig();
     this.gatewayUrl =
       opts.gatewayUrl ??
-      process.env.OPENCLAW_GATEWAY_URL ??
-      "http://localhost:3000";
+      cfg.openclaw.gatewayUrl;
     this.gatewayToken =
-      opts.gatewayToken ?? process.env.OPENCLAW_GATEWAY_TOKEN;
+      opts.gatewayToken ?? cfg.openclaw.gatewayToken;
   }
 
   private headers(): Record<string, string> {

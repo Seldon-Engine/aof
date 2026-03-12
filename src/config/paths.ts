@@ -8,6 +8,7 @@
 
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
+import { getConfig } from "./registry.js";
 
 // ---------------------------------------------------------------------------
 // Default data directory
@@ -32,7 +33,7 @@ export const DEFAULT_DATA_DIR = join(homedir(), ".aof");
  * Priority: explicit arg > AOF_DATA_DIR env > default.
  */
 export function resolveDataDir(explicit?: string): string {
-  const raw = explicit ?? process.env["AOF_DATA_DIR"] ?? DEFAULT_DATA_DIR;
+  const raw = explicit ?? getConfig().core.dataDir;
   return normalizePath(raw);
 }
 

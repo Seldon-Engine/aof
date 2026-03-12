@@ -1,5 +1,6 @@
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
+import { getConfig } from "../config/registry.js";
 import type { OpenClawApi, OpenClawToolDefinition } from "../openclaw/types.js";
 import type { SqliteDb } from "./types.js";
 import { existsSync } from "node:fs";
@@ -155,7 +156,7 @@ export function registerMemoryModule(api: OpenClawApi): void {
   const embeddingProvider = new OpenAIEmbeddingProvider({
     model: embCfg.model,
     baseUrl: embCfg.baseUrl,
-    apiKey: embCfg.apiKey ?? process.env.OPENAI_API_KEY,
+    apiKey: embCfg.apiKey ?? getConfig().integrations.openaiApiKey,
     dimensions,
   });
 

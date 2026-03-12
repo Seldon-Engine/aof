@@ -3,15 +3,18 @@ import { mkdtemp, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { resolveProject, projectExists, DEFAULT_AOF_ROOT } from "../resolver.js";
+import { resetConfig } from "../../config/registry.js";
 
 describe("project resolver", () => {
   let tmpDir: string;
 
   beforeEach(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "aof-resolver-test-"));
+    resetConfig(); // Clear cached config so each test reads fresh env
   });
 
   afterEach(async () => {
+    resetConfig(); // Reset after test to avoid leaking state
     await rm(tmpDir, { recursive: true, force: true });
   });
 

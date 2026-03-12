@@ -7,6 +7,7 @@
 import { resolve, join } from "node:path";
 import { homedir } from "node:os";
 import { access } from "node:fs/promises";
+import { getConfig } from "../config/registry.js";
 
 /** Default AOF vault root — the runtime deployment directory. */
 export const DEFAULT_AOF_ROOT = resolve(homedir(), ".aof");
@@ -31,8 +32,7 @@ export async function resolveProject(
   // Resolve vault root
   const resolvedVaultRoot =
     vaultRoot ??
-    process.env["AOF_ROOT"] ??
-    DEFAULT_AOF_ROOT;
+    getConfig().core.dataDir;
 
   // For _inbox or other projects, resolve under Projects/
   const projectRoot = join(resolvedVaultRoot, "Projects", projectId);

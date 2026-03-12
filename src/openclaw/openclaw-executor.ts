@@ -12,6 +12,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { getConfig } from "../config/registry.js";
 import type { GatewayAdapter, TaskContext, SpawnResult, SessionStatus, AgentRunOutcome } from "../dispatch/executor.js";
 import type { OpenClawApi } from "./types.js";
 import type { ITaskStore } from "../store/interfaces.js";
@@ -379,10 +380,7 @@ export class OpenClawAdapter implements GatewayAdapter {
    * Order: OPENCLAW_STATE_DIR env > ~/.openclaw
    */
   private resolveGatewayDistDir(): string {
-    const stateDir =
-      process.env.OPENCLAW_STATE_DIR?.trim() ||
-      process.env.CLAWDBOT_STATE_DIR?.trim() ||
-      join(homedir(), ".openclaw");
+    const stateDir = getConfig().openclaw.stateDir;
     return join(stateDir, "workspace", "package", "dist");
   }
 
