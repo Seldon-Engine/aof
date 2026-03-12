@@ -148,7 +148,7 @@ describe("Config Registry", () => {
     it("registry.ts imports nothing from dispatch/, service/, store/, protocol/", async () => {
       const { readFile } = await import("node:fs/promises");
       const source = await readFile(
-        new URL("../../registry.ts", import.meta.url),
+        new URL("../registry.ts", import.meta.url),
         "utf-8",
       );
       expect(source).not.toMatch(/from\s+["'].*dispatch/);
