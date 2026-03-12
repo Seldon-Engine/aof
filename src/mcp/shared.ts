@@ -18,6 +18,8 @@ export interface AofMcpOptions {
   projectId?: string;
   /** Vault root (for project-scoped operations). */
   vaultRoot?: string;
+  /** Callback chain depth for callback-spawned sessions (SAFE-01). */
+  callbackDepth?: number;
 }
 
 export interface AofMcpContext {
@@ -32,6 +34,8 @@ export interface AofMcpContext {
   projectConfig?: ProjectManifest;
   /** Subscription store for task notification subscriptions. */
   subscriptionStore: SubscriptionStore;
+  /** Callback chain depth -- 0 for normal sessions, >0 for callback-spawned sessions (SAFE-01). */
+  callbackDepth: number;
 }
 
 export async function createAofMcpContext(options: AofMcpOptions): Promise<AofMcpContext> {
@@ -86,6 +90,9 @@ export async function createAofMcpContext(options: AofMcpOptions): Promise<AofMc
   };
   const subscriptionStore = new SubscriptionStore(taskDirResolver);
 
+  // SAFE-01: Resolve callbackDepth from options or env var
+  const callbackDepth = options.callbackDepth ?? (parseInt(process.env.AOF_CALLBACK_DEPTH ?? "0", 10) || 0);
+
   return {
     dataDir,
     vaultRoot,
@@ -95,6 +102,7 @@ export async function createAofMcpContext(options: AofMcpOptions): Promise<AofMc
     orgChartPath,
     projectConfig,
     subscriptionStore,
+    callbackDepth,
   };
 }
 

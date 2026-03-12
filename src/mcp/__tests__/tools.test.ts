@@ -707,6 +707,43 @@ describe("mcp tools", () => {
     ).rejects.toThrow(/not found in org chart/);
   });
 
+  // --- callbackDepth propagation tests (SAFE-01) ---
+
+  it("handleAofDispatch passes callbackDepth to store.create when ctx.callbackDepth > 0", async () => {
+    const ctx = await createAofMcpContext({
+      dataDir,
+      store,
+      logger: new EventLogger(join(dataDir, "events")),
+      callbackDepth: 2,
+    });
+
+    const result = await handleAofDispatch(ctx, {
+      title: "Depth propagation test",
+      brief: "Should have callbackDepth",
+    });
+
+    const created = await store.get(result.taskId);
+    expect(created).toBeDefined();
+    expect(created?.frontmatter.callbackDepth).toBe(2);
+  });
+
+  it("handleAofDispatch does NOT set callbackDepth when ctx.callbackDepth is 0", async () => {
+    const ctx = await createAofMcpContext({
+      dataDir,
+      store,
+      logger: new EventLogger(join(dataDir, "events")),
+    });
+
+    const result = await handleAofDispatch(ctx, {
+      title: "No depth task",
+      brief: "Should not have callbackDepth",
+    });
+
+    const created = await store.get(result.taskId);
+    expect(created).toBeDefined();
+    expect(created?.frontmatter.callbackDepth).toBeUndefined();
+  });
+
   it("subscribe with mcp as subscriberId validates against org chart", async () => {
     const ctx = await createAofMcpContext({
       dataDir,

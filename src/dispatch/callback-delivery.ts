@@ -344,6 +344,8 @@ async function deliverSingleCallback(
   };
 
   try {
+    // SAFE-01: Set env var so spawned agent's MCP context inherits callbackDepth
+    process.env.AOF_CALLBACK_DEPTH = String(context.metadata?.callbackDepth ?? 0);
     const result = await executor.spawnSession(context, {
       timeoutMs: CALLBACK_TIMEOUT_MS,
       correlationId: randomUUID(),
@@ -389,6 +391,9 @@ async function deliverSingleCallback(
       opts,
       err instanceof Error ? err.message : String(err),
     );
+  } finally {
+    // SAFE-01: Clean up env var after spawn to avoid stale values
+    delete process.env.AOF_CALLBACK_DEPTH;
   }
 }
 

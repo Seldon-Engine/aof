@@ -353,4 +353,33 @@ Missing required fields`, "utf-8");
       }
     });
   });
+
+  // --- callbackDepth tests (SAFE-01) ---
+
+  describe("callbackDepth", () => {
+    it("store.create with callbackDepth persists it to frontmatter", async () => {
+      const task = await store.create({
+        title: "Callback depth task",
+        body: "Has depth",
+        createdBy: "test",
+        callbackDepth: 2,
+      });
+
+      const loaded = await store.get(task.frontmatter.id);
+      expect(loaded).toBeDefined();
+      expect(loaded!.frontmatter.callbackDepth).toBe(2);
+    });
+
+    it("store.create without callbackDepth does not set it on frontmatter", async () => {
+      const task = await store.create({
+        title: "Normal task",
+        body: "No depth",
+        createdBy: "test",
+      });
+
+      const loaded = await store.get(task.frontmatter.id);
+      expect(loaded).toBeDefined();
+      expect(loaded!.frontmatter.callbackDepth).toBeUndefined();
+    });
+  });
 });

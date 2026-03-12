@@ -46,6 +46,8 @@ export interface ITaskStore {
     workflow?: { definition: WorkflowDefinition; templateName?: string };
     /** Context tier for skill injection (seed=minimal, full=complete). */
     contextTier?: "seed" | "full";
+    /** Callback chain depth for callback-spawned tasks (SAFE-01). */
+    callbackDepth?: number;
   }): Promise<Task>;
 
   /**

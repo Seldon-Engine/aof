@@ -181,6 +181,7 @@ export class FilesystemTaskStore implements ITaskStore {
     dependsOn?: string[];
     workflow?: { definition: WorkflowDefinition; templateName?: string };
     contextTier?: "seed" | "full";
+    callbackDepth?: number;
   }): Promise<Task> {
     const now = new Date();
     const nowIso = now.toISOString();
@@ -225,6 +226,7 @@ export class FilesystemTaskStore implements ITaskStore {
       dependsOn: opts.dependsOn ?? [],
       metadata: opts.metadata ?? {},
       contextTier: opts.contextTier,
+      ...(opts.callbackDepth !== undefined ? { callbackDepth: opts.callbackDepth } : {}),
       contentHash: contentHash(body),
       ...(resolvedWorkflow ? { workflow: resolvedWorkflow } : {}),
     });

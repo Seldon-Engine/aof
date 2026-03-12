@@ -180,6 +180,7 @@ export async function handleAofDispatch(ctx: AofMcpContext, input: z.infer<typeo
     createdBy: input.actor ?? "mcp",
     workflow,
     contextTier: input.contextTier ?? "seed",
+    ...(ctx.callbackDepth > 0 ? { callbackDepth: ctx.callbackDepth } : {}),
   });
 
   let currentTask = await ctx.store.transition(task.frontmatter.id, "ready");
