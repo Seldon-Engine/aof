@@ -89,7 +89,18 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 
 ### Active
 
-(No active milestone — next milestone TBD)
+## Current Milestone: v1.10 Codebase Cleanups
+
+**Goal:** Eliminate accumulated entropy from 8 milestones of agent-built code — dead code removal, bug fixes, architectural refactoring, centralized config, structured logging, and test infrastructure improvements.
+
+**Target features:**
+- Dead code removal (legacy gate system, unused imports/exports/schemas)
+- Bug fixes (buildTaskStats, daemon startTime, UpdatePatch.blockers, TOCTOU races)
+- Centralized config registry (replace scattered process.env access with typed, high-performance registry)
+- Structured logging (replace 751 console.* calls in core modules with leveled, structured logger)
+- Code refactoring (extract helpers from god functions, unify tool registration, deduplicate patterns)
+- Architecture fixes (break circular deps, fix store bypass, fix layering violations)
+- Test infrastructure (shared harness, typed mock factories, coverage config, temp dir cleanup)
 
 ### Validated (v1.2)
 
@@ -193,4 +204,4 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 | Budget ceiling 2500 tokens with 30% reduction baseline | ~10% headroom over measured 2268 total after v1.8 SKILL.md growth | ✓ Good |
 
 ---
-*Last updated: 2026-03-12 after v1.8 milestone complete*
+*Last updated: 2026-03-12 after v1.10 milestone started*
