@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.10
 milestone_name: Codebase Cleanups
 status: executing
-stopped_at: Completed 36-01-PLAN.md
-last_updated: "2026-03-12T23:25:20.000Z"
-last_activity: 2026-03-12 — Completed 36-01 (Config registry singleton)
+stopped_at: Completed 36-02-PLAN.md
+last_updated: "2026-03-12T23:32:20.000Z"
+last_activity: 2026-03-12 — Completed 36-02 (Env consolidation)
 progress:
   total_phases: 7
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 5
   completed_plans: 5
-  percent: 29
+  percent: 31
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-12)
 ## Current Position
 
 Phase: 36 of 40 (Config Registry) — third of 7 phases in v1.10
-Plan: 1 of 2 (36-01 complete)
-Status: Executing
-Last activity: 2026-03-12 — Completed 36-01 (Config registry singleton)
+Plan: 2 of 2 (36-02 complete)
+Status: Phase Complete
+Last activity: 2026-03-12 — Completed 36-02 (Env consolidation)
 
-Progress: [██▉░░░░░░░] 29%
+Progress: [███░░░░░░░] 31%
 
 ## Performance Metrics
 
@@ -53,6 +53,8 @@ All decisions logged in PROJECT.md Key Decisions table.
 - [Phase 35]: Used TDD for buildTaskStats fix to ensure regression coverage before implementation
 - [36-01] Used z.coerce.number() for numeric env vars since process.env values are always strings
 - [36-01] resetConfig(overrides) deep-merges with Zod defaults without reading process.env for test isolation
+- [36-02] Lazy default for --root CLI option via preAction hook instead of module-level const
+- [36-02] configPath fallback uses cfg.openclaw.stateDir + openclaw.json instead of hardcoded homedir path
 
 ### Roadmap Evolution
 
@@ -76,6 +78,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-12T23:25:20Z
-Stopped at: Completed 36-01-PLAN.md
-Resume file: .planning/phases/36-config-registry/36-01-SUMMARY.md
+Last session: 2026-03-12T23:32:20Z
+Stopped at: Completed 36-02-PLAN.md
+Resume file: .planning/phases/36-config-registry/36-02-SUMMARY.md

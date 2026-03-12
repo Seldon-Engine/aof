@@ -108,7 +108,7 @@ See: `.planning/milestones/v1.8-ROADMAP.md` for full details
 
 - [x] **Phase 34: Dead Code Removal** - Remove ~2,900 lines of legacy gate system code, unused exports, deprecated aliases, and commented-out code (completed 2026-03-12)
 - [x] **Phase 35: Bug Fixes** - Fix buildTaskStats counts, daemon startTime initialization, UpdatePatch.blockers, and TOCTOU race mitigation (completed 2026-03-12)
-- [ ] **Phase 36: Config Registry** - Centralize all process.env reads into a Zod-validated, typed config singleton
+- [x] **Phase 36: Config Registry** - Centralize all process.env reads into a Zod-validated, typed config singleton (completed 2026-03-12)
 - [ ] **Phase 37: Structured Logging** - Replace core module console.* calls with leveled JSON logger, remediate silent catch blocks
 - [ ] **Phase 38: Code Refactoring** - Extract helpers from god functions, unify tool registration, deduplicate patterns
 - [ ] **Phase 39: Architecture Fixes** - Break circular dependencies, fix store abstraction bypass, fix layering violations
@@ -153,7 +153,7 @@ Plans:
   2. `resetConfig()` provides complete test isolation — tests can override config values without affecting other tests
   3. `grep -r "process.env" src/` returns zero hits outside src/config/ (except the documented AOF_CALLBACK_DEPTH cross-process mutation in callback-delivery.ts)
   4. The config module imports nothing from dispatch/, service/, store/, or any module above it in the dependency hierarchy
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 - [ ] 36-01-PLAN.md — Config registry singleton with Zod schema, rename manager.ts, barrel updates (CFG-01, CFG-02, CFG-04)
 - [ ] 36-02-PLAN.md — Consolidate all process.env reads into registry (CFG-03)
@@ -258,7 +258,7 @@ Phases execute in numeric order: 34 -> 35 -> 36 -> 37 -> 38 -> 39 -> 40
 | 33. Callback Wiring Fixes | v1.8 | 1/1 | Complete | 2026-03-12 |
 | 34. Dead Code Removal | 2/2 | Complete    | 2026-03-12 | - |
 | 35. Bug Fixes | 2/2 | Complete    | 2026-03-12 | - |
-| 36. Config Registry | 1/2 | In Progress|  | - |
+| 36. Config Registry | 2/2 | Complete   | 2026-03-12 | - |
 | 37. Structured Logging | v1.10 | 0/? | Not started | - |
 | 38. Code Refactoring | v1.10 | 0/? | Not started | - |
 | 39. Architecture Fixes | v1.10 | 0/? | Not started | - |
