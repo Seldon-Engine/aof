@@ -17,7 +17,6 @@ import { runMigrations } from "../../packaging/migrations.js";
 import type { Migration } from "../../packaging/migrations.js";
 import { createSnapshot, restoreSnapshot, pruneSnapshots } from "../../packaging/snapshot.js";
 import { migration001 } from "../../packaging/migrations/001-default-workflow-template.js";
-import { migration002 } from "../../packaging/migrations/002-gate-to-dag-batch.js";
 import { migration003 } from "../../packaging/migrations/003-version-metadata.js";
 import { migration004 } from "../../packaging/migrations/004-scaffold-repair.js";
 import {
@@ -62,7 +61,7 @@ export interface SetupOptions {
  * Returns all registered migrations in order.
  */
 function getAllMigrations(): Migration[] {
-  return [migration001, migration002, migration003, migration004];
+  return [migration001, migration003, migration004];
 }
 
 // --- Helpers ---

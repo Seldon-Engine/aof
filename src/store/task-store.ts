@@ -23,8 +23,6 @@ import { lintTasks } from "./task-validation.js";
 import { getTaskInputs as getInputs, getTaskOutputs as getOutputs, writeTaskOutput as writeOutput } from "./task-file-ops.js";
 import { blockTask, unblockTask, cancelTask } from "./task-lifecycle.js";
 import { updateTask, type UpdatePatch, transitionTask, type TransitionOpts } from "./task-mutations.js";
-import { migrateGateToDAG } from "../migration/gate-to-dag.js";
-
 const FRONTMATTER_FENCE = "---";
 
 /** All valid status directories per BRD. */
@@ -82,29 +80,6 @@ export class FilesystemTaskStore implements ITaskStore {
     this.tasksDir = resolve(this.projectRoot, "tasks");
     this.hooks = opts.hooks;
     this.logger = opts.logger;
-  }
-
-  /**
-   * Load workflow config from project manifest for gate-to-DAG migration.
-   * Returns undefined if manifest doesn't exist or has no workflow gates.
-   */
-  private async loadWorkflowConfig(): Promise<import("../migration/gate-to-dag.js").WorkflowConfig | undefined> {
-    try {
-      const { readFile: readManifest } = await import("node:fs/promises");
-      const { parse } = await import("yaml");
-      const manifestPath = join(this.projectRoot, "project.yaml");
-      const raw = await readManifest(manifestPath, "utf-8");
-      const manifest = parse(raw);
-      if (manifest?.workflow?.gates?.length) {
-        return {
-          name: manifest.workflow?.name ?? "default",
-          gates: manifest.workflow.gates,
-        };
-      }
-    } catch {
-      // No manifest or parse error — migration not possible
-    }
-    return undefined;
   }
 
   /** Compute the next TASK-YYYY-MM-DD-NNN identifier. */
@@ -248,15 +223,6 @@ export class FilesystemTaskStore implements ITaskStore {
         const raw = await readFile(filePath, "utf-8");
         const task = parseTaskFile(raw, filePath);
 
-        // Lazy gate-to-DAG migration: convert on load, write back atomically
-        if ((task.frontmatter as any).gate && !task.frontmatter.workflow) {
-          const workflowConfig = await this.loadWorkflowConfig();
-          migrateGateToDAG(task, workflowConfig);
-          if (task.frontmatter.workflow) {
-            await writeFileAtomic(filePath, serializeTask(task));
-          }
-        }
-
         return task;
       } catch (err) {
         // Check if it's a parse error (file exists but is malformed)
@@ -288,15 +254,6 @@ export class FilesystemTaskStore implements ITaskStore {
           const raw = await readFile(filePath, "utf-8");
           const task = parseTaskFile(raw, filePath);
 
-          // Lazy gate-to-DAG migration: convert on load, write back atomically
-          if ((task.frontmatter as any).gate && !task.frontmatter.workflow) {
-            const workflowConfig = await this.loadWorkflowConfig();
-            migrateGateToDAG(task, workflowConfig);
-            if (task.frontmatter.workflow) {
-              await writeFileAtomic(filePath, serializeTask(task));
-            }
-          }
-
           return task;
         }
       } catch {
@@ -314,10 +271,6 @@ export class FilesystemTaskStore implements ITaskStore {
   }): Promise<Task[]> {
     const tasks: Task[] = [];
     const statusesToScan = filters?.status ? [filters.status] : STATUS_DIRS;
-
-    // Lazy-load workflow config once for gate-to-DAG migration (if needed)
-    let workflowConfig: import("../migration/gate-to-dag.js").WorkflowConfig | undefined;
-    let workflowConfigLoaded = false;
 
     for (const status of statusesToScan) {
       const dir = this.statusDir(status);
@@ -338,18 +291,6 @@ export class FilesystemTaskStore implements ITaskStore {
 
           const raw = await readFile(filePath, "utf-8");
           const task = parseTaskFile(raw, filePath);
-
-          // Lazy gate-to-DAG migration: convert on load, write back atomically
-          if ((task.frontmatter as any).gate && !task.frontmatter.workflow) {
-            if (!workflowConfigLoaded) {
-              workflowConfig = await this.loadWorkflowConfig();
-              workflowConfigLoaded = true;
-            }
-            migrateGateToDAG(task, workflowConfig);
-            if (task.frontmatter.workflow) {
-              await writeFileAtomic(filePath, serializeTask(task));
-            }
-          }
 
           // Apply filters
           if (filters?.agent && task.frontmatter.lease?.agent !== filters.agent) continue;

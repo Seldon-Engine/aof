@@ -20,7 +20,6 @@ import { parse as parseYaml } from "yaml";
 
 import { runMigrations, getMigrationHistory } from "../migrations.js";
 import { migration001 } from "../migrations/001-default-workflow-template.js";
-import { migration002 } from "../migrations/002-gate-to-dag-batch.js";
 import { migration003 } from "../migrations/003-version-metadata.js";
 import { runWizard } from "../wizard.js";
 
@@ -28,7 +27,7 @@ import { runWizard } from "../wizard.js";
  * Returns all migrations in order (same pattern as setup.ts).
  */
 function getAllMigrations() {
-  return [migration001, migration002, migration003];
+  return [migration001, migration003];
 }
 
 /**
@@ -89,9 +88,9 @@ describe("Upgrade scenarios", () => {
       targetVersion: "1.3.0",
     });
 
-    // All 3 migrations should apply
+    // 2 migrations should apply (001 + 003; 002 gate-to-dag-batch removed)
     expect(result.success).toBe(true);
-    expect(result.applied).toHaveLength(3);
+    expect(result.applied).toHaveLength(2);
 
     // Migration 001: defaultWorkflow added to project.yaml
     const projectRaw = await readFile(
@@ -101,22 +100,6 @@ describe("Upgrade scenarios", () => {
     const project = parseYaml(projectRaw) as Record<string, unknown>;
     expect(project.defaultWorkflow).toBe("standard-sdlc");
 
-    // Migration 002: gate task converted to DAG workflow
-    const taskRaw = await readFile(
-      join(
-        tmpDir,
-        "Projects",
-        "demo",
-        "tasks",
-        "backlog",
-        "TASK-2026-01-01-001.md",
-      ),
-      "utf-8",
-    );
-    // Gate field should be cleared (migration002 converts gate -> workflow)
-    expect(taskRaw).toContain("workflow:");
-    expect(taskRaw).not.toMatch(/^gate:/m);
-
     // Migration 003: channel.json created with version metadata
     const channelRaw = await readFile(
       join(tmpDir, ".aof", "channel.json"),
@@ -125,9 +108,9 @@ describe("Upgrade scenarios", () => {
     const channel = JSON.parse(channelRaw);
     expect(channel.version).toBe("1.3.0");
 
-    // Migration history records all 3
+    // Migration history records the 2 applied
     const history = await getMigrationHistory(tmpDir);
-    expect(history.migrations).toHaveLength(3);
+    expect(history.migrations).toHaveLength(2);
   });
 
   it("v1.2 upgrade: only migration003 applies (001+002 already recorded)", async () => {
