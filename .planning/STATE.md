@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.10
 milestone_name: Codebase Cleanups
 status: in-progress
-stopped_at: Completed 37-01 (Logger factory)
+stopped_at: Completed 37-02 (Dispatch module migration)
 last_updated: "2026-03-13T00:28:52.853Z"
-last_activity: 2026-03-13 — Completed 37-01 (Logger factory)
+last_activity: 2026-03-13 — Completed 37-02 (Dispatch module migration)
 progress:
   total_phases: 7
   completed_phases: 3
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-03-12)
 ## Current Position
 
 Phase: 37 of 40 (Structured Logging) — fourth of 7 phases in v1.10
-Plan: 1 of 3 (37-01 complete)
+Plan: 2 of 3 (37-02 complete)
 Status: In Progress
-Last activity: 2026-03-13 — Completed 37-01 (Logger factory)
+Last activity: 2026-03-13 — Completed 37-02 (Dispatch module migration)
 
 Progress: [██████████] 95%
 
@@ -57,6 +57,9 @@ All decisions logged in PROJECT.md Key Decisions table.
 - [36-02] configPath fallback uses cfg.openclaw.stateDir + openclaw.json instead of hardcoded homedir path
 - [37-01] Used pino.destination DestinationStream type for proper flushSync access in resetLogger
 - [37-01] Tests use PassThrough streams with direct pino instances for output verification rather than capturing stderr
+- [37-02] Used vi.hoisted() for test logger mocks to avoid vi.mock hoisting issues with const declarations
+- [37-02] Kept file-existence catch blocks as silent catches (flow control, not error swallowing)
+- [37-02] Consolidated multi-line console.error ops alerts into single structured log.error calls
 
 ### Roadmap Evolution
 
@@ -80,6 +83,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-13T00:28:30Z
-Stopped at: Completed 37-01 (Logger factory)
-Resume file: .planning/phases/37-structured-logging/37-01-SUMMARY.md
+Last session: 2026-03-13T00:44:10Z
+Stopped at: Completed 37-02 (Dispatch module migration)
+Resume file: .planning/phases/37-structured-logging/37-02-SUMMARY.md
