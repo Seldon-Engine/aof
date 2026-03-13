@@ -9,6 +9,7 @@ import type { Task } from "../schemas/task.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import { serializeTask } from "../store/task-store.js";
 import { EventLogger } from "../events/logger.js";
+import { createLogger } from "../logging/index.js";
 import type { SchedulerConfig, SchedulerAction } from "./scheduler.js";
 import { join } from "node:path";
 import writeFileAtomic from "write-file-atomic";
@@ -18,6 +19,8 @@ import { resolveCompletionTransitions } from "../protocol/completion-utils.js";
 import { cascadeOnCompletion } from "./dep-cascader.js";
 import { shouldAllowSpawnFailedRequeue, DEFAULT_MAX_DISPATCH_RETRIES } from "./scheduler-helpers.js";
 import { transitionToDeadletter } from "./failure-tracker.js";
+
+const log = createLogger("action-executor");
 
 export interface ActionExecutionStats {
   actionsExecuted: number;
@@ -92,8 +95,8 @@ export async function executeActions(
                       try {
                         await logger.logTransition(action.taskId, "blocked", "deadletter", "scheduler",
                           `Lease expired on spawn-failed task — ${guard.reason}`);
-                      } catch {
-                        // Logging errors should not crash the scheduler
+                      } catch (err) {
+                        log.warn({ err, taskId: action.taskId, op: "eventLog" }, "event logger write failed (best-effort)");
                       }
                     } else if (guard.allow) {
                       await store.transition(action.taskId, "ready", {
@@ -102,12 +105,12 @@ export async function executeActions(
                       try {
                         await logger.logTransition(action.taskId, "blocked", "ready", "scheduler",
                           `Lease expired — ${guard.reason}`);
-                      } catch {
-                        // Logging errors should not crash the scheduler
+                      } catch (err) {
+                        log.warn({ err, taskId: action.taskId, op: "eventLog" }, "event logger write failed (best-effort)");
                       }
                     } else {
                       // Backoff not elapsed — stay blocked, just clear the lease
-                      console.info(`[AOF] Lease expired on spawn-failed task ${action.taskId} — backoff pending (${guard.reason})`);
+                      log.info({ taskId: action.taskId, reason: guard.reason, op: "leaseExpiry" }, "lease expired on spawn-failed task, backoff pending");
                     }
                   } else {
                     // Non-spawn-failure blocked task: check dependencies
@@ -124,11 +127,11 @@ export async function executeActions(
                       try {
                         await logger.logTransition(action.taskId, "blocked", "ready", "scheduler",
                           `Lease expired and dependencies satisfied - requeued`);
-                      } catch {
-                        // Logging errors should not crash the scheduler
+                      } catch (err) {
+                        log.warn({ err, taskId: action.taskId, op: "eventLog" }, "event logger write failed (best-effort)");
                       }
                     } else {
-                      console.warn(`[AOF] Lease expired on blocked task ${action.taskId} but dependencies not satisfied - staying blocked`);
+                      log.warn({ taskId: action.taskId, op: "leaseExpiry" }, "lease expired on blocked task but dependencies not satisfied, staying blocked");
                     }
                   }
                 } else {
@@ -138,8 +141,8 @@ export async function executeActions(
                   try {
                     await logger.logTransition(action.taskId, "in-progress", "ready", "scheduler",
                       `Lease expired - task requeued`);
-                  } catch {
-                    // Logging errors should not crash the scheduler
+                  } catch (err) {
+                    log.warn({ err, taskId: action.taskId, op: "eventLog" }, "event logger write failed (best-effort)");
                   }
                 }
                 leasesExpired++;
@@ -161,7 +164,7 @@ export async function executeActions(
             // TASK-2026-02-10-061: Consult run_result.json for deterministic recovery
             const staleTask = await store.get(action.taskId);
             if (!staleTask) {
-              console.warn(`[AOF] Stale heartbeat: task ${action.taskId} not found, skipping`);
+              log.warn({ taskId: action.taskId, op: "staleHeartbeat" }, "stale heartbeat: task not found, skipping");
               break;
             }
 
@@ -173,7 +176,7 @@ export async function executeActions(
             if (config.executor && staleSessionId) {
               try {
                 await config.executor.forceCompleteSession(staleSessionId);
-                console.info(`[AOF] Force-completed session ${staleSessionId} for task ${action.taskId}`);
+                log.info({ taskId: action.taskId, sessionId: staleSessionId, op: "forceCompleteSession" }, "force-completed session for stale heartbeat");
 
                 // Log session force-completion event
                 try {
@@ -181,11 +184,11 @@ export async function executeActions(
                     taskId: action.taskId,
                     payload: { sessionId: staleSessionId, correlationId: staleCorrelationId, reason: "stale_heartbeat" },
                   });
-                } catch {
-                  // Logging errors should not crash the scheduler
+                } catch (err) {
+                  log.warn({ err, taskId: action.taskId, op: "eventLog" }, "event logger write failed (best-effort)");
                 }
               } catch (err) {
-                console.warn(`[AOF] forceCompleteSession failed for ${staleSessionId}: ${(err as Error).message}`);
+                log.warn({ err, taskId: action.taskId, sessionId: staleSessionId, op: "forceCompleteSession" }, "force-complete session failed");
                 // Continue with existing recovery logic even if force-complete fails
               }
             }
@@ -201,8 +204,8 @@ export async function executeActions(
               try {
                 await logger.logTransition(action.taskId, fromStatus, "ready", "scheduler", 
                   `Stale heartbeat - no run_result - reclaimed to ready`);
-              } catch {
-                // Logging errors should not crash the scheduler
+              } catch (err) {
+                log.warn({ err, taskId: action.taskId, op: "eventLog" }, "event logger write failed (best-effort)");
               }
             } else {
               // Run result exists → apply outcome-driven transitions
@@ -216,8 +219,8 @@ export async function executeActions(
                 try {
                   await logger.logTransition(action.taskId, fromStatus, targetStatus, "scheduler",
                     `Stale heartbeat - outcome ${runResult.outcome} - transition to ${targetStatus}`);
-                } catch {
-                  // Logging errors should not crash the scheduler
+                } catch (err) {
+                  log.warn({ err, taskId: action.taskId, op: "eventLog" }, "event logger write failed (best-effort)");
                 }
               }
 
@@ -225,7 +228,7 @@ export async function executeActions(
                 try {
                   await cascadeOnCompletion(action.taskId, store, logger);
                 } catch (err) {
-                  console.error(`[AOF] cascadeOnCompletion failed for ${action.taskId}:`, err);
+                  log.error({ err, taskId: action.taskId, op: "cascadeOnCompletion" }, "cascade on completion failed");
                 }
               }
             }
@@ -254,8 +257,8 @@ export async function executeActions(
             
             try {
               await logger.logTransition(action.taskId, "blocked", "ready", "scheduler", action.reason);
-            } catch {
-              // Logging errors should not crash the scheduler
+            } catch (err) {
+              log.warn({ err, taskId: action.taskId, op: "eventLog" }, "event logger write failed (best-effort)");
             }
             // BUG-002 fix: Don't count non-dispatch actions in actionsExecuted
             // executed remains false
@@ -266,8 +269,8 @@ export async function executeActions(
             try {
               await logger.logTransition(action.taskId, "backlog", "ready", "scheduler",
                 action.reason ?? "All dependencies satisfied");
-            } catch {
-              // Logging errors should not crash the scheduler
+            } catch (err) {
+              log.warn({ err, taskId: action.taskId, op: "eventLog" }, "event logger write failed (best-effort)");
             }
             tasksPromoted++;
             // BUG-002 fix: Don't count non-dispatch actions in actionsExecuted
@@ -297,7 +300,7 @@ export async function executeActions(
 
           case "alert":
             // Alerts are logged but not executed (notification target)
-            console.warn(`[AOF] ${action.type.toUpperCase()}: ${action.reason}`);
+            log.warn({ taskId: action.taskId, actionType: action.type, reason: action.reason }, "scheduler alert");
             try {
               await logger.log("scheduler_alert", "scheduler", {
                 taskId: action.taskId,
@@ -306,8 +309,8 @@ export async function executeActions(
                   reason: action.reason,
                 },
               });
-            } catch {
-              // Logging errors should not crash the scheduler
+            } catch (err) {
+              log.warn({ err, taskId: action.taskId, op: "eventLog" }, "event logger write failed (best-effort)");
             }
             // BUG-002 fix: Don't count non-dispatch actions in actionsExecuted
             // executed remains false
@@ -321,8 +324,8 @@ export async function executeActions(
             try {
               await logger.logTransition(action.taskId, "ready", "blocked", "scheduler",
                 action.reason);
-            } catch {
-              // Logging errors should not crash the scheduler
+            } catch (err) {
+              log.warn({ err, taskId: action.taskId, op: "eventLog" }, "event logger write failed (best-effort)");
             }
             // BUG-002 fix: Don't count non-dispatch actions in actionsExecuted
             // executed remains false
@@ -341,8 +344,8 @@ export async function executeActions(
                   timestamp: Date.now(),
                 },
               });
-            } catch {
-              // Logging errors should not crash the scheduler
+            } catch (err) {
+              log.warn({ err, taskId: action.taskId, op: "eventLog" }, "event logger write failed (best-effort)");
             }
 
             // Emit alert if not rate-limited
@@ -352,10 +355,7 @@ export async function executeActions(
               const durationHrs = ((action.duration ?? 0) / 3600000).toFixed(1);
               const limitHrs = ((action.limit ?? 0) / 3600000).toFixed(1);
               
-              console.error(`[AOF] SLA VIOLATION: Task ${action.taskId} (${action.taskTitle})`);
-              console.error(`[AOF] SLA VIOLATION:   Duration: ${durationHrs}h (limit: ${limitHrs}h)`);
-              console.error(`[AOF] SLA VIOLATION:   Agent: ${action.agent ?? "unassigned"}`);
-              console.error(`[AOF] SLA VIOLATION:   Action: Check if agent is stuck or task needs SLA override`);
+              log.error({ taskId: action.taskId, taskTitle: action.taskTitle, durationHrs, limitHrs, agent: action.agent ?? "unassigned" }, "SLA violation: check if agent is stuck or task needs SLA override");
             }
             // BUG-002 fix: Don't count non-dispatch actions in actionsExecuted
             // executed remains false
@@ -366,7 +366,7 @@ export async function executeActions(
             try {
               // The action object is already formatted by evaluateMurmurTriggers
               // It contains: type, taskId, agent, reason (and fields for createTask)
-              console.log(`[AOF] Murmur orchestration: creating review task for ${action.sourceTaskId}`);
+              log.info({ taskId: action.taskId, sourceTaskId: action.sourceTaskId, op: "murmurCreateTask" }, "murmur orchestration: creating review task");
               await logger.log("murmur_task_created", "scheduler", {
                 taskId: action.taskId,
                 payload: {
@@ -379,13 +379,13 @@ export async function executeActions(
               // executed remains false
             } catch (err) {
               const error = err as Error;
-              console.error(`[AOF] Failed to create Murmur review task for ${action.sourceTaskId}: ${error.message}`);
+              log.error({ err: error, sourceTaskId: action.sourceTaskId, op: "murmurCreateTask" }, "failed to create murmur review task");
               failed = true;
             }
             break;
 
           default:
-            console.warn(`[AOF] Unknown action type: ${(action as SchedulerAction).type}`);
+            log.warn({ actionType: (action as SchedulerAction).type, taskId: action.taskId }, "unknown action type");
             failed = true;
         }
 
@@ -397,7 +397,7 @@ export async function executeActions(
         }
       } catch (err) {
         const error = err as Error;
-        console.error(`[AOF] Failed to execute action for ${action.taskId}: ${error.message}`);
+        log.error({ err: error, taskId: action.taskId, actionType: action.type, op: "executeAction" }, "failed to execute action");
         try {
           await logger.log("scheduler_action_failed", "scheduler", {
             taskId: action.taskId,
@@ -406,8 +406,8 @@ export async function executeActions(
               error: error.message,
             },
           });
-        } catch {
-          // Logging errors should not crash the scheduler
+        } catch (logErr) {
+          log.warn({ err: logErr, taskId: action.taskId, op: "eventLog" }, "event logger write failed (best-effort)");
         }
         actionsFailed++;
       }

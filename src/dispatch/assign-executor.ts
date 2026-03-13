@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import type { Task, TaskStatus } from "../schemas/task.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import type { EventLogger } from "../events/logger.js";
+import { createLogger } from "../logging/index.js";
 import type { DispatchConfig, SchedulerAction } from "./task-dispatcher.js";
 import { acquireLease, releaseLease } from "../store/lease.js";
 import { isLeaseActive, startLeaseRenewal, stopLeaseRenewal } from "./lease-manager.js";
@@ -24,6 +25,8 @@ import { trackDispatchFailure, shouldTransitionToDeadletter, transitionToDeadlet
 import { captureTrace } from "../trace/trace-writer.js";
 import { deliverCallbacks, deliverAllGranularityCallbacks } from "./callback-delivery.js";
 import { SubscriptionStore } from "../store/subscription-store.js";
+
+const log = createLogger("assign-executor");
 
 /**
  * Load project manifest from disk.
@@ -42,7 +45,8 @@ export async function loadProjectManifest(
     const content = await readFile(projectPath, "utf-8");
     const manifest = parseYaml(content) as ProjectManifest;
     return manifest;
-  } catch {
+  } catch (err) {
+    log.warn({ err, op: "loadProjectManifest", projectId }, "failed to load project manifest");
     return null;
   }
 }
@@ -67,7 +71,7 @@ export async function executeAssignAction(
   effectiveConcurrencyLimitRef: { value: number | null }
 ): Promise<{ executed: boolean; failed: boolean }> {
   if (!config.executor) {
-    console.error(`[AOF] Cannot dispatch task ${action.taskId}: no executor configured (agent: ${action.agent})`);
+    log.error({ taskId: action.taskId, agent: action.agent, op: "dispatch" }, "cannot dispatch task: no executor configured");
     return { executed: false, failed: false };
   }
 
@@ -84,28 +88,24 @@ export async function executeAssignAction(
   try {
     const latest = await store.get(action.taskId);
     if (!latest) {
-      console.warn(`[AOF] [TASK-056] Task ${action.taskId} not found, skipping dispatch`);
+      log.warn({ taskId: action.taskId, op: "dispatch" }, "task not found, skipping dispatch");
       return { executed, failed };
     }
 
     if (latest.frontmatter.status !== "ready") {
-      console.warn(
-        `[AOF] [TASK-056] Dispatch dedup: skipping ${action.taskId} (status ${latest.frontmatter.status})`,
-      );
+      log.warn({ taskId: action.taskId, status: latest.frontmatter.status, op: "dispatchDedup" }, "dispatch dedup: skipping task (status changed)");
       return { executed, failed };
     }
 
     if (isLeaseActive(latest.frontmatter.lease)) {
       const lease = latest.frontmatter.lease;
-      console.warn(
-        `[AOF] [TASK-056] Dispatch dedup: skipping ${action.taskId} (active lease held by ${lease?.agent} until ${lease?.expiresAt})`,
-      );
+      log.warn({ taskId: action.taskId, leaseAgent: lease?.agent, leaseExpiresAt: lease?.expiresAt, op: "dispatchDedup" }, "dispatch dedup: skipping task (active lease)");
       return { executed, failed };
     }
 
     const task = allTasks.find(t => t.frontmatter.id === action.taskId);
     if (!task) {
-      console.warn(`[AOF] Task ${action.taskId} not found in allTasks, skipping dispatch`);
+      log.warn({ taskId: action.taskId, op: "dispatch" }, "task not found in allTasks, skipping dispatch");
       return { executed, failed };
     }
 
@@ -116,8 +116,8 @@ export async function executeAssignAction(
         agent: action.agent,
         correlationId,
       });
-    } catch {
-      // Logging errors should not crash the scheduler
+    } catch (err) {
+      log.warn({ err, taskId: action.taskId, op: "logActionStarted" }, "event logger write failed (best-effort)");
     }
 
     // Acquire lease first (this also transitions ready → in-progress)
@@ -180,8 +180,8 @@ export async function executeAssignAction(
                 debug: traceDebug,
               });
             }
-          } catch {
-            // Trace capture must never crash the scheduler
+          } catch (err) {
+            log.warn({ err, taskId: action.taskId, op: "traceCapture" }, "trace capture failed (best-effort)");
           }
 
           // --- Callback delivery (Phase 30) --- best-effort, never blocks transitions
@@ -201,14 +201,14 @@ export async function executeAssignAction(
           };
           try {
             await deliverCallbacks(callbackOpts);
-          } catch {
-            // Delivery must never crash the scheduler
+          } catch (err) {
+            log.warn({ err, taskId: action.taskId, op: "deliverCallbacks" }, "callback delivery failed (best-effort)");
           }
           // GRAN-02: Deliver all-granularity callbacks (separate try/catch per DLVR-04)
           try {
             await deliverAllGranularityCallbacks(callbackOpts);
-          } catch {
-            // All-granularity delivery must never crash the scheduler
+          } catch (err) {
+            log.warn({ err, taskId: action.taskId, op: "deliverAllGranularityCallbacks" }, "all-granularity callback delivery failed (best-effort)");
           }
           return;
         }
@@ -222,10 +222,7 @@ export async function executeAssignAction(
               ? "Agent run was aborted"
               : "Agent run failed (unknown reason)";
 
-        console.error(
-          `[AOF] Task ${action.taskId} still in-progress after agent completed. ` +
-          enforcementReason,
-        );
+        log.error({ taskId: action.taskId, correlationId, op: "completionEnforcement" }, "task still in-progress after agent completed");
 
         try {
           // Store enforcement metadata on task
@@ -252,8 +249,7 @@ export async function executeAssignAction(
             await store.transition(action.taskId, "blocked", { reason: enforcementReason });
           }
         } catch (transitionErr) {
-          const msg = transitionErr instanceof Error ? transitionErr.message : String(transitionErr);
-          console.error(`[AOF] Enforcement transition failed for ${action.taskId}: ${msg}`);
+          log.error({ err: transitionErr, taskId: action.taskId, op: "enforcementTransition" }, "enforcement transition failed");
         }
 
         // Log enforcement event (non-fatal)
@@ -270,8 +266,8 @@ export async function executeAssignAction(
               dispatchFailures: updatedTask?.frontmatter.metadata.dispatchFailures,
             },
           });
-        } catch {
-          // Logging errors should not crash the scheduler
+        } catch (err) {
+          log.warn({ err, taskId: action.taskId, op: "logCompletionEnforcement" }, "event logger write failed (best-effort)");
         }
 
         // --- Trace capture (Phase 26) --- best-effort, never blocks transitions
@@ -291,8 +287,8 @@ export async function executeAssignAction(
               debug: traceDebug,
             });
           }
-        } catch {
-          // Trace capture must never crash the scheduler
+        } catch (err) {
+          log.warn({ err, taskId: action.taskId, op: "traceCapture" }, "trace capture failed (best-effort)");
         }
 
         // --- Callback delivery (Phase 30) --- best-effort, never blocks transitions
@@ -312,14 +308,14 @@ export async function executeAssignAction(
         };
         try {
           await deliverCallbacks(callbackOpts2);
-        } catch {
-          // Delivery must never crash the scheduler
+        } catch (err) {
+          log.warn({ err, taskId: action.taskId, op: "deliverCallbacks" }, "callback delivery failed (best-effort)");
         }
         // GRAN-02: Deliver all-granularity callbacks (separate try/catch per DLVR-04)
         try {
           await deliverAllGranularityCallbacks(callbackOpts2);
-        } catch {
-          // All-granularity delivery must never crash the scheduler
+        } catch (err) {
+          log.warn({ err, taskId: action.taskId, op: "deliverAllGranularityCallbacks" }, "all-granularity callback delivery failed (best-effort)");
         }
       },
     });
@@ -345,8 +341,8 @@ export async function executeAssignAction(
           sessionId: result.sessionId,
           correlationId,
         });
-      } catch {
-        // Logging errors should not crash the scheduler
+      } catch (err) {
+        log.warn({ err, taskId: action.taskId, op: "logDispatchMatched" }, "event logger write failed (best-effort)");
       }
 
       // Log action completion
@@ -357,8 +353,8 @@ export async function executeAssignAction(
           sessionId: result.sessionId,
           correlationId,
         });
-      } catch {
-        // Logging errors should not crash the scheduler
+      } catch (err) {
+        log.warn({ err, taskId: action.taskId, op: "logActionCompleted" }, "event logger write failed (best-effort)");
       }
 
       startLeaseRenewal(store, action.taskId, action.agent!, config.defaultLeaseTtlMs);
@@ -376,10 +372,7 @@ export async function executeAssignAction(
         const previousCap = effectiveConcurrencyLimitRef.value ?? config.maxConcurrentDispatches ?? 3;
         effectiveConcurrencyLimitRef.value = Math.min(result.platformLimit, config.maxConcurrentDispatches ?? 3);
         
-        console.info(
-          `[AOF] Platform concurrency limit detected: ${result.platformLimit}, ` +
-          `effective cap now ${effectiveConcurrencyLimitRef.value} (was ${previousCap})`
-        );
+        log.info({ taskId: action.taskId, platformLimit: result.platformLimit, effectiveCap: effectiveConcurrencyLimitRef.value, previousCap }, "platform concurrency limit detected");
         
         // Emit event (non-fatal if logging fails)
         try {
@@ -392,27 +385,24 @@ export async function executeAssignAction(
             },
           });
         } catch (logErr) {
-          console.error(`[AOF] Failed to log concurrency.platformLimit event: ${(logErr as Error).message}`);
+          log.warn({ err: logErr, taskId: action.taskId, op: "logPlatformLimit" }, "event logger write failed (best-effort)");
         }
         
         // Release lease — task transitions back to ready (not blocked)
         try {
           await releaseLease(store, action.taskId, action.agent!);
         } catch (releaseErr) {
-          console.error(`[AOF] Failed to release lease for ${action.taskId}: ${(releaseErr as Error).message}`);
+          log.error({ err: releaseErr, taskId: action.taskId, op: "releaseLease" }, "failed to release lease");
         }
         
         // No retry count increment - this is capacity exhaustion, not failure
-        console.info(
-          `[AOF] Task ${action.taskId} requeued to ready (platform capacity exhausted, ` +
-          `will retry next poll)`
-        );
+        log.info({ taskId: action.taskId, op: "requeue" }, "task requeued to ready (platform capacity exhausted, will retry next poll)");
         
         return { executed, failed };
       }
       
       const errorClass = classifySpawnError(result.error ?? "unknown");
-      console.error(`[AOF] Spawn failed for ${action.taskId} (agent: ${action.agent}, class: ${errorClass}): ${result.error}`);
+      log.error({ taskId: action.taskId, agent: action.agent, errorClass, spawnError: result.error, op: "spawn" }, "spawn failed");
 
       // Track retry count and timestamp in metadata
       const currentTask = await store.get(action.taskId);
@@ -452,8 +442,8 @@ export async function executeAssignAction(
           errorMessage: result.error,
           correlationId,
         });
-      } catch {
-        // Logging errors should not crash the scheduler
+      } catch (err) {
+        log.warn({ err, taskId: action.taskId, op: "logDispatchError" }, "event logger write failed (best-effort)");
       }
 
       try {
@@ -464,8 +454,8 @@ export async function executeAssignAction(
           errorMessage: result.error,
           correlationId,
         });
-      } catch {
-        // Logging errors should not crash the scheduler
+      } catch (err) {
+        log.warn({ err, taskId: action.taskId, op: "logActionCompleted" }, "event logger write failed (best-effort)");
       }
 
       // Don't count as executed when spawn fails
@@ -477,7 +467,7 @@ export async function executeAssignAction(
     const errorMsg = error.message;
     const errorStack = error.stack ?? "No stack trace available";
 
-    console.error(`[AOF] Exception dispatching ${action.taskId} (agent: ${action.agent}): ${errorMsg}`);
+    log.error({ err, taskId: action.taskId, agent: action.agent, correlationId, op: "dispatch" }, "exception dispatching task");
 
     try {
       await logger.logDispatch("dispatch.error", "scheduler", action.taskId, {
@@ -486,8 +476,8 @@ export async function executeAssignAction(
         errorStack: errorStack,
         correlationId,
       });
-    } catch {
-      // Logging errors should not crash the scheduler
+    } catch (logErr) {
+      log.warn({ err: logErr, taskId: action.taskId, op: "logDispatchError" }, "event logger write failed (best-effort)");
     }
 
     try {
@@ -499,8 +489,8 @@ export async function executeAssignAction(
         errorStack: errorStack,
         correlationId,
       });
-    } catch {
-      // Logging errors should not crash the scheduler
+    } catch (logErr) {
+      log.warn({ err: logErr, taskId: action.taskId, op: "logActionCompleted" }, "event logger write failed (best-effort)");
     }
     
     // Don't count as executed if exception occurred, mark as failed

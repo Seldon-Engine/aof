@@ -8,6 +8,7 @@
 import { FilesystemTaskStore, serializeTask } from "../store/task-store.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import { EventLogger } from "../events/logger.js";
+import { createLogger } from "../logging/index.js";
 import { acquireLease, expireLeases, releaseLease } from "../store/lease.js";
 import { checkStaleHeartbeats, markRunArtifactExpired, readRunResult } from "../recovery/run-artifacts.js";
 import { resolveCompletionTransitions } from "../protocol/completion-utils.js";
@@ -103,6 +104,8 @@ export interface PollResult {
   };
 }
 
+const log = createLogger("scheduler");
+
 /**
  * Effective concurrency limit — auto-detected from OpenClaw platform limit.
  * Starts null, set to min(platformLimit, config.maxConcurrentDispatches) when detected.
@@ -183,7 +186,7 @@ export async function poll(
       const stackArr = Array.from(stack);
       const cycleStart = stackArr.indexOf(taskId);
       const cycle = stackArr.slice(cycleStart).concat(taskId);
-      console.error(`[AOF] Circular dependency detected: ${cycle.join(" → ")}`);
+      log.error({ cycle }, "circular dependency detected");
       for (const id of cycle) circularDeps.add(id);
       return;
     }
@@ -221,7 +224,7 @@ export async function poll(
     projectManifest = parseYaml(projectYamlContent) ?? {};
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-      console.warn(`[AOF] Failed to parse project.yaml at ${projectYamlPath}: ${(err as Error).message}`);
+      log.warn({ err, op: "parseProjectYaml", path: projectYamlPath }, "failed to parse project.yaml");
     }
   }
   const slaViolations = slaChecker.checkViolations(allTasks, projectManifest);
@@ -340,9 +343,7 @@ export async function poll(
             });
           }
         } catch (err) {
-          console.error(
-            `[AOF] DAG hop dispatch failed for ${dagTask.frontmatter.id}/${readyHopId}: ${(err as Error).message}`
-          );
+          log.error({ err, taskId: dagTask.frontmatter.id, hopId: readyHopId, op: "dagHopDispatch" }, "DAG hop dispatch failed");
         }
       }
     }
@@ -371,8 +372,8 @@ export async function poll(
           executor: config.executor,
           logger,
         });
-      } catch {
-        // Delivery retry must never crash the scheduler
+      } catch (err) {
+        log.warn({ err, taskId: task.frontmatter.id, op: "retryPendingDeliveries" }, "callback delivery retry failed (best-effort)");
       }
     }
   }
@@ -450,24 +451,23 @@ export async function poll(
 
   try {
     await logger.logSchedulerPoll(pollPayload);
-  } catch {
-    // Logging errors should not crash the scheduler
+  } catch (err) {
+    log.warn({ err, op: "logSchedulerPoll" }, "event logger poll write failed (best-effort)");
   }
 
   // BUG-004 fix: Add gateway log visibility for scheduler activity
-  // Log poll summary to gateway log (visible in ~/.openclaw/logs/gateway.log)
   if (config.dryRun) {
-    console.info(`[AOF] Scheduler poll (DRY RUN): ${stats.ready} ready, ${actions.length} actions planned, 0 dispatched`);
+    log.info({ dryRun: true, ready: stats.ready, actionsPlanned: actions.length }, "scheduler poll complete");
   } else {
-    console.info(`[AOF] Scheduler poll: ${stats.ready} ready, ${actionsExecuted} dispatched, ${actionsFailed} failed`);
+    log.info({ ready: stats.ready, actionsExecuted, actionsFailed }, "scheduler poll complete");
   }
 
   // Log warnings for common issues
   if (!config.dryRun && actions.length > 0 && actionsExecuted === 0) {
     if (!config.executor) {
-      console.error(`[AOF] Scheduler cannot dispatch: executor is undefined (${actions.length} tasks need dispatch)`);
+      log.error({ actionsPlanned: actions.length, op: "dispatch" }, "scheduler cannot dispatch: executor is undefined");
     } else if (actionsFailed > 0) {
-      console.error(`[AOF] Scheduler dispatch failures: ${actionsFailed} tasks failed to spawn (check events.jsonl for details)`);
+      log.error({ actionsFailed, op: "dispatch" }, "scheduler dispatch failures (check events.jsonl)");
     }
   }
 
@@ -476,9 +476,7 @@ export async function poll(
     // Alert when all non-done tasks are blocked
     const activeTasks = stats.total - stats.done - stats.cancelled - stats.deadletter;
     if (activeTasks > 0 && stats.blocked === activeTasks) {
-      console.error(`[AOF] ALERT: All active tasks are blocked (${stats.blocked} tasks)`);
-      console.error(`[AOF] ALERT: No tasks can progress - manual intervention required`);
-      console.error(`[AOF] ALERT: Check blocked tasks: ls ~/.openclaw/aof/tasks/blocked/`);
+      log.error({ blocked: stats.blocked }, "ALERT: all active tasks are blocked, manual intervention required");
     }
 
     // Alert when many tasks are blocked
@@ -500,14 +498,12 @@ export async function poll(
       }
 
       const ageMinutes = Math.round(oldestBlockedAge / 1000 / 60);
-      console.warn(`[AOF] WARNING: ${stats.blocked} tasks blocked (oldest: ${oldestBlockedId}, ${ageMinutes}min)`);
-      console.warn(`[AOF] WARNING: Consider investigating dispatch failures or dependencies`);
+      log.warn({ blocked: stats.blocked, oldestBlockedId, ageMinutes }, "many tasks blocked, investigate dispatch failures or dependencies");
     }
 
     // Alert when no successful dispatches in active mode
     if (actionsExecuted === 0 && stats.ready > 0 && actionsFailed > 0) {
-      console.error(`[AOF] ALERT: No successful dispatches this poll (${stats.ready} ready, ${actionsFailed} failed)`);
-      console.error(`[AOF] ALERT: Check gateway credentials and agent registry`);
+      log.error({ ready: stats.ready, actionsFailed }, "ALERT: no successful dispatches this poll, check gateway credentials");
     }
   }
 
@@ -554,15 +550,14 @@ export async function poll(
                 reviewsSkipped: murmurResult.reviewsSkipped,
               },
             });
-          } catch {
-            // Logging errors should not crash the scheduler
+          } catch (err) {
+            log.warn({ err, op: "logMurmurPoll" }, "event logger murmur poll write failed (best-effort)");
           }
         }
       }
     }
   } catch (error) {
-    // Murmur evaluation errors should not crash the scheduler
-    console.error(`[AOF] Murmur evaluation failed: ${(error as Error).message}`);
+    log.error({ err: error, op: "murmurEvaluation" }, "murmur evaluation failed");
     try {
       await logger.log("murmur.evaluation.failed", "scheduler", {
         taskId: undefined,
@@ -570,8 +565,8 @@ export async function poll(
           error: (error as Error).message,
         },
       });
-    } catch {
-      // Logging errors should not crash the scheduler
+    } catch (err) {
+      log.warn({ err, op: "logMurmurEvalFailed" }, "event logger write failed (best-effort)");
     }
   }
 

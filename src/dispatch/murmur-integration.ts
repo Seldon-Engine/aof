@@ -7,6 +7,7 @@
 
 import type { ITaskStore } from "../store/interfaces.js";
 import type { EventLogger } from "../events/logger.js";
+import { createLogger } from "../logging/index.js";
 import type { GatewayAdapter, TaskContext } from "./executor.js";
 import type { OrgTeam } from "../schemas/org-chart.js";
 import { MurmurStateManager } from "../murmur/state-manager.js";
@@ -15,6 +16,8 @@ import { buildReviewContext } from "../murmur/context-builder.js";
 import { cleanupStaleReview } from "../murmur/cleanup.js";
 import { relative, join } from "node:path";
 import { acquireLease } from "../store/lease.js";
+
+const log = createLogger("murmur-integration");
 
 export interface MurmurIntegrationOptions {
   /** Task store for creating review tasks. */
@@ -143,24 +146,18 @@ export async function evaluateMurmurTriggers(
       if (!triggerResult.shouldFire) {
         // No trigger fired or review already in progress
         if (state.currentReviewTaskId !== null) {
-          console.info(
-            `[AOF] Murmur: skipping ${team.id} (review ${state.currentReviewTaskId} in progress)`
-          );
+          log.info({ team: team.id, reviewTaskId: state.currentReviewTaskId }, "murmur: skipping team (review in progress)");
         }
         result.reviewsSkipped++;
         continue;
       }
 
-      console.info(
-        `[AOF] Murmur: trigger fired for ${team.id} (${triggerResult.triggeredBy}): ${triggerResult.reason}`
-      );
+      log.info({ team: team.id, triggeredBy: triggerResult.triggeredBy, reason: triggerResult.reason }, "murmur: trigger fired");
       result.reviewsTriggered++;
 
       // Check concurrency limit before dispatching
       if (currentInProgress >= maxConcurrentDispatches) {
-        console.info(
-          `[AOF] Murmur: skipping ${team.id} (concurrency limit ${currentInProgress}/${maxConcurrentDispatches})`
-        );
+        log.info({ team: team.id, currentInProgress, maxConcurrentDispatches }, "murmur: skipping team (concurrency limit)");
         result.reviewsSkipped++;
 
         // Log event
@@ -175,8 +172,8 @@ export async function evaluateMurmurTriggers(
               maxConcurrentDispatches,
             },
           });
-        } catch {
-          // Logging errors should not crash the scheduler
+        } catch (err) {
+          log.warn({ err, op: "eventLog" }, "event logger write failed (best-effort)");
         }
 
         continue;
@@ -184,9 +181,7 @@ export async function evaluateMurmurTriggers(
 
       // Don't mutate in dry-run mode
       if (dryRun) {
-        console.info(
-          `[AOF] Murmur: would create review task for ${team.id} (dry-run)`
-        );
+        log.info({ team: team.id, dryRun: true }, "murmur: would create review task (dry-run)");
         continue;
       }
 
@@ -215,9 +210,7 @@ export async function evaluateMurmurTriggers(
         reason: "murmur_review_created",
       });
 
-      console.info(
-        `[AOF] Murmur: created review task ${reviewTask.frontmatter.id} for ${team.id}`
-      );
+      log.info({ team: team.id, reviewTaskId: reviewTask.frontmatter.id }, "murmur: created review task");
 
       // Update murmur state (start review)
       await stateManager.startReview(
@@ -237,15 +230,13 @@ export async function evaluateMurmurTriggers(
             orchestrator: team.orchestrator,
           },
         });
-      } catch {
-        // Logging errors should not crash the scheduler
+      } catch (err) {
+        log.warn({ err, op: "eventLog" }, "event logger write failed (best-effort)");
       }
 
       // Dispatch review task if executor is available
       if (!executor) {
-        console.warn(
-          `[AOF] Murmur: executor unavailable, review task ${reviewTask.frontmatter.id} will be picked up by normal dispatch`
-        );
+        log.warn({ reviewTaskId: reviewTask.frontmatter.id, team: team.id }, "murmur: executor unavailable, review task deferred to normal dispatch");
         continue;
       }
 
@@ -283,9 +274,7 @@ export async function evaluateMurmurTriggers(
         });
 
         if (spawnResult.success) {
-          console.info(
-            `[AOF] Murmur: dispatched review task ${reviewTask.frontmatter.id} to ${team.orchestrator}`
-          );
+          log.info({ reviewTaskId: reviewTask.frontmatter.id, orchestrator: team.orchestrator, team: team.id }, "murmur: dispatched review task");
           result.reviewsDispatched++;
 
           try {
@@ -297,13 +286,11 @@ export async function evaluateMurmurTriggers(
                 sessionId: spawnResult.sessionId,
               },
             });
-          } catch {
-            // Logging errors should not crash the scheduler
+          } catch (err) {
+            log.warn({ err, op: "eventLog" }, "event logger write failed (best-effort)");
           }
         } else {
-          console.error(
-            `[AOF] Murmur: failed to dispatch review task ${reviewTask.frontmatter.id}: ${spawnResult.error}`
-          );
+          log.error({ reviewTaskId: reviewTask.frontmatter.id, spawnError: spawnResult.error, team: team.id, op: "murmurDispatch" }, "murmur: failed to dispatch review task");
           result.reviewsFailed++;
 
           try {
@@ -315,8 +302,8 @@ export async function evaluateMurmurTriggers(
                 error: spawnResult.error,
               },
             });
-          } catch {
-            // Logging errors should not crash the scheduler
+          } catch (err) {
+            log.warn({ err, op: "eventLog" }, "event logger write failed (best-effort)");
           }
 
           // Transition back to ready so normal dispatch can retry
@@ -325,9 +312,7 @@ export async function evaluateMurmurTriggers(
           });
         }
       } catch (error) {
-        console.error(
-          `[AOF] Murmur: exception dispatching review task ${reviewTask.frontmatter.id}: ${(error as Error).message}`
-        );
+        log.error({ err: error, reviewTaskId: reviewTask.frontmatter.id, team: team.id, op: "murmurDispatch" }, "murmur: exception dispatching review task");
         result.reviewsFailed++;
 
         try {
@@ -338,14 +323,12 @@ export async function evaluateMurmurTriggers(
               error: (error as Error).message,
             },
           });
-        } catch {
-          // Logging errors should not crash the scheduler
+        } catch (err) {
+          log.warn({ err, op: "eventLog" }, "event logger write failed (best-effort)");
         }
       }
     } catch (error) {
-      console.error(
-        `[AOF] Murmur: error evaluating team ${team.id}: ${(error as Error).message}`
-      );
+      log.error({ err: error, team: team.id, op: "murmurEvaluation" }, "murmur: error evaluating team");
 
       try {
         await logger.log("murmur.evaluation.error", "scheduler", {
@@ -355,19 +338,14 @@ export async function evaluateMurmurTriggers(
             error: (error as Error).message,
           },
         });
-      } catch {
-        // Logging errors should not crash the scheduler
+      } catch (err) {
+        log.warn({ err, op: "eventLog" }, "event logger write failed (best-effort)");
       }
     }
   }
 
   // Log summary
-  console.info(
-    `[AOF] Murmur evaluation: ${result.teamsEvaluated} teams, ` +
-      `${result.reviewsTriggered} triggered, ` +
-      `${result.reviewsDispatched} dispatched, ` +
-      `${result.reviewsFailed} failed`
-  );
+  log.info({ teamsEvaluated: result.teamsEvaluated, reviewsTriggered: result.reviewsTriggered, reviewsDispatched: result.reviewsDispatched, reviewsFailed: result.reviewsFailed }, "murmur evaluation complete");
 
   return result;
 }
