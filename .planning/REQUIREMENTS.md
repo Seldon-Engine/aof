@@ -58,10 +58,10 @@ Requirements for codebase cleanup milestone. Each maps to roadmap phases.
 
 - [x] **ARCH-01**: Circular dependency between dispatch/ and protocol/ broken — completion-utils.ts extracted to shared location
 - [ ] **ARCH-02**: Store abstraction bypass fixed — 14 direct serializeTask+writeFileAtomic call sites routed through ITaskStore
-- [ ] **ARCH-03**: Config→org upward import fixed — lintOrgChart dependency inverted or moved
-- [ ] **ARCH-04**: MCP→CLI hidden dependency fixed — createProjectStore() moved to projects/ or store/
-- [ ] **ARCH-05**: Duplicate loadProjectManifest() implementations unified into shared utility
-- [ ] **ARCH-06**: memory/index.ts split — barrel exports separated from registerMemoryModule() logic
+- [x] **ARCH-03**: Config→org upward import fixed — lintOrgChart dependency inverted or moved
+- [x] **ARCH-04**: MCP→CLI hidden dependency fixed — createProjectStore() moved to projects/ or store/
+- [x] **ARCH-05**: Duplicate loadProjectManifest() implementations unified into shared utility
+- [x] **ARCH-06**: memory/index.ts split — barrel exports separated from registerMemoryModule() logic
 
 ### Test Infrastructure
 
@@ -136,10 +136,10 @@ Requirements for codebase cleanup milestone. Each maps to roadmap phases.
 | REF-08 | Phase 38 | Complete |
 | ARCH-01 | Phase 39 | Complete |
 | ARCH-02 | Phase 39 | Pending |
-| ARCH-03 | Phase 39 | Pending |
-| ARCH-04 | Phase 39 | Pending |
-| ARCH-05 | Phase 39 | Pending |
-| ARCH-06 | Phase 39 | Pending |
+| ARCH-03 | Phase 39 | Complete |
+| ARCH-04 | Phase 39 | Complete |
+| ARCH-05 | Phase 39 | Complete |
+| ARCH-06 | Phase 39 | Complete |
 | TEST-01 | Phase 40 | Pending |
 | TEST-02 | Phase 40 | Pending |
 | TEST-03 | Phase 40 | Pending |

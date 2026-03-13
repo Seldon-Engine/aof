@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.10
 milestone_name: Codebase Cleanups
 status: executing
-stopped_at: Completed 39-01-PLAN.md
-last_updated: "2026-03-13T20:58:35.919Z"
-last_activity: 2026-03-13 — Completed 39-01 (Dispatch & tools circular dependency resolution)
+stopped_at: Completed 39-02-PLAN.md
+last_updated: "2026-03-13T21:02:55.640Z"
+last_activity: 2026-03-13 — Completed 39-02 (Layering fixes, module relocation, ARCHITECTURE.md)
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 15
-  completed_plans: 13
+  completed_plans: 14
   percent: 95
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-03-12)
 ## Current Position
 
 Phase: 39 of 40 (Architecture Fixes) — sixth of 7 phases in v1.10
-Plan: 2 of 3 (39-01 complete)
+Plan: 3 of 3 (39-02 complete)
 Status: In Progress
-Last activity: 2026-03-13 — Completed 39-01 (Dispatch & tools circular dependency resolution)
+Last activity: 2026-03-13 — Completed 39-02 (Layering fixes, module relocation, ARCHITECTURE.md)
 
 Progress: [██████████] 95%
 
@@ -70,6 +70,9 @@ All decisions logged in PROJECT.md Key Decisions table.
 - [Phase 38]: Used zod-to-json-schema for OpenClaw JSON Schema generation from co-located Zod schemas
 - [39-01] Kept re-exports in scheduler.ts, task-dispatcher.ts, and aof-tools.ts for backward compatibility with external consumers
 - [39-01] Consolidated duplicate SchedulerAction interfaces into single canonical definition in dispatch/types.ts
+- [Phase 39]: Inlined normalizePath in registry.ts to break config/paths<->registry cycle
+- [Phase 39]: Used dependency inversion for config->org: linter passed as optional parameter
+- [Phase 39]: createProjectStore re-exported from cli/project-utils.ts for backward compatibility
 
 ### Roadmap Evolution
 
@@ -93,5 +96,5 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-13T20:58:35.916Z
-Stopped at: Completed 39-01-PLAN.md
+Last session: 2026-03-13T21:02:55.637Z
+Stopped at: Completed 39-02-PLAN.md
