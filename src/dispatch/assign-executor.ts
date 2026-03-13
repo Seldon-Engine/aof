@@ -11,7 +11,7 @@ import type { EventLogger } from "../events/logger.js";
 import { createLogger } from "../logging/index.js";
 import type { DispatchConfig, SchedulerAction } from "./task-dispatcher.js";
 import { acquireLease, releaseLease } from "../store/lease.js";
-import { isLeaseActive, startLeaseRenewal, stopLeaseRenewal } from "./lease-manager.js";
+import { isLeaseActive, startLeaseRenewal } from "./lease-manager.js";
 import { updateThrottleState } from "./throttle.js";
 import { serializeTask } from "../store/task-store.js";
 import { join, relative } from "node:path";
@@ -21,10 +21,8 @@ import writeFileAtomic from "write-file-atomic";
 import { ProjectManifest } from "../schemas/project.js";
 import type { TaskContext } from "./executor.js";
 import { classifySpawnError } from "./scheduler-helpers.js";
-import { trackDispatchFailure, shouldTransitionToDeadletter, transitionToDeadletter } from "./failure-tracker.js";
-import { captureTrace } from "../trace/trace-writer.js";
-import { deliverCallbacks, deliverAllGranularityCallbacks } from "./callback-delivery.js";
-import { SubscriptionStore } from "../store/subscription-store.js";
+import { transitionToDeadletter } from "./failure-tracker.js";
+import { handleRunComplete } from "./assign-helpers.js";
 
 const log = createLogger("assign-executor");
 
@@ -150,174 +148,23 @@ export async function executeAssignAction(
       taskRelpath: relative(store.projectRoot, taskPath),
     };
 
+    // Build context for onRunComplete handler
+    const runCompleteCtx = {
+      action,
+      store,
+      logger,
+      config,
+      correlationId,
+      effectiveConcurrencyLimitRef,
+      allTasks,
+      executor,
+    };
+
     // Spawn agent session with correlation ID and fallback completion callback
     const result = await executor.spawnSession(context, {
       timeoutMs: config.spawnTimeoutMs ?? 30_000,
       correlationId,
-      onRunComplete: async (outcome) => {
-        // Always stop lease renewal — the agent is done regardless of outcome
-        stopLeaseRenewal(store, action.taskId);
-
-        // Re-read task to check current status
-        const currentTask = await store.get(action.taskId);
-        if (!currentTask) return;
-
-        // If agent already transitioned the task (called aof_task_complete), capture trace and return
-        if (currentTask.frontmatter.status !== "in-progress") {
-          // --- Trace capture (Phase 26) --- best-effort, never blocks transitions
-          try {
-            const sid1 = outcome.sessionId;
-            const aid1 = action.agent;
-            if (sid1 && aid1) {
-              const traceDebug = currentTask.frontmatter.metadata?.debug === true;
-              await captureTrace({
-                taskId: action.taskId,
-                sessionId: sid1,
-                agentId: aid1,
-                durationMs: outcome.durationMs,
-                store,
-                logger,
-                debug: traceDebug,
-              });
-            }
-          } catch (err) {
-            log.warn({ err, taskId: action.taskId, op: "traceCapture" }, "trace capture failed (best-effort)");
-          }
-
-          // --- Callback delivery (Phase 30) --- best-effort, never blocks transitions
-          const tasksDir = store.tasksDir;
-          const taskDirResolver = async (tid: string): Promise<string> => {
-            const t = await store.get(tid);
-            if (!t) throw new Error(`Task not found: ${tid}`);
-            return join(tasksDir, t.frontmatter.status, tid);
-          };
-          const subscriptionStore = new SubscriptionStore(taskDirResolver);
-          const callbackOpts = {
-            taskId: action.taskId,
-            store,
-            subscriptionStore,
-            executor,
-            logger,
-          };
-          try {
-            await deliverCallbacks(callbackOpts);
-          } catch (err) {
-            log.warn({ err, taskId: action.taskId, op: "deliverCallbacks" }, "callback delivery failed (best-effort)");
-          }
-          // GRAN-02: Deliver all-granularity callbacks (separate try/catch per DLVR-04)
-          try {
-            await deliverAllGranularityCallbacks(callbackOpts);
-          } catch (err) {
-            log.warn({ err, taskId: action.taskId, op: "deliverAllGranularityCallbacks" }, "all-granularity callback delivery failed (best-effort)");
-          }
-          return;
-        }
-
-        // Agent finished without calling aof_task_complete — enforcement
-        const enforcementReason = outcome.success
-          ? `Task failed: agent exited without calling aof_task_complete. Session lasted ${(outcome.durationMs / 1000).toFixed(1)}s. Run \`aof trace ${action.taskId}\` for session details.`
-          : outcome.error
-            ? `Agent error: ${outcome.error.kind}: ${outcome.error.message}`
-            : outcome.aborted
-              ? "Agent run was aborted"
-              : "Agent run failed (unknown reason)";
-
-        log.error({ taskId: action.taskId, correlationId, op: "completionEnforcement" }, "task still in-progress after agent completed");
-
-        try {
-          // Store enforcement metadata on task
-          const taskForMeta = await store.get(action.taskId);
-          if (taskForMeta) {
-            taskForMeta.frontmatter.metadata = {
-              ...taskForMeta.frontmatter.metadata,
-              enforcementReason,
-              enforcementAt: new Date().toISOString(),
-            };
-            const serialized = serializeTask(taskForMeta);
-            const metaPath = taskForMeta.path ?? join(store.tasksDir, "in-progress", `${action.taskId}.md`);
-            await writeFileAtomic(metaPath, serialized);
-          }
-
-          // Track dispatch failure (increments counter)
-          await trackDispatchFailure(store, action.taskId, enforcementReason);
-
-          // Check deadletter threshold
-          const updatedTask = await store.get(action.taskId);
-          if (updatedTask && shouldTransitionToDeadletter(updatedTask)) {
-            await transitionToDeadletter(store, logger, action.taskId, enforcementReason);
-          } else {
-            await store.transition(action.taskId, "blocked", { reason: enforcementReason });
-          }
-        } catch (transitionErr) {
-          log.error({ err: transitionErr, taskId: action.taskId, op: "enforcementTransition" }, "enforcement transition failed");
-        }
-
-        // Log enforcement event (non-fatal)
-        try {
-          const updatedTask = await store.get(action.taskId);
-          await logger.log("completion.enforcement", "scheduler", {
-            taskId: action.taskId,
-            payload: {
-              agent: action.agent,
-              sessionId: outcome.sessionId,
-              durationMs: outcome.durationMs,
-              correlationId,
-              reason: "agent_exited_without_completion",
-              dispatchFailures: updatedTask?.frontmatter.metadata.dispatchFailures,
-            },
-          });
-        } catch (err) {
-          log.warn({ err, taskId: action.taskId, op: "logCompletionEnforcement" }, "event logger write failed (best-effort)");
-        }
-
-        // --- Trace capture (Phase 26) --- best-effort, never blocks transitions
-        try {
-          const sid = outcome.sessionId;
-          const aid = action.agent;
-          if (sid && aid) {
-            const taskForTrace = await store.get(action.taskId);
-            const traceDebug = taskForTrace?.frontmatter.metadata?.debug === true;
-            await captureTrace({
-              taskId: action.taskId,
-              sessionId: sid,
-              agentId: aid,
-              durationMs: outcome.durationMs,
-              store,
-              logger,
-              debug: traceDebug,
-            });
-          }
-        } catch (err) {
-          log.warn({ err, taskId: action.taskId, op: "traceCapture" }, "trace capture failed (best-effort)");
-        }
-
-        // --- Callback delivery (Phase 30) --- best-effort, never blocks transitions
-        const tasksDir2 = store.tasksDir;
-        const taskDirResolver2 = async (tid: string): Promise<string> => {
-          const t = await store.get(tid);
-          if (!t) throw new Error(`Task not found: ${tid}`);
-          return join(tasksDir2, t.frontmatter.status, tid);
-        };
-        const subscriptionStore2 = new SubscriptionStore(taskDirResolver2);
-        const callbackOpts2 = {
-          taskId: action.taskId,
-          store,
-          subscriptionStore: subscriptionStore2,
-          executor: config.executor!,
-          logger,
-        };
-        try {
-          await deliverCallbacks(callbackOpts2);
-        } catch (err) {
-          log.warn({ err, taskId: action.taskId, op: "deliverCallbacks" }, "callback delivery failed (best-effort)");
-        }
-        // GRAN-02: Deliver all-granularity callbacks (separate try/catch per DLVR-04)
-        try {
-          await deliverAllGranularityCallbacks(callbackOpts2);
-        } catch (err) {
-          log.warn({ err, taskId: action.taskId, op: "deliverAllGranularityCallbacks" }, "all-granularity callback delivery failed (best-effort)");
-        }
-      },
+      onRunComplete: (outcome) => handleRunComplete(runCompleteCtx, outcome),
     });
 
     if (result.success) {
