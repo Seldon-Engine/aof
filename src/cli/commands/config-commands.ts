@@ -5,6 +5,7 @@
 import { join } from "node:path";
 import type { Command } from "commander";
 import { getConfigValue, setConfigValue, validateConfig } from "../../config/index.js";
+import { lintOrgChart } from "../../org/linter.js";
 import { startMetricsServer, AOFMetrics } from "../../metrics/exporter.js";
 import { collectMetrics } from "../../metrics/collector.js";
 import { MockNotificationAdapter } from "../../events/notifier.js";
@@ -47,7 +48,7 @@ export function registerConfigCommands(program: Command): void {
     .action(async (key: string, value: string, opts: { dryRun: boolean }) => {
       const root = program.opts()["root"] as string;
       const configPath = join(root, "org", "org-chart.yaml");
-      const result = await setConfigValue(configPath, key, value, opts.dryRun);
+      const result = await setConfigValue(configPath, key, value, opts.dryRun, lintOrgChart);
       const errors = result.issues.filter(i => i.severity === "error");
 
       if (opts.dryRun) {
@@ -78,7 +79,7 @@ export function registerConfigCommands(program: Command): void {
     .action(async () => {
       const root = program.opts()["root"] as string;
       const configPath = join(root, "org", "org-chart.yaml");
-      const result = await validateConfig(configPath);
+      const result = await validateConfig(configPath, lintOrgChart);
 
       if (result.schemaErrors.length > 0) {
         console.log("❌ Schema validation failed:");

@@ -5,10 +5,14 @@
  * and reusable manifest creation for migration and project creation.
  */
 
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { stringify as stringifyYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { ProjectManifest } from "../schemas/project.js";
+import type { ITaskStore } from "../store/interfaces.js";
+import { createLogger } from "../logging/index.js";
+
+const log = createLogger("projects:manifest");
 
 export interface BuildProjectManifestOptions {
   title?: string;
@@ -89,6 +93,33 @@ export function buildProjectManifest(
     },
     links: opts.links ?? { dashboards: [], docs: [] },
   };
+}
+
+/**
+ * Load project manifest from disk.
+ *
+ * When projectId matches store.projectId, reads from store.projectRoot/project.yaml.
+ * Otherwise falls back to store.projectRoot/projects/<projectId>/project.yaml.
+ *
+ * @param store - Task store with projectRoot and projectId
+ * @param projectId - Project to load manifest for
+ * @returns Parsed manifest or null if not found / unreadable
+ */
+export async function loadProjectManifest(
+  store: ITaskStore,
+  projectId: string
+): Promise<ProjectManifest | null> {
+  try {
+    const projectPath = (store.projectId === projectId)
+      ? join(store.projectRoot, "project.yaml")
+      : join(store.projectRoot, "projects", projectId, "project.yaml");
+    const content = await readFile(projectPath, "utf-8");
+    const manifest = parseYaml(content) as ProjectManifest;
+    return manifest;
+  } catch (err) {
+    log.warn({ err, op: "loadProjectManifest", projectId }, "failed to load project manifest");
+    return null;
+  }
 }
 
 /**

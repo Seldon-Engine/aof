@@ -11,7 +11,6 @@ import { join, dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { OrgChart } from "../schemas/org-chart.js";
-import { lintOrgChart } from "../org/linter.js";
 
 export interface ConfigChange {
   key: string;
@@ -40,6 +39,7 @@ export async function setConfigValue(
   key: string,
   value: string,
   dryRun: boolean = false,
+  linter?: (data: unknown) => Array<{ severity: string; message: string }>,
 ): Promise<{ change: ConfigChange; issues: Array<{ severity: string; message: string }> }> {
   const content = await readFile(configPath, "utf-8");
   const raw = parseYaml(content) as Record<string, unknown>;
@@ -62,8 +62,8 @@ export async function setConfigValue(
     };
   }
 
-  // Run referential integrity lint
-  const lintIssues = lintOrgChart(parseResult.data);
+  // Run referential integrity lint (when linter is provided)
+  const lintIssues = linter ? linter(parseResult.data) : [];
   const errors = lintIssues.filter(i => i.severity === "error");
 
   if (!dryRun && errors.length === 0) {
@@ -83,7 +83,10 @@ export async function setConfigValue(
 /**
  * Validate the entire config (schema + referential integrity).
  */
-export async function validateConfig(configPath: string): Promise<{
+export async function validateConfig(
+  configPath: string,
+  linter?: (data: unknown) => Array<{ severity: string; rule?: string; message: string }>,
+): Promise<{
   valid: boolean;
   schemaErrors: Array<{ path: string; message: string }>;
   lintIssues: Array<{ severity: string; rule: string; message: string }>;
@@ -103,7 +106,7 @@ export async function validateConfig(configPath: string): Promise<{
     };
   }
 
-  const lint = lintOrgChart(result.data);
+  const lint = linter ? linter(result.data) : [];
   const hasErrors = lint.some(i => i.severity === "error");
 
   return {

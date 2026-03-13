@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { stringify as stringifyYaml } from "yaml";
 import { getConfigValue, setConfigValue } from "../org-chart-config.js";
+import { lintOrgChart } from "../../org/linter.js";
 
 describe("Config manager", () => {
   let tmpDir: string;
@@ -56,9 +57,9 @@ describe("Config manager", () => {
 
   describe("setConfigValue", () => {
     it("sets simple top-level value", async () => {
-      const result = await setConfigValue(configPath, "schemaVersion", "2", false);
+      const result = await setConfigValue(configPath, "schemaVersion", "2", false, lintOrgChart);
       expect(result.change.newValue).toBe(2);
-      expect(result.issues.length).toBeGreaterThan(0); // Schema validation will fail
+      expect(result.issues.length).toBeGreaterThan(0); // Lint issues from sample data
     });
 
     it("sets nested value by id lookup", async () => {

@@ -48,7 +48,7 @@ export async function createAofMcpContext(options: AofMcpOptions): Promise<AofMc
 
   // If projectId is provided, use project-scoped store
   if (options.projectId || options.vaultRoot) {
-    const { createProjectStore } = await import("../cli/project-utils.js");
+    const { createProjectStore } = await import("../projects/store-factory.js");
     const projectId = options.projectId ?? "_inbox";
     const vaultRoot = options.vaultRoot ?? options.dataDir;
     const resolution = await createProjectStore({ projectId, vaultRoot, logger: options.logger });

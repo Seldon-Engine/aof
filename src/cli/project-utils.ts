@@ -2,46 +2,14 @@
  * CLI project utilities.
  *
  * Helpers for resolving projects and creating TaskStore instances.
+ * createProjectStore is re-exported from projects/store-factory.ts
+ * for backward compatibility.
  */
 
 import { join } from "node:path";
-import { FilesystemTaskStore } from "../store/task-store.js";
-import type { ITaskStore } from "../store/interfaces.js";
-import { EventLogger } from "../events/logger.js";
-import { resolveProject } from "../projects/resolver.js";
 
-export interface CreateStoreOptions {
-  /** Project ID (defaults to _inbox). */
-  projectId?: string;
-  /** Vault root (optional, uses AOF_ROOT env or default). */
-  vaultRoot?: string;
-  /** Event logger (optional). */
-  logger?: EventLogger;
-}
-
-/**
- * Create a TaskStore for a project scope.
- *
- * @param opts - Store creation options
- * @returns TaskStore instance and project resolution
- */
-export async function createProjectStore(
-  opts: CreateStoreOptions = {}
-): Promise<{ store: ITaskStore; projectRoot: string; vaultRoot: string }> {
-  const projectId = opts.projectId ?? "_inbox";
-  const resolution = await resolveProject(projectId, opts.vaultRoot);
-
-  const store = new FilesystemTaskStore(resolution.projectRoot, {
-    projectId: resolution.projectId,
-    logger: opts.logger,
-  });
-
-  return {
-    store,
-    projectRoot: resolution.projectRoot,
-    vaultRoot: resolution.vaultRoot,
-  };
-}
+export { createProjectStore } from "../projects/store-factory.js";
+export type { CreateStoreOptions } from "../projects/store-factory.js";
 
 /**
  * Resolve views directory for a project.

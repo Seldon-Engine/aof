@@ -15,10 +15,8 @@ import { isLeaseActive, startLeaseRenewal } from "./lease-manager.js";
 import { updateThrottleState } from "./throttle.js";
 import { serializeTask } from "../store/task-store.js";
 import { join, relative } from "node:path";
-import { readFile } from "node:fs/promises";
-import { parse as parseYaml } from "yaml";
 import writeFileAtomic from "write-file-atomic";
-import { ProjectManifest } from "../schemas/project.js";
+import { loadProjectManifest } from "../projects/manifest.js";
 import type { TaskContext } from "./executor.js";
 import { classifySpawnError } from "./scheduler-helpers.js";
 import { transitionToDeadletter } from "./failure-tracker.js";
@@ -26,28 +24,7 @@ import { handleRunComplete } from "./assign-helpers.js";
 
 const log = createLogger("assign-executor");
 
-/**
- * Load project manifest from disk.
- * When projectId matches store.projectId, reads from store.projectRoot/project.yaml.
- * Otherwise falls back to store.projectRoot/projects/<projectId>/project.yaml.
- */
-export async function loadProjectManifest(
-  store: ITaskStore,
-  projectId: string
-): Promise<ProjectManifest | null> {
-  try {
-    // If the projectId matches the store's own project, read directly from project root
-    const projectPath = (store.projectId === projectId)
-      ? join(store.projectRoot, "project.yaml")
-      : join(store.projectRoot, "projects", projectId, "project.yaml");
-    const content = await readFile(projectPath, "utf-8");
-    const manifest = parseYaml(content) as ProjectManifest;
-    return manifest;
-  } catch (err) {
-    log.warn({ err, op: "loadProjectManifest", projectId }, "failed to load project manifest");
-    return null;
-  }
-}
+export { loadProjectManifest } from "../projects/manifest.js";
 
 /**
  * Execute a single assign action: acquire lease, spawn agent, handle errors.
