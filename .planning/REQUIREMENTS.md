@@ -57,7 +57,7 @@ Requirements for codebase cleanup milestone. Each maps to roadmap phases.
 ### Architecture
 
 - [x] **ARCH-01**: Circular dependency between dispatch/ and protocol/ broken — completion-utils.ts extracted to shared location
-- [ ] **ARCH-02**: Store abstraction bypass fixed — 14 direct serializeTask+writeFileAtomic call sites routed through ITaskStore
+- [x] **ARCH-02**: Store abstraction bypass fixed — 14 direct serializeTask+writeFileAtomic call sites routed through ITaskStore
 - [x] **ARCH-03**: Config→org upward import fixed — lintOrgChart dependency inverted or moved
 - [x] **ARCH-04**: MCP→CLI hidden dependency fixed — createProjectStore() moved to projects/ or store/
 - [x] **ARCH-05**: Duplicate loadProjectManifest() implementations unified into shared utility
@@ -135,7 +135,7 @@ Requirements for codebase cleanup milestone. Each maps to roadmap phases.
 | REF-07 | Phase 38 | Complete |
 | REF-08 | Phase 38 | Complete |
 | ARCH-01 | Phase 39 | Complete |
-| ARCH-02 | Phase 39 | Pending |
+| ARCH-02 | Phase 39 | Complete |
 | ARCH-03 | Phase 39 | Complete |
 | ARCH-04 | Phase 39 | Complete |
 | ARCH-05 | Phase 39 | Complete |

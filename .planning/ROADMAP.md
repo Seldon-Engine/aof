@@ -111,7 +111,7 @@ See: `.planning/milestones/v1.8-ROADMAP.md` for full details
 - [x] **Phase 36: Config Registry** - Centralize all process.env reads into a Zod-validated, typed config singleton (completed 2026-03-12)
 - [x] **Phase 37: Structured Logging** - Replace core module console.* calls with leveled JSON logger, remediate silent catch blocks (completed 2026-03-13)
 - [x] **Phase 38: Code Refactoring** - Extract helpers from god functions, unify tool registration, deduplicate patterns (completed 2026-03-13)
-- [ ] **Phase 39: Architecture Fixes** - Break circular dependencies, fix store abstraction bypass, fix layering violations
+- [x] **Phase 39: Architecture Fixes** - Break circular dependencies, fix store abstraction bypass, fix layering violations (completed 2026-03-13)
 - [ ] **Phase 40: Test Infrastructure** - Shared test harness, typed mock factories, coverage config expansion, temp dir cleanup
 
 ## Phase Details
@@ -199,7 +199,7 @@ Plans:
   3. Config module does not import from org/ — the lintOrgChart dependency is inverted or relocated
   4. MCP server does not import from CLI — `createProjectStore()` lives in projects/ or store/, and `loadProjectManifest()` has a single implementation
   5. memory/index.ts barrel exports are separated from `registerMemoryModule()` initialization logic
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans complete
 Plans:
 - [ ] 39-01-PLAN.md — Break dispatch and tools circular dependency cycles (ARCH-01)
 - [ ] 39-02-PLAN.md — Fix layering violations, relocate modules, split memory barrel, break simple cycles (ARCH-03, ARCH-04, ARCH-05, ARCH-06)
@@ -264,5 +264,5 @@ Phases execute in numeric order: 34 -> 35 -> 36 -> 37 -> 38 -> 39 -> 40
 | 36. Config Registry | 2/2 | Complete    | 2026-03-12 | - |
 | 37. Structured Logging | 3/3 | Complete    | 2026-03-13 | - |
 | 38. Code Refactoring | 3/3 | Complete    | 2026-03-13 | - |
-| 39. Architecture Fixes | 2/3 | In Progress|  | - |
+| 39. Architecture Fixes | 3/3 | Complete   | 2026-03-13 | - |
 | 40. Test Infrastructure | v1.10 | 0/? | Not started | - |
