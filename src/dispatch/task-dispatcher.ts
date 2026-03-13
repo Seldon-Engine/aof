@@ -10,12 +10,11 @@
  * - Handle dispatch failures and retry logic
  */
 
-import type { Task, TaskStatus } from "../schemas/task.js";
+import type { Task } from "../schemas/task.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import type { EventLogger } from "../events/logger.js";
 import { createLogger } from "../logging/index.js";
-import type { GatewayAdapter } from "./executor.js";
-import type { TaskLockManager } from "../protocol/task-lock.js";
+import type { DispatchConfig, SchedulerAction } from "./types.js";
 import { isLeaseActive } from "./lease-manager.js";
 import { checkThrottle, updateThrottleState } from "./throttle.js";
 import { loadOrgChart } from "../org/loader.js";
@@ -26,33 +25,8 @@ import { loadProjectManifest } from "./assign-executor.js";
 
 const log = createLogger("task-dispatcher");
 
-export interface DispatchConfig {
-  dataDir: string;
-  dryRun: boolean;
-  defaultLeaseTtlMs: number;
-  spawnTimeoutMs?: number;
-  executor?: GatewayAdapter;
-  maxConcurrentDispatches?: number;
-  minDispatchIntervalMs?: number;
-  maxDispatchesPerPoll?: number;
-  /** Task lock manager for serializing per-task operations. Shared with ProtocolRouter. */
-  lockManager?: TaskLockManager;
-}
-
-export interface SchedulerAction {
-  type: "expire_lease" | "assign" | "requeue" | "block" | "deadletter" | "alert" | "stale_heartbeat" | "sla_violation" | "promote" | "murmur_create_task";
-  taskId: string;
-  taskTitle: string;
-  agent?: string;
-  reason: string;
-  fromStatus?: TaskStatus;
-  toStatus?: TaskStatus;
-  duration?: number;
-  limit?: number;
-  sourceTaskId?: string;
-  murmurCandidateId?: string;
-  blockers?: string[];
-}
+// Re-export types from types.ts for backward compatibility
+export type { DispatchConfig, SchedulerAction } from "./types.js";
 
 export interface DispatchMetrics {
   currentInProgress: number;

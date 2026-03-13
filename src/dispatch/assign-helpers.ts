@@ -19,7 +19,7 @@ import type { ITaskStore } from "../store/interfaces.js";
 import type { EventLogger } from "../events/logger.js";
 import type { GatewayAdapter } from "./executor.js";
 import type { AgentRunOutcome } from "./executor.js";
-import type { DispatchConfig, SchedulerAction } from "./task-dispatcher.js";
+import type { DispatchConfig, SchedulerAction } from "./types.js";
 import type { Task } from "../schemas/task.js";
 
 const log = createLogger("assign-helpers");

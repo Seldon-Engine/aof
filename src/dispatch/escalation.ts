@@ -16,9 +16,9 @@ import { parseDuration } from "./duration-parser.js";
 import type { TaskContext } from "./executor.js";
 import { buildHopContext } from "./dag-context-builder.js";
 
-// Import types from scheduler to avoid duplication
-export type { SchedulerConfig, SchedulerAction } from "./scheduler.js";
-import type { SchedulerConfig, SchedulerAction } from "./scheduler.js";
+// Import types from types.ts to avoid circular dependencies
+export type { SchedulerConfig, SchedulerAction } from "./types.js";
+import type { SchedulerConfig, SchedulerAction } from "./types.js";
 
 const log = createLogger("escalation");
 

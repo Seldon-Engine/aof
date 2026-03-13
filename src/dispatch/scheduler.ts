@@ -20,6 +20,7 @@ import { parse as parseYaml } from "yaml";
 import writeFileAtomic from "write-file-atomic";
 import type { GatewayAdapter, TaskContext } from "./executor.js";
 import type { Task, TaskStatus } from "../schemas/task.js";
+import type { SchedulerConfig, SchedulerAction } from "./types.js";
 import { ProjectManifest } from "../schemas/project.js";
 import { evaluateMurmurTriggers } from "./murmur-integration.js";
 import { loadOrgChart } from "../org/loader.js";
@@ -29,62 +30,13 @@ import { checkHopTimeouts } from "./escalation.js";
 import { buildDispatchActions } from "./task-dispatcher.js";
 import { checkPromotionEligibility } from "./promotion.js";
 import { executeActions } from "./action-executor.js";
-import type { TaskLockManager } from "../protocol/task-lock.js";
 import { buildTaskStats, buildChildrenMap, checkExpiredLeases, buildResourceOccupancyMap, checkBacklogPromotion, checkBlockedTaskRecovery } from "./scheduler-helpers.js";
 import { dispatchDAGHop } from "./dag-transition-handler.js";
 import { retryPendingDeliveries } from "./callback-delivery.js";
 import { SubscriptionStore } from "../store/subscription-store.js";
 
-export interface SchedulerConfig {
-  /** Root data directory. */
-  dataDir: string;
-  /** Dry-run mode: log decisions but don't mutate state. */
-  dryRun: boolean;
-  /** Default lease TTL in ms. */
-  defaultLeaseTtlMs: number;
-  /** Heartbeat TTL in ms (default 5min). */
-  heartbeatTtlMs?: number;
-  /** Executor for spawning agent sessions (optional — if absent, assign actions are logged only). */
-  executor?: GatewayAdapter;
-  /** Spawn timeout in ms (default 30s). */
-  spawnTimeoutMs?: number;
-  /** SLA checker instance (optional — created if not provided). */
-  slaChecker?: SLAChecker;
-  /** Maximum concurrent in-progress tasks across all agents (default: 3). */
-  maxConcurrentDispatches?: number;
-  /** Minimum interval between dispatches in milliseconds (default: 5000). */
-  minDispatchIntervalMs?: number;
-  /** Maximum dispatches per poll cycle (default: 2). */
-  maxDispatchesPerPoll?: number;
-  /**
-   * When true, blocking a task cascades to its direct dependents in backlog/ready.
-   * Default: false (opt-in — cascade-blocking can be heavy-handed in multi-parent scenarios).
-   */
-  cascadeBlocks?: boolean;
-  /** Maximum dispatch retries before deadletter (default: 3). */
-  maxDispatchRetries?: number;
-  /** Maximum time for a single poll cycle in ms (default: 30_000). Consumed by AOFService. */
-  pollTimeoutMs?: number;
-  /** Maximum time for a single task action in ms (default: 10_000). */
-  taskActionTimeoutMs?: number;
-  /** Task lock manager for serializing per-task operations. Shared with ProtocolRouter. */
-  lockManager?: TaskLockManager;
-}
-
-export interface SchedulerAction {
-  type: "expire_lease" | "assign" | "requeue" | "block" | "deadletter" | "alert" | "stale_heartbeat" | "sla_violation" | "promote" | "murmur_create_task";
-  taskId: string;
-  taskTitle: string;
-  agent?: string;
-  reason: string;
-  fromStatus?: TaskStatus;
-  toStatus?: TaskStatus;  // For promote actions
-  duration?: number;  // For SLA violations: actual duration
-  limit?: number;     // For SLA violations: SLA limit
-  sourceTaskId?: string;
-  murmurCandidateId?: string;
-  blockers?: string[];
-}
+// Re-export types from types.ts for backward compatibility
+export type { SchedulerConfig, SchedulerAction } from "./types.js";
 
 export interface PollResult {
   scannedAt: string;

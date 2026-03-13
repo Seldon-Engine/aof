@@ -9,7 +9,7 @@ import type { ITaskStore } from "../store/interfaces.js";
 import { serializeTask } from "../store/task-store.js";
 import type { EventLogger } from "../events/logger.js";
 import { createLogger } from "../logging/index.js";
-import type { SchedulerConfig, SchedulerAction } from "./scheduler.js";
+import type { SchedulerConfig, SchedulerAction } from "./types.js";
 import { join } from "node:path";
 import writeFileAtomic from "write-file-atomic";
 import { executeAssignAction } from "./assign-executor.js";

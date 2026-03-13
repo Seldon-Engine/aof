@@ -9,7 +9,7 @@ import type { Task, TaskStatus } from "../schemas/task.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import type { EventLogger } from "../events/logger.js";
 import { createLogger } from "../logging/index.js";
-import type { DispatchConfig, SchedulerAction } from "./task-dispatcher.js";
+import type { DispatchConfig, SchedulerAction } from "./types.js";
 import { acquireLease, releaseLease } from "../store/lease.js";
 import { isLeaseActive, startLeaseRenewal } from "./lease-manager.js";
 import { updateThrottleState } from "./throttle.js";

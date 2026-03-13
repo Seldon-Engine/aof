@@ -7,7 +7,7 @@
 import type { ITaskStore } from "../store/interfaces.js";
 import type { EventLogger } from "../events/logger.js";
 import { createLogger } from "../logging/index.js";
-import type { SchedulerConfig, SchedulerAction } from "./scheduler.js";
+import type { SchedulerConfig, SchedulerAction } from "./types.js";
 import { markRunArtifactExpired, readRunResult } from "../recovery/run-artifacts.js";
 import { resolveCompletionTransitions } from "../protocol/completion-utils.js";
 import { cascadeOnCompletion } from "./dep-cascader.js";

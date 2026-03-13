@@ -9,7 +9,7 @@ import type { Task } from "../schemas/task.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import { EventLogger } from "../events/logger.js";
 import { createLogger } from "../logging/index.js";
-import type { SchedulerConfig, SchedulerAction } from "./scheduler.js";
+import type { SchedulerConfig, SchedulerAction } from "./types.js";
 import { handleExpireLease, handlePromote, handleRequeue, handleDeadletter, handleAssign } from "./lifecycle-handlers.js";
 import { handleStaleHeartbeat } from "./recovery-handlers.js";
 import { handleAlert, handleBlock, handleSlaViolation, handleMurmurCreateTask } from "./alert-handlers.js";

@@ -5,7 +5,7 @@
  */
 
 import type { Task } from "../schemas/task.js";
-import type { SchedulerAction } from "./scheduler.js";
+import type { SchedulerAction } from "./types.js";
 
 /**
  * Build task statistics by status.

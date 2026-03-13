@@ -7,7 +7,7 @@
 import type { ITaskStore } from "../store/interfaces.js";
 import type { EventLogger } from "../events/logger.js";
 import { createLogger } from "../logging/index.js";
-import type { SchedulerConfig, SchedulerAction } from "./scheduler.js";
+import type { SchedulerConfig, SchedulerAction } from "./types.js";
 import type { ActionHandlerResult } from "./action-handler-types.js";
 
 const log = createLogger("alert-handlers");
