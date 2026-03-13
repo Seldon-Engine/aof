@@ -102,7 +102,7 @@ See: `.planning/milestones/v1.8-ROADMAP.md` for full details
 
 </details>
 
-### 🚧 v1.10 Codebase Cleanups (In Progress)
+### v1.10 Codebase Cleanups (In Progress)
 
 **Milestone Goal:** Eliminate accumulated entropy from 8 milestones of agent-built code — dead code removal, bug fixes, architectural refactoring, centralized config, structured logging, and test infrastructure improvements.
 
@@ -168,10 +168,11 @@ Plans:
   3. The 36 previously-silent catch blocks in dispatch/ now emit at least a warn-level log line with the error — no errors are silently swallowed in core modules
   4. CLI commands (`aof status`, `aof trace`, etc.) still produce human-readable console output — CLI is not affected by the structured logger
   5. EventLogger (audit JSONL) continues to write to its own files unchanged — operational logging and audit events remain separate systems
-**Plans:** 2 plans
+**Plans:** 3 plans
 Plans:
-- [ ] 34-01-PLAN.md — Gate system removal (source, tests, re-exports, migration, imports)
-- [ ] 34-02-PLAN.md — Cleanup unused MCP schemas, deprecated aliases, commented code, notifier
+- [ ] 37-01-PLAN.md — Logger factory module (install Pino, createLogger/resetLogger, tests)
+- [ ] 37-02-PLAN.md — Migrate dispatch/ console.* calls and remediate silent catch blocks
+- [ ] 37-03-PLAN.md — Migrate remaining core modules, verify CLI and EventLogger boundaries
 
 ### Phase 38: Code Refactoring
 **Goal**: God functions decomposed into testable helpers, tool registration unified, duplicated patterns consolidated
@@ -259,7 +260,7 @@ Phases execute in numeric order: 34 -> 35 -> 36 -> 37 -> 38 -> 39 -> 40
 | 34. Dead Code Removal | 2/2 | Complete    | 2026-03-12 | - |
 | 35. Bug Fixes | 2/2 | Complete    | 2026-03-12 | - |
 | 36. Config Registry | 2/2 | Complete    | 2026-03-12 | - |
-| 37. Structured Logging | v1.10 | 0/? | Not started | - |
+| 37. Structured Logging | v1.10 | 0/3 | Not started | - |
 | 38. Code Refactoring | v1.10 | 0/? | Not started | - |
 | 39. Architecture Fixes | v1.10 | 0/? | Not started | - |
 | 40. Test Infrastructure | v1.10 | 0/? | Not started | - |
