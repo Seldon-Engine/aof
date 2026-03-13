@@ -39,8 +39,8 @@ export async function setConfigValue(
   key: string,
   value: string,
   dryRun: boolean = false,
-  linter?: (data: unknown) => Array<{ severity: string; message: string }>,
-): Promise<{ change: ConfigChange; issues: Array<{ severity: string; message: string }> }> {
+  linter?: (data: any) => Array<{ severity: string; rule?: string; message: string }>,
+): Promise<{ change: ConfigChange; issues: Array<{ severity: string; rule?: string; message: string }> }> {
   const content = await readFile(configPath, "utf-8");
   const raw = parseYaml(content) as Record<string, unknown>;
 
@@ -85,11 +85,11 @@ export async function setConfigValue(
  */
 export async function validateConfig(
   configPath: string,
-  linter?: (data: unknown) => Array<{ severity: string; rule?: string; message: string }>,
+  linter?: (data: any) => Array<{ severity: string; rule?: string; message: string }>,
 ): Promise<{
   valid: boolean;
   schemaErrors: Array<{ path: string; message: string }>;
-  lintIssues: Array<{ severity: string; rule: string; message: string }>;
+  lintIssues: Array<{ severity: string; rule?: string; message: string }>;
 }> {
   const content = await readFile(configPath, "utf-8");
   const raw = parseYaml(content) as unknown;
