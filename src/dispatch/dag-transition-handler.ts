@@ -32,8 +32,6 @@ import {
   type EvalContext,
 } from "./dag-evaluator.js";
 import { buildHopContext } from "./dag-context-builder.js";
-import { serializeTask } from "../store/task-store.js";
-import writeFileAtomic from "write-file-atomic";
 import type { Task } from "../schemas/task.js";
 import type { TaskContext, GatewayAdapter } from "./executor.js";
 import type { EventLogger } from "../events/logger.js";
@@ -152,14 +150,16 @@ function buildEvalContext(task: Task): EvalContext {
  *
  * @param task - Task object (mutated in-place with new state)
  * @param newState - New WorkflowState to persist
+ * @param store - Task store for persistence
  */
 async function persistWorkflowState(
   task: Task,
   newState: WorkflowState,
+  store: ITaskStore,
 ): Promise<void> {
   task.frontmatter.workflow!.state = newState;
   task.frontmatter.updatedAt = new Date().toISOString();
-  await writeFileAtomic(task.path!, serializeTask(task));
+  await store.save(task);
 }
 
 // ---------------------------------------------------------------------------
@@ -220,7 +220,7 @@ export async function handleDAGHopCompletion(
   });
 
   // 6. Persist new state atomically
-  await persistWorkflowState(task, evalResult.state);
+  await persistWorkflowState(task, evalResult.state, store);
 
   // 7. Log event — rejection or completion
   if (hopEvent.outcome === "rejected") {
@@ -373,7 +373,7 @@ export async function dispatchDAGHop(
             status: "failed",
             completedAt: new Date().toISOString(),
           };
-          await persistWorkflowState(updatedTask, updatedTask.frontmatter.workflow.state);
+          await persistWorkflowState(updatedTask, updatedTask.frontmatter.workflow.state, store);
         }
 
         // Emit enforcement event with hopId
@@ -434,7 +434,7 @@ export async function dispatchDAGHop(
     correlationId: spawnResult.sessionId,
   };
 
-  await persistWorkflowState(task, workflow.state);
+  await persistWorkflowState(task, workflow.state, store);
 
   // Log dispatch event
   await logger.log("dag.hop_dispatched", hop.role, {

@@ -58,6 +58,8 @@ function makeStore(task?: Partial<Task>): ITaskStore {
   return {
     get: vi.fn().mockResolvedValue(defaultTask),
     transition: vi.fn().mockResolvedValue(undefined),
+    save: vi.fn().mockResolvedValue(undefined),
+    saveToPath: vi.fn().mockResolvedValue(undefined),
     tasksDir: "/tmp/tasks",
   } as unknown as ITaskStore;
 }

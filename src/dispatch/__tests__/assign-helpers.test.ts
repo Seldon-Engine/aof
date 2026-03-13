@@ -52,6 +52,8 @@ describe("handleRunComplete", () => {
       tasksDir: "/tmp/tasks",
       get: vi.fn(),
       transition: vi.fn().mockResolvedValue(undefined),
+      save: vi.fn().mockResolvedValue(undefined),
+      saveToPath: vi.fn().mockResolvedValue(undefined),
     };
 
     mockLogger = {

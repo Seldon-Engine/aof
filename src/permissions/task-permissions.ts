@@ -418,11 +418,19 @@ export class PermissionAwareTaskStore implements ITaskStore {
     const task = await this.store.get(id);
     const roleInfo = determineRole(this.agentId, this.orgChart);
     const check = checkPermission("unblock", this.agentId, task, roleInfo);
-    
+
     if (!check.allowed) {
       throw new Error(check.reason || "Permission denied");
     }
 
     return this.store.unblock(id);
+  }
+
+  async save(task: Task): Promise<void> {
+    return this.store.save(task);
+  }
+
+  async saveToPath(task: Task, path: string): Promise<void> {
+    return this.store.saveToPath(task, path);
   }
 }

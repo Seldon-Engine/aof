@@ -13,9 +13,7 @@ import type { DispatchConfig, SchedulerAction } from "./types.js";
 import { acquireLease, releaseLease } from "../store/lease.js";
 import { isLeaseActive, startLeaseRenewal } from "./lease-manager.js";
 import { updateThrottleState } from "./throttle.js";
-import { serializeTask } from "../store/task-store.js";
 import { join, relative } from "node:path";
-import writeFileAtomic from "write-file-atomic";
 import { loadProjectManifest } from "../projects/manifest.js";
 import type { TaskContext } from "./executor.js";
 import { classifySpawnError } from "./scheduler-helpers.js";
@@ -106,9 +104,7 @@ export async function executeAssignAction(
         ...leasedTask.frontmatter.metadata,
         correlationId,
       };
-      const serialized = serializeTask(leasedTask);
-      const metadataPath = leasedTask.path ?? join(store.tasksDir, "in-progress", `${leasedTask.frontmatter.id}.md`);
-      await writeFileAtomic(metadataPath, serialized);
+      await store.save(leasedTask);
     }
 
     // Build task context using post-lease task path (now in-progress/)
@@ -153,9 +149,7 @@ export async function executeAssignAction(
             ...dispatchedTaskForSession.frontmatter.metadata,
             sessionId: result.sessionId,
           };
-          const serialized = serializeTask(dispatchedTaskForSession);
-          const sessionTaskPath = dispatchedTaskForSession.path ?? join(store.tasksDir, "in-progress", `${dispatchedTaskForSession.frontmatter.id}.md`);
-          await writeFileAtomic(sessionTaskPath, serialized);
+          await store.save(dispatchedTaskForSession);
         }
       }
 
@@ -244,9 +238,7 @@ export async function executeAssignAction(
         };
 
         // Write updated task with metadata before transition
-        const serialized = serializeTask(currentTask);
-        const taskPath = currentTask.path ?? join(store.tasksDir, currentTask.frontmatter.status, `${currentTask.frontmatter.id}.md`);
-        await writeFileAtomic(taskPath, serialized);
+        await store.save(currentTask);
       }
 
       // Permanent errors → deadletter immediately

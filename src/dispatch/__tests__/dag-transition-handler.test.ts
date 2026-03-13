@@ -100,6 +100,8 @@ function makeStore(): ITaskStore {
     projectId: "test",
     tasksDir: "/tmp/project/tasks",
     get: vi.fn().mockResolvedValue(undefined),
+    save: vi.fn().mockResolvedValue(undefined),
+    saveToPath: vi.fn().mockResolvedValue(undefined),
   } as unknown as ITaskStore;
 }
 
@@ -173,7 +175,7 @@ describe("handleDAGHopCompletion", () => {
     expect(evalInput.event.outcome).toBe("complete");
 
     // State should have been persisted atomically
-    expect(writeFileAtomic).toHaveBeenCalledOnce();
+    expect(store.save).toHaveBeenCalled();
 
     // Result should have readyHops
     expect(result.readyHops).toEqual(["review"]);
@@ -466,7 +468,7 @@ describe("dispatchDAGHop", () => {
     expect(opts.timeoutMs).toBe(30_000);
 
     // State should have been persisted with dispatched status
-    expect(writeFileAtomic).toHaveBeenCalledOnce();
+    expect(store.save).toHaveBeenCalled();
 
     // Hop should now be dispatched
     expect(task.frontmatter.workflow!.state.hops.implement.status).toBe("dispatched");
@@ -507,7 +509,7 @@ describe("dispatchDAGHop", () => {
     expect(task.frontmatter.workflow!.state.hops.implement.status).toBe("ready");
 
     // State should NOT have been persisted (no writeFileAtomic call)
-    expect(writeFileAtomic).not.toHaveBeenCalled();
+    expect(store.save).not.toHaveBeenCalled();
 
     // Logger should still log the failure
     expect(logger.log).toHaveBeenCalled();

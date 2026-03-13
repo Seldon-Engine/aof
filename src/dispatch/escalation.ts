@@ -8,10 +8,8 @@
 import { randomUUID } from "node:crypto";
 import type { Task } from "../schemas/task.js";
 import type { ITaskStore } from "../store/interfaces.js";
-import { serializeTask } from "../store/task-store.js";
 import { EventLogger } from "../events/logger.js";
 import { createLogger } from "../logging/index.js";
-import writeFileAtomic from "write-file-atomic";
 import { parseDuration } from "./duration-parser.js";
 import type { TaskContext } from "./executor.js";
 import { buildHopContext } from "./dag-context-builder.js";
@@ -178,7 +176,7 @@ async function escalateHopTimeout(
 
   // 3. Persist workflow state atomically
   task.frontmatter.updatedAt = new Date().toISOString();
-  await writeFileAtomic(task.path!, serializeTask(task));
+  await store.save(task);
 
   // 4. Log escalation event
   try {

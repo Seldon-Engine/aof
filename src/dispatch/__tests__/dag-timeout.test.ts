@@ -87,6 +87,8 @@ function makeStore(tasks: Task[]): ITaskStore {
     updateBody: vi.fn(),
     transition: vi.fn(),
     delete: vi.fn(),
+    save: vi.fn().mockResolvedValue(undefined),
+    saveToPath: vi.fn().mockResolvedValue(undefined),
     tasksDir: "/tmp/tasks",
     projectRoot: "/tmp/aof",
     projectId: "test",

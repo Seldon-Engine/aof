@@ -7,13 +7,10 @@
  * See AOF-p3k task brief for requirements.
  */
 
-import { join } from "node:path";
-import writeFileAtomic from "write-file-atomic";
 import type { ITaskStore } from "../store/interfaces.js";
 import type { EventLogger } from "../events/logger.js";
 import { createLogger } from "../logging/index.js";
 import type { Task } from "../schemas/task.js";
-import { serializeTask } from "../store/task-store.js";
 
 const log = createLogger("failure-tracker");
 
@@ -42,8 +39,7 @@ export async function trackDispatchFailure(
   task.frontmatter.updatedAt = new Date().toISOString();
 
   // Write updated task back to file
-  const filePath = task.path ?? join(store.tasksDir, task.frontmatter.status, `${taskId}.md`);
-  await writeFileAtomic(filePath, serializeTask(task));
+  await store.save(task);
 }
 
 /**
@@ -128,6 +124,5 @@ export async function resetDispatchFailures(
   task.frontmatter.updatedAt = new Date().toISOString();
 
   // Write updated task back to file
-  const filePath = task.path ?? join(store.tasksDir, task.frontmatter.status, `${taskId}.md`);
-  await writeFileAtomic(filePath, serializeTask(task));
+  await store.save(task);
 }

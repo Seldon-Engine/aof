@@ -6,12 +6,10 @@ import type { HandoffRequestPayload, HandoffAckPayload } from "../schemas/protoc
 import type { Task } from "../schemas/task.js";
 import type { TaskStatus } from "../schemas/task.js";
 import type { ITaskStore } from "../store/interfaces.js";
-import { serializeTask } from "../store/task-store.js";
 import type { NotificationService } from "../events/notifier.js";
 import { readRunResult, writeRunResult, completeRunArtifact } from "../recovery/run-artifacts.js";
 import type { RunResult } from "../schemas/run-result.js";
 import { writeHandoffArtifacts } from "../delegation/index.js";
-import writeFileAtomic from "write-file-atomic";
 import type { TaskLockManager } from "./task-lock.js";
 import { InMemoryTaskLockManager } from "./task-lock.js";
 import { parseProtocolMessage, type ProtocolLogger } from "./parsers.js";
@@ -462,11 +460,10 @@ export class ProtocolRouter {
     childTask.frontmatter.updatedAt = new Date().toISOString();
 
     // Write updated task
-    const taskPath =
-      childTask.path ??
-      `${store.tasksDir}/${childTask.frontmatter.status}/${childTask.frontmatter.id}.md`;
-    childTask.path = taskPath;
-    await writeFileAtomic(taskPath, serializeTask(childTask));
+    if (!childTask.path) {
+      childTask.path = `${store.tasksDir}/${childTask.frontmatter.status}/${childTask.frontmatter.id}.md`;
+    }
+    await store.save(childTask);
 
     // Write handoff artifacts
     await writeHandoffArtifacts(store, childTask, payload);

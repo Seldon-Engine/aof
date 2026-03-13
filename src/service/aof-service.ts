@@ -324,10 +324,7 @@ export class AOFService {
             // Persist the updated state atomically
             task.frontmatter.workflow.state = state;
             task.frontmatter.updatedAt = new Date().toISOString();
-            const { serializeTask } = await import("../store/task-store.js");
-            const writeFileAtomic = (await import("write-file-atomic")).default;
-            const serialized = serializeTask(task);
-            await writeFileAtomic(task.path!, serialized);
+            await store.save(task);
 
             svcLog.info(
               { taskId: task.frontmatter.id, op: "startup_reconciliation" },

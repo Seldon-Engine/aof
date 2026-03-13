@@ -7,10 +7,7 @@
  * 3. Task not found: early return
  */
 
-import { join } from "node:path";
 import { createLogger } from "../logging/index.js";
-import { serializeTask } from "../store/task-store.js";
-import writeFileAtomic from "write-file-atomic";
 import { trackDispatchFailure, shouldTransitionToDeadletter, transitionToDeadletter } from "./failure-tracker.js";
 import { stopLeaseRenewal } from "./lease-manager.js";
 import { captureTraceSafely } from "./trace-helpers.js";
@@ -100,9 +97,7 @@ export async function handleRunComplete(
         enforcementReason,
         enforcementAt: new Date().toISOString(),
       };
-      const serialized = serializeTask(taskForMeta);
-      const metaPath = taskForMeta.path ?? join(store.tasksDir, "in-progress", `${action.taskId}.md`);
-      await writeFileAtomic(metaPath, serialized);
+      await store.save(taskForMeta);
     }
 
     // Track dispatch failure (increments counter)

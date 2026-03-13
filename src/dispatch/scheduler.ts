@@ -5,7 +5,7 @@
  * No LLM calls. Filesystem I/O only.
  */
 
-import { FilesystemTaskStore, serializeTask } from "../store/task-store.js";
+import { FilesystemTaskStore } from "../store/task-store.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import { EventLogger } from "../events/logger.js";
 import { createLogger } from "../logging/index.js";
@@ -17,7 +17,6 @@ import { join, relative } from "node:path";
 import { orgChartPath as orgChartPathFn, projectManifestPath } from "../config/paths.js";
 import { readFile, access } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
-import writeFileAtomic from "write-file-atomic";
 import type { GatewayAdapter, TaskContext } from "./executor.js";
 import type { Task, TaskStatus } from "../schemas/task.js";
 import type { SchedulerConfig, SchedulerAction } from "./types.js";

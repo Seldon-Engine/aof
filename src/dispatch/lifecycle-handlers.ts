@@ -6,12 +6,9 @@
 
 import type { Task } from "../schemas/task.js";
 import type { ITaskStore } from "../store/interfaces.js";
-import { serializeTask } from "../store/task-store.js";
 import type { EventLogger } from "../events/logger.js";
 import { createLogger } from "../logging/index.js";
 import type { SchedulerConfig, SchedulerAction } from "./types.js";
-import { join } from "node:path";
-import writeFileAtomic from "write-file-atomic";
 import { executeAssignAction } from "./assign-executor.js";
 import { shouldAllowSpawnFailedRequeue, DEFAULT_MAX_DISPATCH_RETRIES } from "./scheduler-helpers.js";
 import { transitionToDeadletter } from "./failure-tracker.js";
@@ -40,9 +37,7 @@ export async function handleExpireLease(
     if (expiringTask) {
       // Clear the lease first
       expiringTask.frontmatter.lease = undefined;
-      const serialized = serializeTask(expiringTask);
-      const taskPath = expiringTask.path ?? join(store.tasksDir, expiringTask.frontmatter.status, `${expiringTask.frontmatter.id}.md`);
-      await writeFileAtomic(taskPath, serialized);
+      await store.save(expiringTask);
 
       // BUG-AUDIT-002: For blocked tasks, check spawn failure + dependencies before requeueing
       if (expiringTask.frontmatter.status === "blocked") {
@@ -160,9 +155,7 @@ export async function handleRequeue(
     };
 
     // Write updated task with metadata before transition
-    const serialized = serializeTask(requeuedTask);
-    const taskPath = requeuedTask.path ?? join(store.tasksDir, requeuedTask.frontmatter.status, `${requeuedTask.frontmatter.id}.md`);
-    await writeFileAtomic(taskPath, serialized);
+    await store.save(requeuedTask);
   }
 
   await store.transition(action.taskId, "ready", { reason: action.reason });
