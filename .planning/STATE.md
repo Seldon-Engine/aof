@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.10
 milestone_name: Codebase Cleanups
-status: completed
-stopped_at: Phase 37 context gathered
-last_updated: "2026-03-13T00:09:14.687Z"
-last_activity: 2026-03-12 — Completed 36-02 (Env consolidation)
+status: in-progress
+stopped_at: Completed 37-01 (Logger factory)
+last_updated: "2026-03-13T00:28:52.853Z"
+last_activity: 2026-03-13 — Completed 37-01 (Logger factory)
 progress:
   total_phases: 7
   completed_phases: 3
-  total_plans: 6
-  completed_plans: 6
-  percent: 31
+  total_plans: 9
+  completed_plans: 7
+  percent: 95
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-12)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** Phase 36 - Config Registry (v1.10 Codebase Cleanups)
+**Current focus:** Phase 37 - Structured Logging (v1.10 Codebase Cleanups)
 
 ## Current Position
 
-Phase: 36 of 40 (Config Registry) — third of 7 phases in v1.10
-Plan: 2 of 2 (36-02 complete)
-Status: Phase Complete
-Last activity: 2026-03-12 — Completed 36-02 (Env consolidation)
+Phase: 37 of 40 (Structured Logging) — fourth of 7 phases in v1.10
+Plan: 1 of 3 (37-01 complete)
+Status: In Progress
+Last activity: 2026-03-13 — Completed 37-01 (Logger factory)
 
-Progress: [███░░░░░░░] 31%
+Progress: [██████████] 95%
 
 ## Performance Metrics
 
@@ -55,6 +55,8 @@ All decisions logged in PROJECT.md Key Decisions table.
 - [36-01] resetConfig(overrides) deep-merges with Zod defaults without reading process.env for test isolation
 - [36-02] Lazy default for --root CLI option via preAction hook instead of module-level const
 - [36-02] configPath fallback uses cfg.openclaw.stateDir + openclaw.json instead of hardcoded homedir path
+- [37-01] Used pino.destination DestinationStream type for proper flushSync access in resetLogger
+- [37-01] Tests use PassThrough streams with direct pino instances for output verification rather than capturing stderr
 
 ### Roadmap Evolution
 
@@ -78,6 +80,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-13T00:09:14.685Z
-Stopped at: Phase 37 context gathered
-Resume file: .planning/phases/37-structured-logging/37-CONTEXT.md
+Last session: 2026-03-13T00:28:30Z
+Stopped at: Completed 37-01 (Logger factory)
+Resume file: .planning/phases/37-structured-logging/37-01-SUMMARY.md

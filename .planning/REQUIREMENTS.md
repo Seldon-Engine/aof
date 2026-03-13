@@ -35,13 +35,13 @@ Requirements for codebase cleanup milestone. Each maps to roadmap phases.
 
 ### Structured Logging
 
-- [ ] **LOG-01**: Pino integrated as structured logging library with JSON output to stderr
-- [ ] **LOG-02**: Log levels configurable via AOF_LOG_LEVEL env var (read from config registry)
-- [ ] **LOG-03**: Child loggers created per module for contextual logging (dispatch, scheduler, protocol, daemon, service)
+- [x] **LOG-01**: Pino integrated as structured logging library with JSON output to stderr
+- [x] **LOG-02**: Log levels configurable via AOF_LOG_LEVEL env var (read from config registry)
+- [x] **LOG-03**: Child loggers created per module for contextual logging (dispatch, scheduler, protocol, daemon, service)
 - [ ] **LOG-04**: Core module console.* calls replaced with structured logger (~120 calls in dispatch, service, protocol, daemon)
 - [ ] **LOG-05**: 36 silent catch blocks in dispatch remediated — errors logged at warn/debug level instead of swallowed
 - [ ] **LOG-06**: CLI console.* output unchanged — user-facing output is not logging
-- [ ] **LOG-07**: EventLogger (audit JSONL) unchanged — operational logging and audit events remain separate systems
+- [x] **LOG-07**: EventLogger (audit JSONL) unchanged — operational logging and audit events remain separate systems
 
 ### Code Refactoring
 
@@ -119,13 +119,13 @@ Requirements for codebase cleanup milestone. Each maps to roadmap phases.
 | CFG-02 | Phase 36 | Complete |
 | CFG-03 | Phase 36 | Complete |
 | CFG-04 | Phase 36 | Complete |
-| LOG-01 | Phase 37 | Pending |
-| LOG-02 | Phase 37 | Pending |
-| LOG-03 | Phase 37 | Pending |
+| LOG-01 | Phase 37 | Complete |
+| LOG-02 | Phase 37 | Complete |
+| LOG-03 | Phase 37 | Complete |
 | LOG-04 | Phase 37 | Pending |
 | LOG-05 | Phase 37 | Pending |
 | LOG-06 | Phase 37 | Pending |
-| LOG-07 | Phase 37 | Pending |
+| LOG-07 | Phase 37 | Complete |
 | REF-01 | Phase 38 | Pending |
 | REF-02 | Phase 38 | Pending |
 | REF-03 | Phase 38 | Pending |
