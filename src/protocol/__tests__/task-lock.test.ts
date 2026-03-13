@@ -1,5 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { InMemoryTaskLockManager } from "../task-lock.js";
+
+// Mock structured logger to suppress output during tests
+vi.mock("../../logging/index.js", () => ({
+  createLogger: () => ({ trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn(), child: vi.fn() }),
+}));
 
 describe("InMemoryTaskLockManager", () => {
   it("executes functions serially for the same taskId", async () => {

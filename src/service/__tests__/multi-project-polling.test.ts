@@ -5,7 +5,7 @@
  * aggregate stats, and inject project context into TaskContext.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -13,6 +13,11 @@ import { stringify as stringifyYaml } from "yaml";
 import { AOFService } from "../aof-service.js";
 import type { GatewayAdapter, TaskContext, SpawnResult } from "../../dispatch/executor.js";
 import { FilesystemTaskStore } from "../../store/task-store.js";
+
+// Mock structured logger to suppress output during tests
+vi.mock("../../logging/index.js", () => ({
+  createLogger: () => ({ trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn(), child: vi.fn() }),
+}));
 
 class TestExecutor implements GatewayAdapter {
   readonly spawned: TaskContext[] = [];

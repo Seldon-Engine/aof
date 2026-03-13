@@ -9,6 +9,11 @@ import { AOFService } from "../aof-service.js";
 import type { PollResult } from "../../dispatch/scheduler.js";
 import type { GatewayAdapter } from "../../dispatch/executor.js";
 
+// Mock structured logger to suppress output during tests
+vi.mock("../../logging/index.js", () => ({
+  createLogger: () => ({ trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn(), child: vi.fn() }),
+}));
+
 describe("AOFService ProtocolRouter wiring", () => {
   let tmpDir: string;
   let store: ITaskStore;

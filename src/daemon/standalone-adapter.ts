@@ -13,6 +13,9 @@ import type {
   AgentRunOutcome,
 } from "../dispatch/executor.js";
 import { getConfig } from "../config/registry.js";
+import { createLogger } from "../logging/index.js";
+
+const log = createLogger("daemon");
 
 export interface StandaloneAdapterOptions {
   gatewayUrl?: string;
@@ -52,17 +55,16 @@ export class StandaloneAdapter implements GatewayAdapter {
         signal: AbortSignal.timeout(5000),
       });
       if (!res.ok) {
-        console.error(
-          `[StandaloneAdapter] Gateway health check failed (HTTP ${res.status}). ` +
-            `Is the OpenClaw gateway running at ${this.gatewayUrl}?`,
+        log.error(
+          { gatewayUrl: this.gatewayUrl, statusCode: res.status },
+          "gateway health check failed",
         );
       }
       this.gatewayVerified = true;
     } catch (err) {
-      console.error(
-        `[StandaloneAdapter] Cannot reach gateway at ${this.gatewayUrl}. ` +
-          `Ensure the OpenClaw gateway is running.\n` +
-          `  Error: ${err instanceof Error ? err.message : String(err)}`,
+      log.error(
+        { err, gatewayUrl: this.gatewayUrl },
+        "cannot reach gateway — ensure the OpenClaw gateway is running",
       );
       // Mark verified to avoid spamming on every call
       this.gatewayVerified = true;
@@ -112,9 +114,9 @@ export class StandaloneAdapter implements GatewayAdapter {
       if (opts?.onRunComplete) {
         this.pollForCompletion(sessionId, context.taskId, opts.onRunComplete).catch(
           (err) =>
-            console.error(
-              `[StandaloneAdapter] Completion poll error for ${sessionId}:`,
-              err,
+            log.error(
+              { err, sessionId },
+              "completion poll error",
             ),
         );
       }
@@ -154,7 +156,8 @@ export class StandaloneAdapter implements GatewayAdapter {
         lastHeartbeatAt: data.lastHeartbeatAt,
         completedAt: data.completedAt,
       };
-    } catch {
+    } catch (err) {
+      log.warn({ err, sessionId }, "failed to get session status");
       return { sessionId, alive: false };
     }
   }
@@ -170,10 +173,7 @@ export class StandaloneAdapter implements GatewayAdapter {
         },
       );
     } catch (err) {
-      console.error(
-        `[StandaloneAdapter] Failed to force-complete session ${sessionId}:`,
-        err instanceof Error ? err.message : String(err),
-      );
+      log.warn({ err, sessionId }, "failed to force-complete session");
     }
   }
 

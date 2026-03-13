@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { createLogger } from "../logging/index.js";
 import type { ProtocolEnvelope as ProtocolEnvelopeType } from "../schemas/protocol.js";
 import type { StatusUpdatePayload } from "../schemas/protocol.js";
 import type { HandoffRequestPayload, HandoffAckPayload } from "../schemas/protocol.js";
@@ -47,6 +48,8 @@ export interface ProtocolRouterDependencies {
   /** Spawn timeout in ms for DAG hop dispatch (default 30s). */
   spawnTimeoutMs?: number;
 }
+
+const routerLog = createLogger("protocol");
 
 export class ProtocolRouter {
   private readonly handlers: Record<
@@ -199,7 +202,7 @@ export class ProtocolRouter {
       try {
         await cascadeOnCompletion(envelope.taskId, store, this.logger);
       } catch (err) {
-        console.error(`[AOF] cascadeOnCompletion failed for ${envelope.taskId}:`, err);
+        routerLog.error({ err, taskId: envelope.taskId }, "cascadeOnCompletion failed");
       }
     }
 
@@ -316,7 +319,7 @@ export class ProtocolRouter {
                   try {
                     await cascadeOnCompletion(task.frontmatter.id, this.store, this.logger as import("../events/logger.js").EventLogger);
                   } catch (err) {
-                    console.error(`[AOF] cascadeOnCompletion failed for ${task.frontmatter.id}:`, err);
+                    routerLog.error({ err, taskId: task.frontmatter.id }, "cascadeOnCompletion failed");
                   }
                 }
               } else {
@@ -350,8 +353,9 @@ export class ProtocolRouter {
           });
         } catch (err) {
           // DAG errors must not crash the scheduler
-          console.error(
-            `[AOF] DAG handleSessionEnd failed for ${task.frontmatter.id}: ${(err as Error).message}`,
+          routerLog.error(
+            { err, taskId: task.frontmatter.id },
+            "DAG handleSessionEnd failed",
           );
         }
       } else {
@@ -373,7 +377,7 @@ export class ProtocolRouter {
           try {
             await cascadeOnCompletion(task.frontmatter.id, this.store, this.logger as import("../events/logger.js").EventLogger);
           } catch (err) {
-            console.error(`[AOF] cascadeOnCompletion failed for ${task.frontmatter.id}:`, err);
+            routerLog.error({ err, taskId: task.frontmatter.id }, "cascadeOnCompletion failed");
           }
         }
       }

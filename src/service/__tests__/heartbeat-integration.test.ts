@@ -11,6 +11,11 @@ import { poll } from "../../dispatch/scheduler.js";
 import { writeRunResult, readRunArtifact } from "../../recovery/run-artifacts.js";
 import type { RunResult } from "../../schemas/run-result.js";
 
+// Mock structured logger to suppress output during tests
+vi.mock("../../logging/index.js", () => ({
+  createLogger: () => ({ trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn(), child: vi.fn() }),
+}));
+
 describe("heartbeat integration", () => {
   let tmpDir: string;
   let store: ITaskStore;

@@ -13,6 +13,23 @@ import { getMetricValue } from "../../testing/metrics-reader.js";
 import type { PollResult } from "../../dispatch/scheduler.js";
 import type { BaseEvent } from "../../schemas/event.js";
 
+// Mock structured logger to suppress output and enable assertions
+const mockLogFns = {
+  trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(),
+  error: vi.fn(), fatal: vi.fn(), child: vi.fn(),
+};
+vi.mock("../../logging/index.js", () => ({
+  createLogger: () => ({
+    trace: (...args: unknown[]) => mockLogFns.trace(...args),
+    debug: (...args: unknown[]) => mockLogFns.debug(...args),
+    info: (...args: unknown[]) => mockLogFns.info(...args),
+    warn: (...args: unknown[]) => mockLogFns.warn(...args),
+    error: (...args: unknown[]) => mockLogFns.error(...args),
+    fatal: (...args: unknown[]) => mockLogFns.fatal(...args),
+    child: (...args: unknown[]) => mockLogFns.child(...args),
+  }),
+}));
+
 describe("AOFService", () => {
   let tmpDir: string;
   let store: ITaskStore;
@@ -450,7 +467,7 @@ describe("AOFService", () => {
       });
 
       it("logs each reclaimed task individually", async () => {
-        const infoSpy = vi.spyOn(console, "info");
+        mockLogFns.info.mockClear();
 
         // Create 2 in-progress tasks
         const task1 = await store.create({
@@ -478,26 +495,25 @@ describe("AOFService", () => {
         );
         await service.start();
 
-        // ODD: console.info called with each task ID
-        const reclaimLogs = infoSpy.mock.calls
-          .map(c => c[0] as string)
-          .filter(msg => msg.includes("Reclaimed orphaned task"));
-        expect(reclaimLogs.length).toBe(2);
-        expect(reclaimLogs.some(l => l.includes(task1.frontmatter.id))).toBe(true);
-        expect(reclaimLogs.some(l => l.includes(task2.frontmatter.id))).toBe(true);
+        // ODD: structured logger called with each task ID
+        const reclaimCalls = mockLogFns.info.mock.calls.filter(
+          (c: unknown[]) => typeof c[1] === "string" && c[1].includes("reclaimed orphaned task"),
+        );
+        expect(reclaimCalls.length).toBe(2);
+        expect(reclaimCalls.some((c: unknown[]) => (c[0] as { taskId: string }).taskId === task1.frontmatter.id)).toBe(true);
+        expect(reclaimCalls.some((c: unknown[]) => (c[0] as { taskId: string }).taskId === task2.frontmatter.id)).toBe(true);
 
         // ODD: summary line logged
-        const summaryLogs = infoSpy.mock.calls
-          .map(c => c[0] as string)
-          .filter(msg => msg.includes("2 task(s) reclaimed"));
-        expect(summaryLogs.length).toBe(1);
+        const summaryCalls = mockLogFns.info.mock.calls.filter(
+          (c: unknown[]) => typeof c[0] === "object" && c[0] !== null && "totalReclaimed" in (c[0] as Record<string, unknown>),
+        );
+        expect(summaryCalls.length).toBe(1);
 
-        infoSpy.mockRestore();
         await service.stop();
       });
 
       it("handles startup with no orphaned tasks", async () => {
-        const infoSpy = vi.spyOn(console, "info");
+        mockLogFns.info.mockClear();
 
         // Create a task in backlog (not in-progress)
         await store.create({
@@ -514,17 +530,16 @@ describe("AOFService", () => {
         await service.start();
 
         // ODD: no reclaim logs, only "no orphaned tasks" summary
-        const reclaimLogs = infoSpy.mock.calls
-          .map(c => c[0] as string)
-          .filter(msg => msg.includes("Reclaimed orphaned task"));
-        expect(reclaimLogs.length).toBe(0);
+        const reclaimCalls = mockLogFns.info.mock.calls.filter(
+          (c: unknown[]) => typeof c[1] === "string" && c[1].includes("reclaimed orphaned task"),
+        );
+        expect(reclaimCalls.length).toBe(0);
 
-        const noOrphanLogs = infoSpy.mock.calls
-          .map(c => c[0] as string)
-          .filter(msg => msg.includes("no orphaned tasks found"));
-        expect(noOrphanLogs.length).toBe(1);
+        const noOrphanCalls = mockLogFns.info.mock.calls.filter(
+          (c: unknown[]) => typeof c[0] === "string" && c[0].includes("no orphaned tasks found"),
+        );
+        expect(noOrphanCalls.length).toBe(1);
 
-        infoSpy.mockRestore();
         await service.stop();
       });
     });

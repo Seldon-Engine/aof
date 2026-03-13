@@ -9,6 +9,11 @@ import { EventLogger } from "../../events/logger.js";
 import { startAofDaemon } from "../daemon.js";
 import type { PollResult } from "../../dispatch/scheduler.js";
 
+// Mock structured logger to suppress output during tests
+vi.mock("../../logging/index.js", () => ({
+  createLogger: () => ({ trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn(), child: vi.fn() }),
+}));
+
 describe("AOF daemon", () => {
   let tmpDir: string;
   let store: ITaskStore;

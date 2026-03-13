@@ -10,6 +10,9 @@ import { parseProtocolMessage, ProtocolRouter } from "../protocol/router.js";
 import { InMemoryTaskLockManager } from "../protocol/task-lock.js";
 import { discoverProjects, type ProjectRecord } from "../projects/index.js";
 import { createMurmurHook } from "../dispatch/murmur-hooks.js";
+import { createLogger } from "../logging/index.js";
+
+const svcLog = createLogger("service");
 
 /** Maximum time to wait for in-flight polls to complete during shutdown (ms). */
 const DRAIN_TIMEOUT_MS = 10_000;
@@ -171,7 +174,7 @@ export class AOFService {
     // 2. Wait for in-flight poll with drain timeout
     const drainStart = Date.now();
 
-    console.info("[AOF] Drain started — waiting for in-flight transitions...");
+    svcLog.info("drain started — waiting for in-flight transitions");
     try {
       await this.logger.logSystem("system.shutdown", {
         drainTimeoutMs: DRAIN_TIMEOUT_MS,
@@ -184,7 +187,7 @@ export class AOFService {
     // Countdown logger
     const countdownTimer = setInterval(() => {
       const remaining = Math.max(0, Math.round((DRAIN_TIMEOUT_MS - (Date.now() - drainStart)) / 1000));
-      console.info(`[AOF] Drain in progress... ${remaining}s remaining`);
+      svcLog.info({ remainingSeconds: remaining }, "drain in progress");
     }, 2000);
 
     try {
@@ -194,13 +197,12 @@ export class AOFService {
           setTimeout(() => reject(new Error("drain_timeout")), DRAIN_TIMEOUT_MS)
         ),
       ]);
-      console.info(`[AOF] Drain complete — all transitions finished (${Date.now() - drainStart}ms)`);
+      svcLog.info({ durationMs: Date.now() - drainStart }, "drain complete — all transitions finished");
     } catch (err) {
       if ((err as Error).message === "drain_timeout") {
-        console.warn(`[AOF] Drain timeout after ${DRAIN_TIMEOUT_MS}ms — forcing exit`);
-        console.warn("[AOF] Orphaned tasks will be reclaimed on next startup");
+        svcLog.warn({ timeoutMs: DRAIN_TIMEOUT_MS }, "drain timeout — forcing exit, orphaned tasks will be reclaimed on next startup");
       } else {
-        console.error(`[AOF] Drain error: ${(err as Error).message}`);
+        svcLog.error({ err }, "drain error");
       }
     } finally {
       clearInterval(countdownTimer);
@@ -256,7 +258,7 @@ export class AOFService {
     // Create TaskStore for each valid project (skip those with errors)
     for (const project of this.projects) {
       if (project.error) {
-        console.warn(`[AOF] Skipping project ${project.id}: ${project.error}`);
+        svcLog.warn({ projectId: project.id, error: project.error }, "skipping project");
         continue;
       }
 
@@ -270,7 +272,7 @@ export class AOFService {
       this.projectStores.set(project.id, store);
     }
 
-    console.info(`[AOF] Initialized ${this.projectStores.size} project stores`);
+    svcLog.info({ count: this.projectStores.size }, "initialized project stores");
   }
 
   /**
@@ -327,8 +329,9 @@ export class AOFService {
             const serialized = serializeTask(task);
             await writeFileAtomic(task.path!, serialized);
 
-            console.info(
-              `[AOF] DAG task ${task.frontmatter.id}: reset dispatched hops to ready (startup reconciliation)`
+            svcLog.info(
+              { taskId: task.frontmatter.id, op: "startup_reconciliation" },
+              "DAG task: reset dispatched hops to ready",
             );
             try {
               await this.logger.log("task.reclaimed", "system", {
@@ -347,9 +350,9 @@ export class AOFService {
             reason: "startup_reconciliation",
           });
 
-          console.info(
-            `[AOF] Reclaimed orphaned task ${task.frontmatter.id} ` +
-            `(was in-progress, leased to ${lease?.agent ?? "unknown"}) -> ready`
+          svcLog.info(
+            { taskId: task.frontmatter.id, previousAgent: lease?.agent ?? "unknown" },
+            "reclaimed orphaned task -> ready",
           );
 
           try {
@@ -367,17 +370,18 @@ export class AOFService {
 
           totalReclaimed++;
         } catch (err) {
-          console.error(
-            `[AOF] Failed to reclaim task ${task.frontmatter.id}: ${(err as Error).message}`
+          svcLog.error(
+            { err, taskId: task.frontmatter.id },
+            "failed to reclaim task",
           );
         }
       }
     }
 
     if (totalReclaimed > 0) {
-      console.info(`[AOF] Startup reconciliation: ${totalReclaimed} task(s) reclaimed`);
+      svcLog.info({ totalReclaimed }, "startup reconciliation complete");
     } else {
-      console.info("[AOF] Startup reconciliation: no orphaned tasks found");
+      svcLog.info("startup reconciliation: no orphaned tasks found");
     }
   }
 
@@ -410,7 +414,7 @@ export class AOFService {
     } catch (err) {
       const message = (err as Error).message;
       if (message.includes("Poll timeout")) {
-        console.warn(`[AOF] Poll timed out after ${this.pollTimeoutMs}ms — skipping to next cycle`);
+        svcLog.warn({ timeoutMs: this.pollTimeoutMs }, "poll timed out — skipping to next cycle");
         try {
           await this.logger.log("poll.timeout", "scheduler", {
             payload: { timeoutMs: this.pollTimeoutMs, durationMs: Math.round(performance.now() - start) },
@@ -437,7 +441,7 @@ export class AOFService {
         const result = await this.poller(store, this.logger, this.schedulerConfig);
         results.push(result);
       } catch (err) {
-        console.error(`[AOF] Failed to poll project ${projectId}: ${(err as Error).message}`);
+        svcLog.error({ err, projectId }, "failed to poll project");
       }
     }
     

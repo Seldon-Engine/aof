@@ -2,6 +2,9 @@
  * TaskLockManager provides per-task serialization of asynchronous operations.
  * Used to prevent race conditions when concurrent protocol messages target the same task.
  */
+import { createLogger } from "../logging/index.js";
+
+const lockLog = createLogger("task-lock");
 
 export interface TaskLockManager {
   /**
@@ -35,8 +38,8 @@ export class InMemoryTaskLockManager implements TaskLockManager {
     // 3. Returns the result to the caller (propagates errors)
     const resultPromise = new Promise<T>((resolve, reject) => {
       currentLock
-        .catch(() => {
-          // Swallow previous errors to continue the chain
+        .catch((err) => {
+          lockLog.warn({ err, taskId }, "previous lock holder errored — continuing chain");
         })
         .then(() => fn())
         .then(resolve, reject);
@@ -45,8 +48,8 @@ export class InMemoryTaskLockManager implements TaskLockManager {
     // Create the next lock in the chain
     // This settles when fn settles, but swallows errors to keep chain alive
     const nextLock = resultPromise
-      .catch(() => {
-        // Swallow errors to keep the chain alive for next operations
+      .catch((err) => {
+        lockLog.warn({ err, taskId }, "lock operation errored — keeping chain alive");
       })
       .finally(() => {
         // Clean up lock if this was the last pending operation

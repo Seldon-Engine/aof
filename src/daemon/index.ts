@@ -4,6 +4,9 @@ import { resolve } from "node:path";
 import { Command } from "commander";
 import { startAofDaemon } from "./daemon.js";
 import { getConfig } from "../config/registry.js";
+import { createLogger } from "../logging/index.js";
+
+const log = createLogger("daemon");
 
 const program = new Command()
   .name("aof-daemon")
@@ -19,7 +22,7 @@ program.action(async (opts: { root?: string; interval: string; dryRun: boolean }
 
   const pollIntervalMs = Number(opts.interval);
   if (Number.isNaN(pollIntervalMs) || pollIntervalMs <= 0) {
-    console.error("Invalid --interval (must be positive number)");
+    log.error("invalid --interval (must be positive number)");
     process.exitCode = 1;
     return;
   }
@@ -36,7 +39,7 @@ program.action(async (opts: { root?: string; interval: string; dryRun: boolean }
   });
 
   const resolvedSocket = socketPath ?? resolve(opts.root, "daemon.sock");
-  console.log(`[AOF] Daemon started. Health endpoint: ${resolvedSocket}`);
+  log.info({ socketPath: resolvedSocket }, "daemon started");
 
   const shutdown = async () => {
     if (healthServer) {
@@ -53,6 +56,6 @@ program.action(async (opts: { root?: string; interval: string; dryRun: boolean }
 });
 
 program.parseAsync().catch((err: unknown) => {
-  console.error(err);
+  log.error({ err }, "daemon startup failed");
   process.exitCode = 1;
 });

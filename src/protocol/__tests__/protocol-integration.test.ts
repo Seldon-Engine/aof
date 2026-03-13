@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +13,11 @@ import type { ProtocolEnvelope } from "../../schemas/protocol.js";
 import type { RunResult } from "../../schemas/run-result.js";
 import type { Task } from "../../schemas/task.js";
 import { acquireLease } from "../../store/lease.js";
+
+// Mock structured logger to suppress output during tests
+vi.mock("../../logging/index.js", () => ({
+  createLogger: () => ({ trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn(), child: vi.fn() }),
+}));
 
 /**
  * Integration test suite for AOF Protocols (TASK-057 through TASK-061)

@@ -11,6 +11,9 @@ import { createHealthServer, selfCheck, type DaemonStateProvider, type StatusCon
 import { setShuttingDown } from "./health.js";
 import { VERSION } from "../version.js";
 import { StandaloneAdapter } from "./standalone-adapter.js";
+import { createLogger } from "../logging/index.js";
+
+const log = createLogger("daemon");
 
 export interface AOFDaemonOptions extends AOFServiceConfig {
   store?: ITaskStore;
@@ -134,7 +137,7 @@ export async function startAofDaemon(opts: AOFDaemonOptions): Promise<AOFDaemonC
 
   // --- Step 6: Emit crash recovery event if applicable ---
   if (previousPid !== undefined) {
-    console.info(`[AOF] Recovered from crash (previous PID: ${previousPid})`);
+    log.info({ previousPid }, "recovered from crash");
     try {
       await logger.logSystem("system.crash_recovery", {
         previousPid,
