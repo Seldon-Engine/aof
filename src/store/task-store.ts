@@ -514,4 +514,20 @@ export class FilesystemTaskStore implements ITaskStore {
       this.logger,
     );
   }
+
+  /**
+   * Persist a modified task to its canonical path.
+   * Uses task.path if set, otherwise computes from status directory.
+   */
+  async save(task: Task): Promise<void> {
+    const filePath = task.path ?? this.taskPath(task.frontmatter.id, task.frontmatter.status);
+    await writeFileAtomic(filePath, serializeTask(task));
+  }
+
+  /**
+   * Persist a task to an explicit path (for session copies, metadata files).
+   */
+  async saveToPath(task: Task, path: string): Promise<void> {
+    await writeFileAtomic(path, serializeTask(task));
+  }
 }

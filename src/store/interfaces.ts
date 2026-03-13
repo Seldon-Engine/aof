@@ -182,4 +182,16 @@ export interface ITaskStore {
    * Can only unblock tasks currently in blocked state.
    */
   unblock(id: string): Promise<Task>;
+
+  /**
+   * Persist a modified task to its canonical path (task.path or computed from status).
+   * Serializes the task and writes atomically.
+   */
+  save(task: Task): Promise<void>;
+
+  /**
+   * Persist a task to an explicit path (for session copies, metadata files).
+   * Serializes the task and writes atomically to the given path.
+   */
+  saveToPath(task: Task, path: string): Promise<void>;
 }
