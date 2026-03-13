@@ -183,7 +183,7 @@ Plans:
   2. Tool registration for OpenClaw adapter and MCP server shares handler functions through a common layer — adding a new tool requires implementing the handler once, not twice
   3. Callback delivery and trace capture code each exist in exactly one place (single helper function) — no copy-paste duplication in assign-executor.ts
   4. MCP tools.ts inline schemas are moved to a shared location — the god file is split into focused modules
-**Plans:** 3 plans
+**Plans:** 2/3 plans executed
 Plans:
 - [ ] 38-01-PLAN.md — Decompose executeAssignAction, deduplicate callback/trace helpers (REF-01, REF-04, REF-05, REF-06)
 - [ ] 38-02-PLAN.md — Decompose executeActions switch into domain handler modules (REF-02)
@@ -262,6 +262,6 @@ Phases execute in numeric order: 34 -> 35 -> 36 -> 37 -> 38 -> 39 -> 40
 | 35. Bug Fixes | 2/2 | Complete    | 2026-03-12 | - |
 | 36. Config Registry | 2/2 | Complete    | 2026-03-12 | - |
 | 37. Structured Logging | 3/3 | Complete    | 2026-03-13 | - |
-| 38. Code Refactoring | v1.10 | 0/3 | Not started | - |
+| 38. Code Refactoring | 2/3 | In Progress|  | - |
 | 39. Architecture Fixes | v1.10 | 0/? | Not started | - |
 | 40. Test Infrastructure | v1.10 | 0/? | Not started | - |

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.10
 milestone_name: Codebase Cleanups
 status: executing
-stopped_at: Phase 38 context gathered
-last_updated: "2026-03-13T01:53:26.452Z"
-last_activity: 2026-03-13 — Completed 37-02 (Dispatch module migration)
+stopped_at: Completed 38-02-PLAN.md
+last_updated: "2026-03-13T11:59:03.057Z"
+last_activity: 2026-03-13 — Completed 38-02 (Action executor decomposition)
 progress:
   total_phases: 7
   completed_phases: 4
-  total_plans: 9
-  completed_plans: 9
-  percent: 95
+  total_plans: 12
+  completed_plans: 11
+  percent: 98
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-12)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** Phase 37 - Structured Logging (v1.10 Codebase Cleanups)
+**Current focus:** Phase 38 - Code Refactoring (v1.10 Codebase Cleanups)
 
 ## Current Position
 
-Phase: 37 of 40 (Structured Logging) — fourth of 7 phases in v1.10
-Plan: 2 of 3 (37-02 complete)
+Phase: 38 of 40 (Code Refactoring) — fifth of 7 phases in v1.10
+Plan: 2 of 2 (38-02 complete)
 Status: In Progress
-Last activity: 2026-03-13 — Completed 37-02 (Dispatch module migration)
+Last activity: 2026-03-13 — Completed 38-02 (Action executor decomposition)
 
-Progress: [██████████] 95%
+Progress: [██████████] 98%
 
 ## Performance Metrics
 
@@ -62,6 +62,8 @@ All decisions logged in PROJECT.md Key Decisions table.
 - [37-02] Consolidated multi-line console.error ops alerts into single structured log.error calls
 - [Phase 37]: Used err field name for errors to trigger Pino serializer
 - [Phase 37]: Shared mockLogFns pattern with indirect wrappers for vi.mock hoisting
+- [38-02] Put ActionHandlerResult in separate action-handler-types.ts to avoid circular imports
+- [38-02] Handler functions receive all deps as parameters (no closure dependencies, no imports from action-executor)
 
 ### Roadmap Evolution
 
@@ -85,6 +87,5 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-13T01:53:26.447Z
-Stopped at: Phase 38 context gathered
-Resume file: .planning/phases/38-code-refactoring/38-CONTEXT.md
+Last session: 2026-03-13T11:59:03.055Z
+Stopped at: Completed 38-02-PLAN.md

@@ -46,7 +46,7 @@ Requirements for codebase cleanup milestone. Each maps to roadmap phases.
 ### Code Refactoring
 
 - [ ] **REF-01**: executeAssignAction() decomposed — onRunComplete callback, trace capture, callback delivery extracted into named helpers
-- [ ] **REF-02**: executeActions() 415-line switch decomposed — each case extracted into named handler function
+- [x] **REF-02**: executeActions() 415-line switch decomposed — each case extracted into named handler function
 - [ ] **REF-03**: Tool registration unified — shared handler functions between OpenClaw adapter and MCP server, thin adapter layer for each
 - [ ] **REF-04**: Callback delivery code deduplicated in assign-executor.ts — single deliverAllCallbacksSafely() helper
 - [ ] **REF-05**: Trace capture code deduplicated in assign-executor.ts — single captureTraceSafely() helper
@@ -127,7 +127,7 @@ Requirements for codebase cleanup milestone. Each maps to roadmap phases.
 | LOG-06 | Phase 37 | Complete |
 | LOG-07 | Phase 37 | Complete |
 | REF-01 | Phase 38 | Pending |
-| REF-02 | Phase 38 | Pending |
+| REF-02 | Phase 38 | Complete |
 | REF-03 | Phase 38 | Pending |
 | REF-04 | Phase 38 | Pending |
 | REF-05 | Phase 38 | Pending |
