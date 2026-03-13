@@ -47,12 +47,12 @@ Requirements for codebase cleanup milestone. Each maps to roadmap phases.
 
 - [x] **REF-01**: executeAssignAction() decomposed — onRunComplete callback, trace capture, callback delivery extracted into named helpers
 - [x] **REF-02**: executeActions() 415-line switch decomposed — each case extracted into named handler function
-- [ ] **REF-03**: Tool registration unified — shared handler functions between OpenClaw adapter and MCP server, thin adapter layer for each
+- [x] **REF-03**: Tool registration unified — shared handler functions between OpenClaw adapter and MCP server, thin adapter layer for each
 - [x] **REF-04**: Callback delivery code deduplicated in assign-executor.ts — single deliverAllCallbacksSafely() helper
 - [x] **REF-05**: Trace capture code deduplicated in assign-executor.ts — single captureTraceSafely() helper
 - [x] **REF-06**: Gate-to-DAG migration check deduplicated in task-store.ts — single migrateIfNeeded() method (or removed with DEAD-04)
-- [ ] **REF-07**: OpenClaw adapter withPermissions() HOF replaces 10 copy-pasted execute blocks with as-any casts
-- [ ] **REF-08**: MCP tools.ts god file split — inline schemas moved to shared location, registration logic decomposed
+- [x] **REF-07**: OpenClaw adapter withPermissions() HOF replaces 10 copy-pasted execute blocks with as-any casts
+- [x] **REF-08**: MCP tools.ts god file split — inline schemas moved to shared location, registration logic decomposed
 
 ### Architecture
 
@@ -128,12 +128,12 @@ Requirements for codebase cleanup milestone. Each maps to roadmap phases.
 | LOG-07 | Phase 37 | Complete |
 | REF-01 | Phase 38 | Complete |
 | REF-02 | Phase 38 | Complete |
-| REF-03 | Phase 38 | Pending |
+| REF-03 | Phase 38 | Complete |
 | REF-04 | Phase 38 | Complete |
 | REF-05 | Phase 38 | Complete |
 | REF-06 | Phase 38 | Complete |
-| REF-07 | Phase 38 | Pending |
-| REF-08 | Phase 38 | Pending |
+| REF-07 | Phase 38 | Complete |
+| REF-08 | Phase 38 | Complete |
 | ARCH-01 | Phase 39 | Pending |
 | ARCH-02 | Phase 39 | Pending |
 | ARCH-03 | Phase 39 | Pending |

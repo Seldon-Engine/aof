@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.10
 milestone_name: Codebase Cleanups
 status: executing
-stopped_at: Completed 38-01-PLAN.md
-last_updated: "2026-03-13T11:59:53.986Z"
+stopped_at: Completed 38-03-PLAN.md
+last_updated: "2026-03-13T12:00:01.591Z"
 last_activity: 2026-03-13 — Completed 38-03 (Tool registration unification)
 progress:
   total_phases: 7
@@ -67,6 +67,7 @@ All decisions logged in PROJECT.md Key Decisions table.
 - [38-02] Put ActionHandlerResult in separate action-handler-types.ts to avoid circular imports
 - [38-02] Handler functions receive all deps as parameters (no closure dependencies, no imports from action-executor)
 - [Phase 38]: MCP-specific handlers kept separate for dispatch/task_update/task_complete due to extra behavior (workflow, subscribe, body building)
+- [Phase 38]: Used zod-to-json-schema for OpenClaw JSON Schema generation from co-located Zod schemas
 
 ### Roadmap Evolution
 
@@ -90,5 +91,5 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-13T11:59:44.413Z
-Stopped at: Completed 38-01-PLAN.md
+Last session: 2026-03-13T12:00:01.588Z
+Stopped at: Completed 38-03-PLAN.md
