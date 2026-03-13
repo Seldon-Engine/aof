@@ -7,7 +7,7 @@
  */
 
 import { z } from "zod";
-import type { ToolContext } from "./aof-tools.js";
+import type { ToolContext } from "./types.js";
 
 // Domain module imports — schemas
 import { dispatchSchema } from "./project-tools.js";

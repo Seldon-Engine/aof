@@ -7,21 +7,8 @@
  * - task-tools.ts: Task manipulation (update, complete, cancel, deps, block)
  */
 
-import type { ITaskStore } from "../store/interfaces.js";
-import { EventLogger } from "../events/logger.js";
-
-/**
- * Shared context passed to every AOF tool function, providing access to
- * the task store, event logger, and optional project scope.
- */
-export interface ToolContext {
-  /** The task store used for all CRUD and state-transition operations. */
-  store: ITaskStore;
-  /** Event logger for recording audit events and triggering notifications. */
-  logger: EventLogger;
-  /** Project ID for scoping operations; auto-populated from the active task's project. */
-  projectId?: string;
-}
+// Re-export ToolContext from types.ts for backward compatibility
+export type { ToolContext } from "./types.js";
 
 // Project tools (task creation/dispatch)
 export type { AOFDispatchInput, AOFDispatchResult } from "./project-tools.js";

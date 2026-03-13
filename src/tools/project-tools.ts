@@ -5,7 +5,7 @@
 import { z } from "zod";
 import type { TaskStatus, TaskPriority } from "../schemas/task.js";
 import { compactResponse, type ToolResponseEnvelope } from "./envelope.js";
-import type { ToolContext } from "./aof-tools.js";
+import type { ToolContext } from "./types.js";
 
 /**
  * Zod schema for aof_dispatch input (shared between MCP and OpenClaw).

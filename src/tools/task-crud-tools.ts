@@ -6,7 +6,7 @@ import { z } from "zod";
 import type { ITaskStore } from "../store/interfaces.js";
 import type { TaskStatus, TaskPriority, Task } from "../schemas/task.js";
 import { compactResponse, type ToolResponseEnvelope } from "./envelope.js";
-import type { ToolContext } from "./aof-tools.js";
+import type { ToolContext } from "./types.js";
 
 /**
  * Zod schema for aof_task_update input.
