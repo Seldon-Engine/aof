@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.10
 milestone_name: Codebase Cleanups
 status: executing
-stopped_at: Completed 38-02-PLAN.md
-last_updated: "2026-03-13T11:59:03.057Z"
-last_activity: 2026-03-13 — Completed 38-02 (Action executor decomposition)
+stopped_at: Completed 38-01-PLAN.md
+last_updated: "2026-03-13T11:59:53.986Z"
+last_activity: 2026-03-13 — Completed 38-03 (Tool registration unification)
 progress:
   total_phases: 7
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 12
-  completed_plans: 11
+  completed_plans: 12
   percent: 98
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-03-12)
 ## Current Position
 
 Phase: 38 of 40 (Code Refactoring) — fifth of 7 phases in v1.10
-Plan: 2 of 2 (38-02 complete)
+Plan: 3 of 3 (38-03 complete)
 Status: In Progress
-Last activity: 2026-03-13 — Completed 38-02 (Action executor decomposition)
+Last activity: 2026-03-13 — Completed 38-03 (Tool registration unification)
 
 Progress: [██████████] 98%
 
@@ -62,8 +62,11 @@ All decisions logged in PROJECT.md Key Decisions table.
 - [37-02] Consolidated multi-line console.error ops alerts into single structured log.error calls
 - [Phase 37]: Used err field name for errors to trigger Pino serializer
 - [Phase 37]: Shared mockLogFns pattern with indirect wrappers for vi.mock hoisting
+- [38-01] Kept post-spawn result handling in assign-executor.ts — platform limits, retry logic are orchestration concerns
+- [38-01] REF-06 (gate-to-DAG migration dedup) documented as N/A — fully resolved by DEAD-04 in Phase 34
 - [38-02] Put ActionHandlerResult in separate action-handler-types.ts to avoid circular imports
 - [38-02] Handler functions receive all deps as parameters (no closure dependencies, no imports from action-executor)
+- [Phase 38]: MCP-specific handlers kept separate for dispatch/task_update/task_complete due to extra behavior (workflow, subscribe, body building)
 
 ### Roadmap Evolution
 
@@ -83,9 +86,9 @@ None.
 ### Blockers/Concerns
 
 - Phase 39 (Architecture Fixes): Circular dependency graph requires `madge` analysis before planning — research flag from SUMMARY.md.
-- REF-06 (gate-to-DAG migration dedup) may be fully resolved by DEAD-04 (lazy migration removal) — verify during Phase 38 planning.
+- REF-06 confirmed resolved by DEAD-04 in Phase 34 — documented in 38-01-SUMMARY.md.
 
 ## Session Continuity
 
-Last session: 2026-03-13T11:59:03.055Z
-Stopped at: Completed 38-02-PLAN.md
+Last session: 2026-03-13T11:59:44.413Z
+Stopped at: Completed 38-01-PLAN.md

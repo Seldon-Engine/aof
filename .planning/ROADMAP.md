@@ -110,7 +110,7 @@ See: `.planning/milestones/v1.8-ROADMAP.md` for full details
 - [x] **Phase 35: Bug Fixes** - Fix buildTaskStats counts, daemon startTime initialization, UpdatePatch.blockers, and TOCTOU race mitigation (completed 2026-03-12)
 - [x] **Phase 36: Config Registry** - Centralize all process.env reads into a Zod-validated, typed config singleton (completed 2026-03-12)
 - [x] **Phase 37: Structured Logging** - Replace core module console.* calls with leveled JSON logger, remediate silent catch blocks (completed 2026-03-13)
-- [ ] **Phase 38: Code Refactoring** - Extract helpers from god functions, unify tool registration, deduplicate patterns
+- [x] **Phase 38: Code Refactoring** - Extract helpers from god functions, unify tool registration, deduplicate patterns (completed 2026-03-13)
 - [ ] **Phase 39: Architecture Fixes** - Break circular dependencies, fix store abstraction bypass, fix layering violations
 - [ ] **Phase 40: Test Infrastructure** - Shared test harness, typed mock factories, coverage config expansion, temp dir cleanup
 
@@ -183,7 +183,7 @@ Plans:
   2. Tool registration for OpenClaw adapter and MCP server shares handler functions through a common layer — adding a new tool requires implementing the handler once, not twice
   3. Callback delivery and trace capture code each exist in exactly one place (single helper function) — no copy-paste duplication in assign-executor.ts
   4. MCP tools.ts inline schemas are moved to a shared location — the god file is split into focused modules
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans complete
 Plans:
 - [ ] 38-01-PLAN.md — Decompose executeAssignAction, deduplicate callback/trace helpers (REF-01, REF-04, REF-05, REF-06)
 - [ ] 38-02-PLAN.md — Decompose executeActions switch into domain handler modules (REF-02)
@@ -262,6 +262,6 @@ Phases execute in numeric order: 34 -> 35 -> 36 -> 37 -> 38 -> 39 -> 40
 | 35. Bug Fixes | 2/2 | Complete    | 2026-03-12 | - |
 | 36. Config Registry | 2/2 | Complete    | 2026-03-12 | - |
 | 37. Structured Logging | 3/3 | Complete    | 2026-03-13 | - |
-| 38. Code Refactoring | 2/3 | In Progress|  | - |
+| 38. Code Refactoring | 3/3 | Complete   | 2026-03-13 | - |
 | 39. Architecture Fixes | v1.10 | 0/? | Not started | - |
 | 40. Test Infrastructure | v1.10 | 0/? | Not started | - |
