@@ -4,7 +4,7 @@
  * Extracted from linter.ts to meet size budget.
  */
 
-import type { LintIssue } from "./linter.js";
+import type { LintIssue } from "./types.js";
 
 /**
  * Validate memory tier combinations (no cold in warm).

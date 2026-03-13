@@ -11,16 +11,9 @@ import { stringify as stringifyYaml } from "yaml";
 import type { ITaskStore } from "../store/interfaces.js";
 import { FilesystemResolver, ResolverChain } from "./resolvers.js";
 import { loadManifest, generateDefaultManifest } from "./manifest.js";
+import type { ContextManifest } from "./types.js";
 
-export interface ContextManifest {
-  version: 'v1';
-  taskId: string;
-  layers: {
-    seed: string[];      // Always included (task card, inputs/)
-    optional: string[];  // Included if budget allows
-    deep: string[];      // Only on explicit request
-  };
-}
+export type { ContextManifest } from "./types.js";
 
 export interface ContextBundle {
   summary: string;       // Assembled context as a single string

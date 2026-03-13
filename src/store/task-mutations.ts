@@ -111,9 +111,8 @@ export interface TransitionOpts {
   agent?: string;
 }
 
-export interface TaskStoreHooks {
-  afterTransition?: (task: Task, previousStatus: TaskStatus) => Promise<void>;
-}
+export type { TaskStoreHooks } from "./interfaces.js";
+import type { TaskStoreHooks } from "./interfaces.js";
 
 export interface TaskLogger {
   logTransition(

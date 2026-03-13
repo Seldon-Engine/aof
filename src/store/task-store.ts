@@ -17,7 +17,7 @@ import { TaskFrontmatter, Task, isValidTransition } from "../schemas/task.js";
 
 const storeLog = createLogger("store");
 import type { TaskStatus } from "../schemas/task.js";
-import type { ITaskStore } from "./interfaces.js";
+import type { ITaskStore, TaskStoreHooks } from "./interfaces.js";
 import { parseTaskFile, serializeTask, extractTaskSections, contentHash } from "./task-parser.js";
 import { validateDAG, initializeWorkflowState } from "../schemas/workflow-dag.js";
 import type { WorkflowDefinition, TaskWorkflow } from "../schemas/workflow-dag.js";
@@ -40,9 +40,7 @@ const STATUS_DIRS: readonly TaskStatus[] = [
   "deadletter",
 ] as const;
 
-export interface TaskStoreHooks {
-  afterTransition?: (task: Task, previousStatus: TaskStatus) => Promise<void>;
-}
+export type { TaskStoreHooks } from "./interfaces.js";
 
 export interface TaskStoreOptions {
   hooks?: TaskStoreHooks;

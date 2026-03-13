@@ -12,13 +12,9 @@
 
 import type { OrgChart, OrgAgent } from "../schemas/org-chart.js";
 import { checkMemoryTiers, checkContextBudgetPolicy } from "./linter-helpers.js";
+import type { LintIssue } from "./types.js";
 
-export interface LintIssue {
-  severity: "error" | "warning";
-  rule: string;
-  message: string;
-  path?: string;
-}
+export type { LintIssue } from "./types.js";
 
 /**
  * Lint an org chart for referential integrity issues.

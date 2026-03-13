@@ -5,7 +5,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 import type { ProjectRecord } from "./registry.js";
-import type { LintIssue } from "./lint.js";
+import type { LintIssue } from "./types.js";
 import type { EventLogger } from "../events/logger.js";
 
 /** Required top-level directories. */

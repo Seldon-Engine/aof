@@ -8,6 +8,10 @@
 import type { Task, TaskStatus } from "../schemas/task.js";
 import type { WorkflowDefinition } from "../schemas/workflow-dag.js";
 
+export interface TaskStoreHooks {
+  afterTransition?: (task: Task, previousStatus: TaskStatus) => Promise<void>;
+}
+
 /**
  * Core task store interface.
  * All task storage implementations must implement this contract.

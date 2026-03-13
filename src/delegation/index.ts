@@ -4,7 +4,7 @@ import writeFileAtomic from "write-file-atomic";
 import { stringify as stringifyYaml } from "yaml";
 import type { Task } from "../schemas/task.js";
 import type { ITaskStore } from "../store/interfaces.js";
-import type { TaskStoreHooks } from "../store/task-store.js";
+import type { TaskStoreHooks } from "../store/interfaces.js";
 import type { HandoffRequestPayload } from "../schemas/protocol.js";
 
 export interface DelegationSyncResult {

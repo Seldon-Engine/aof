@@ -10,7 +10,7 @@ import writeFileAtomic from "write-file-atomic";
 import type { Task, TaskStatus } from "../schemas/task.js";
 import type { EventLogger } from "../events/logger.js";
 import { serializeTask } from "./task-parser.js";
-import type { TaskStoreHooks } from "./task-store.js";
+import type { TaskStoreHooks } from "./interfaces.js";
 
 /**
  * Task getter function type.

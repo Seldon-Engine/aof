@@ -8,7 +8,7 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { ITaskStore } from "../store/interfaces.js";
-import type { ContextManifest } from "./assembler.js";
+import type { ContextManifest } from "./types.js";
 
 /**
  * Load manifest from task's inputs/context-manifest.json.

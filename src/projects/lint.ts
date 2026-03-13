@@ -26,25 +26,9 @@ import {
   formatLintReport,
 } from "./lint-helpers.js";
 import { validateDAG } from "../schemas/workflow-dag.js";
+import type { LintIssue, LintResult } from "./types.js";
 
-/** Lint issue severity. */
-export type LintSeverity = "error" | "warning";
-
-/** Single lint issue. */
-export interface LintIssue {
-  severity: LintSeverity;
-  category: string;
-  message: string;
-  path?: string;
-}
-
-/** Lint result for a project. */
-export interface LintResult {
-  projectId: string;
-  issues: LintIssue[];
-  /** True if project passed all checks. */
-  passed: boolean;
-}
+export type { LintSeverity, LintIssue, LintResult } from "./types.js";
 
 /** Valid task status values (lowercase for directory matching). */
 const VALID_STATUSES = TaskStatus.options;

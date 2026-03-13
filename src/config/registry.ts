@@ -9,7 +9,8 @@
  */
 
 import { z, type ZodIssue } from "zod";
-import { normalizePath } from "./paths.js";
+import { join, resolve } from "node:path";
+import { homedir } from "node:os";
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -201,6 +202,14 @@ function warnUnknownVars(): void {
 // ---------------------------------------------------------------------------
 // Deep merge utility (for resetConfig overrides)
 // ---------------------------------------------------------------------------
+
+/** Resolve a path to absolute, expanding ~ to homedir. (Inlined from paths.ts to avoid cycle.) */
+function normalizePath(p: string): string {
+  if (p.startsWith("~/") || p === "~") {
+    return resolve(join(homedir(), p.slice(2)));
+  }
+  return resolve(p);
+}
 
 function deepMerge(
   target: Record<string, unknown>,
