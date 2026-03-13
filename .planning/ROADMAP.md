@@ -199,7 +199,7 @@ Plans:
   3. Config module does not import from org/ — the lintOrgChart dependency is inverted or relocated
   4. MCP server does not import from CLI — `createProjectStore()` lives in projects/ or store/, and `loadProjectManifest()` has a single implementation
   5. memory/index.ts barrel exports are separated from `registerMemoryModule()` initialization logic
-**Plans:** 3 plans
+**Plans:** 1/3 plans executed
 Plans:
 - [ ] 39-01-PLAN.md — Break dispatch and tools circular dependency cycles (ARCH-01)
 - [ ] 39-02-PLAN.md — Fix layering violations, relocate modules, split memory barrel, break simple cycles (ARCH-03, ARCH-04, ARCH-05, ARCH-06)
@@ -264,5 +264,5 @@ Phases execute in numeric order: 34 -> 35 -> 36 -> 37 -> 38 -> 39 -> 40
 | 36. Config Registry | 2/2 | Complete    | 2026-03-12 | - |
 | 37. Structured Logging | 3/3 | Complete    | 2026-03-13 | - |
 | 38. Code Refactoring | 3/3 | Complete    | 2026-03-13 | - |
-| 39. Architecture Fixes | v1.10 | 0/3 | Not started | - |
+| 39. Architecture Fixes | 1/3 | In Progress|  | - |
 | 40. Test Infrastructure | v1.10 | 0/? | Not started | - |

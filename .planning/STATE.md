@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.10
 milestone_name: Codebase Cleanups
 status: executing
-stopped_at: Phase 39 planned — 3 plans in 2 waves, verified
-last_updated: "2026-03-13T20:07:27.898Z"
-last_activity: 2026-03-13 — Completed 38-03 (Tool registration unification)
+stopped_at: Completed 39-01-PLAN.md
+last_updated: "2026-03-13T20:58:35.919Z"
+last_activity: 2026-03-13 — Completed 39-01 (Dispatch & tools circular dependency resolution)
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 15
-  completed_plans: 12
-  percent: 98
+  completed_plans: 13
+  percent: 95
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-12)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** Phase 38 - Code Refactoring (v1.10 Codebase Cleanups)
+**Current focus:** Phase 39 - Architecture Fixes (v1.10 Codebase Cleanups)
 
 ## Current Position
 
-Phase: 38 of 40 (Code Refactoring) — fifth of 7 phases in v1.10
-Plan: 3 of 3 (38-03 complete)
+Phase: 39 of 40 (Architecture Fixes) — sixth of 7 phases in v1.10
+Plan: 2 of 3 (39-01 complete)
 Status: In Progress
-Last activity: 2026-03-13 — Completed 38-03 (Tool registration unification)
+Last activity: 2026-03-13 — Completed 39-01 (Dispatch & tools circular dependency resolution)
 
-Progress: [██████████] 98%
+Progress: [██████████] 95%
 
 ## Performance Metrics
 
@@ -68,6 +68,8 @@ All decisions logged in PROJECT.md Key Decisions table.
 - [38-02] Handler functions receive all deps as parameters (no closure dependencies, no imports from action-executor)
 - [Phase 38]: MCP-specific handlers kept separate for dispatch/task_update/task_complete due to extra behavior (workflow, subscribe, body building)
 - [Phase 38]: Used zod-to-json-schema for OpenClaw JSON Schema generation from co-located Zod schemas
+- [39-01] Kept re-exports in scheduler.ts, task-dispatcher.ts, and aof-tools.ts for backward compatibility with external consumers
+- [39-01] Consolidated duplicate SchedulerAction interfaces into single canonical definition in dispatch/types.ts
 
 ### Roadmap Evolution
 
@@ -91,5 +93,5 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-13T20:07:27.889Z
-Stopped at: Phase 39 planned — 3 plans in 2 waves, verified
+Last session: 2026-03-13T20:58:35.916Z
+Stopped at: Completed 39-01-PLAN.md
