@@ -183,10 +183,11 @@ Plans:
   2. Tool registration for OpenClaw adapter and MCP server shares handler functions through a common layer — adding a new tool requires implementing the handler once, not twice
   3. Callback delivery and trace capture code each exist in exactly one place (single helper function) — no copy-paste duplication in assign-executor.ts
   4. MCP tools.ts inline schemas are moved to a shared location — the god file is split into focused modules
-**Plans:** 2 plans
+**Plans:** 3 plans
 Plans:
-- [ ] 34-01-PLAN.md — Gate system removal (source, tests, re-exports, migration, imports)
-- [ ] 34-02-PLAN.md — Cleanup unused MCP schemas, deprecated aliases, commented code, notifier
+- [ ] 38-01-PLAN.md — Decompose executeAssignAction, deduplicate callback/trace helpers (REF-01, REF-04, REF-05, REF-06)
+- [ ] 38-02-PLAN.md — Decompose executeActions switch into domain handler modules (REF-02)
+- [ ] 38-03-PLAN.md — Unify tool registration, split MCP god file, withPermissions HOF (REF-03, REF-07, REF-08)
 
 ### Phase 39: Architecture Fixes
 **Goal**: Module dependency graph is clean — no circular imports, no store abstraction bypass, no layering violations
@@ -261,6 +262,6 @@ Phases execute in numeric order: 34 -> 35 -> 36 -> 37 -> 38 -> 39 -> 40
 | 35. Bug Fixes | 2/2 | Complete    | 2026-03-12 | - |
 | 36. Config Registry | 2/2 | Complete    | 2026-03-12 | - |
 | 37. Structured Logging | 3/3 | Complete    | 2026-03-13 | - |
-| 38. Code Refactoring | v1.10 | 0/? | Not started | - |
+| 38. Code Refactoring | v1.10 | 0/3 | Not started | - |
 | 39. Architecture Fixes | v1.10 | 0/? | Not started | - |
 | 40. Test Infrastructure | v1.10 | 0/? | Not started | - |
