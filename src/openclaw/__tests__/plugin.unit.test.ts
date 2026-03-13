@@ -83,21 +83,24 @@ describe("AOF OpenClaw plugin entrypoint", () => {
 
     expect(registry.serviceIds).toEqual(["aof-scheduler"]);
     expect(registry.toolNames).toEqual([
+      // From shared toolRegistry loop
       "aof_dispatch",
       "aof_task_update",
-      "aof_status_report",
       "aof_task_complete",
+      "aof_status_report",
       "aof_task_edit",
       "aof_task_cancel",
       "aof_task_dep_add",
       "aof_task_dep_remove",
       "aof_task_block",
       "aof_task_unblock",
+      "aof_context_load",
+      // Adapter-specific tools
       "aof_project_create",
       "aof_project_list",
       "aof_project_add_participant",
     ]);
-    expect(registry.toolOptionals).toEqual([false, false, false, false, false, false, false, false, false, false, false, false, false]);
+    expect(registry.toolOptionals).toEqual([false, false, false, false, false, false, false, false, false, false, false, false, false, false]);
     expect(registry.httpRoutes).toEqual(["/aof/metrics", "/aof/status"]);
     expect(registry.events).toEqual(
       expect.arrayContaining(["session_end", "before_compaction", "agent_end", "message_received"]),

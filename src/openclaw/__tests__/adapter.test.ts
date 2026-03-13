@@ -40,18 +40,21 @@ describe("OpenClaw adapter", () => {
     expect(services).toHaveLength(1);
     expect(services[0]!.id).toBe("aof-scheduler");
 
-    // Tools (with optional flag)
+    // Tools: shared registry tools + adapter-specific tools
     expect(tools.map(t => t.name)).toEqual([
+      // From shared toolRegistry loop
       "aof_dispatch",
       "aof_task_update",
-      "aof_status_report",
       "aof_task_complete",
+      "aof_status_report",
       "aof_task_edit",
       "aof_task_cancel",
       "aof_task_dep_add",
       "aof_task_dep_remove",
       "aof_task_block",
       "aof_task_unblock",
+      "aof_context_load",
+      // Adapter-specific tools
       "aof_project_create",
       "aof_project_list",
       "aof_project_add_participant",
