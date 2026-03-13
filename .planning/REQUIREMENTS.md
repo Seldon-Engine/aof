@@ -40,7 +40,7 @@ Requirements for codebase cleanup milestone. Each maps to roadmap phases.
 - [x] **LOG-03**: Child loggers created per module for contextual logging (dispatch, scheduler, protocol, daemon, service)
 - [x] **LOG-04**: Core module console.* calls replaced with structured logger (~120 calls in dispatch, service, protocol, daemon)
 - [x] **LOG-05**: 36 silent catch blocks in dispatch remediated — errors logged at warn/debug level instead of swallowed
-- [ ] **LOG-06**: CLI console.* output unchanged — user-facing output is not logging
+- [x] **LOG-06**: CLI console.* output unchanged — user-facing output is not logging
 - [x] **LOG-07**: EventLogger (audit JSONL) unchanged — operational logging and audit events remain separate systems
 
 ### Code Refactoring
@@ -124,7 +124,7 @@ Requirements for codebase cleanup milestone. Each maps to roadmap phases.
 | LOG-03 | Phase 37 | Complete |
 | LOG-04 | Phase 37 | Complete |
 | LOG-05 | Phase 37 | Complete |
-| LOG-06 | Phase 37 | Pending |
+| LOG-06 | Phase 37 | Complete |
 | LOG-07 | Phase 37 | Complete |
 | REF-01 | Phase 38 | Pending |
 | REF-02 | Phase 38 | Pending |
