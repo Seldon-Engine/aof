@@ -61,3 +61,6 @@ export {
   aofTaskBlock,
   aofTaskUnblock,
 } from "./task-tools.js";
+
+// Shared tool registry (consumed by both MCP and OpenClaw adapters)
+export { toolRegistry, type ToolDefinition, type ToolRegistry } from "./tool-registry.js";
