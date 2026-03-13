@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { startWatchdog, type WatchdogConfig } from "../index.js";
 
+vi.mock("../../../logging/index.js", () => ({
+  createLogger: () => ({ trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn(), child: vi.fn() }),
+}));
+
 describe("Watchdog Plugin", () => {
   let config: WatchdogConfig;
 

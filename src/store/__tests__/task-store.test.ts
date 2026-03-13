@@ -1,9 +1,26 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { FilesystemTaskStore, parseTaskFile, serializeTask } from "../task-store.js";
 import type { ITaskStore } from "../interfaces.js";
+
+// Mock structured logger to suppress output and enable assertions
+const mockStoreFns = {
+  trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(),
+  error: vi.fn(), fatal: vi.fn(), child: vi.fn(),
+};
+vi.mock("../../logging/index.js", () => ({
+  createLogger: () => ({
+    trace: (...args: unknown[]) => mockStoreFns.trace(...args),
+    debug: (...args: unknown[]) => mockStoreFns.debug(...args),
+    info: (...args: unknown[]) => mockStoreFns.info(...args),
+    warn: (...args: unknown[]) => mockStoreFns.warn(...args),
+    error: (...args: unknown[]) => mockStoreFns.error(...args),
+    fatal: (...args: unknown[]) => mockStoreFns.fatal(...args),
+    child: (...args: unknown[]) => mockStoreFns.child(...args),
+  }),
+}));
 
 describe("parseTaskFile / serializeTask", () => {
   const raw = `---
@@ -322,9 +339,10 @@ Body`, "utf-8");
       expect(validationEvents.length).toBe(2);
     });
 
-    it("logs warning to console when task parsing fails", async () => {
+    it("logs warning via structured logger when task parsing fails", async () => {
       const { writeFile } = await import("node:fs/promises");
-      
+      mockStoreFns.error.mockClear();
+
       // Create malformed task (missing required fields)
       const malformedFile = join(tmpDir, "tasks", "backlog", "console-test.md");
       await writeFile(malformedFile, `---
@@ -334,23 +352,18 @@ status: backlog
 ---
 Missing required fields`, "utf-8");
 
-      // Capture console.error
-      const errors: string[] = [];
-      const originalError = console.error;
-      console.error = (...args: any[]) => {
-        errors.push(args.join(" "));
-      };
+      await store.list();
 
-      try {
-        await store.list();
-
-        // Should have logged error
-        expect(errors.length).toBeGreaterThan(0);
-        expect(errors.some(e => e.includes("console-test.md"))).toBe(true);
-        expect(errors.some(e => e.includes("Parse error"))).toBe(true);
-      } finally {
-        console.error = originalError;
-      }
+      // Should have logged error via structured logger
+      const errorCalls = mockStoreFns.error.mock.calls;
+      expect(errorCalls.length).toBeGreaterThan(0);
+      expect(errorCalls.some((c: unknown[]) =>
+        typeof c[0] === "object" && c[0] !== null &&
+        (c[0] as { filePath?: string }).filePath?.includes("console-test.md")
+      )).toBe(true);
+      expect(errorCalls.some((c: unknown[]) =>
+        typeof c[1] === "string" && c[1].includes("parse error")
+      )).toBe(true);
     });
   });
 

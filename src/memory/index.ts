@@ -1,6 +1,9 @@
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { getConfig } from "../config/registry.js";
+import { createLogger } from "../logging/index.js";
+
+const memLog = createLogger("memory");
 import type { OpenClawApi, OpenClawToolDefinition } from "../openclaw/types.js";
 import type { SqliteDb } from "./types.js";
 import { existsSync } from "node:fs";
@@ -123,11 +126,11 @@ export function registerMemoryModule(api: OpenClawApi): void {
       hnsw.load(hnswPath);
     } catch {
       // Corrupt or incompatible index file
-      console.warn("[AOF] HNSW index corrupt or incompatible. Rebuilding from SQLite...");
+      memLog.warn("HNSW index corrupt or incompatible — rebuilding from SQLite");
       needsRebuild = true;
     }
   } else {
-    console.warn("[AOF] HNSW index missing. Rebuilding from SQLite...");
+    memLog.warn("HNSW index missing — rebuilding from SQLite");
     needsRebuild = true;
   }
 
@@ -136,8 +139,9 @@ export function registerMemoryModule(api: OpenClawApi): void {
     const hnswCount = hnsw.count;
     const sqliteCount = (db.prepare("SELECT COUNT(*) as c FROM vec_chunks").get() as { c: number }).c;
     if (hnswCount !== sqliteCount) {
-      console.warn(
-        `[AOF] HNSW-SQLite desync detected (HNSW: ${hnswCount}, SQLite: ${sqliteCount}). Rebuilding index...`,
+      memLog.warn(
+        { hnswCount, sqliteCount },
+        "HNSW-SQLite desync detected — rebuilding index",
       );
       needsRebuild = true;
     }

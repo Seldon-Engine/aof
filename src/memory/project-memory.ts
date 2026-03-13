@@ -1,5 +1,8 @@
 import { join } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
+import { createLogger } from "../logging/index.js";
+
+const memLog = createLogger("memory");
 import { initMemoryDb } from "./store/schema.js";
 import { VectorStore } from "./store/vector-store.js";
 import { HnswIndex } from "./store/hnsw-index.js";
@@ -70,7 +73,7 @@ export function getProjectMemoryStore(projectRoot: string, dimensions: number): 
     try {
       hnsw.load(hnswPath);
     } catch {
-      console.warn(`[AOF] Project memory HNSW index corrupt at ${hnswPath}. Rebuilding...`);
+      memLog.warn({ hnswPath }, "project memory HNSW index corrupt — rebuilding");
       needsRebuild = true;
     }
   } else {
@@ -83,8 +86,9 @@ export function getProjectMemoryStore(projectRoot: string, dimensions: number): 
     const hnswCount = hnsw.count;
     const sqliteCount = (db.prepare("SELECT COUNT(*) as c FROM vec_chunks").get() as { c: number }).c;
     if (hnswCount !== sqliteCount) {
-      console.warn(
-        `[AOF] Project memory HNSW-SQLite desync at ${projectRoot} (HNSW: ${hnswCount}, SQLite: ${sqliteCount}). Rebuilding...`,
+      memLog.warn(
+        { projectRoot, hnswCount, sqliteCount },
+        "project memory HNSW-SQLite desync — rebuilding",
       );
       needsRebuild = true;
     }
@@ -119,7 +123,7 @@ export function saveAllProjectMemory(): void {
         store.hnsw.save(store.hnswPath);
       }
     } catch (err) {
-      console.error(`[AOF] Failed to save project memory HNSW at ${projectRoot}: ${(err as Error).message}`);
+      memLog.error({ err, projectRoot }, "failed to save project memory HNSW");
     }
   }
 }

@@ -1,6 +1,9 @@
+import { createLogger } from "../../logging/index.js";
 import { createRestartTracker, type RestartRecord } from "./restart-tracker.js";
 import { formatAlert, type OpsAlert } from "./alerting.js";
 import type { HealthStatus } from "../../daemon/health.js";
+
+const log = createLogger("watchdog");
 
 export interface WatchdogConfig {
   enabled: boolean;
@@ -34,7 +37,7 @@ export async function startWatchdog(config: WatchdogConfig): Promise<Watchdog | 
       const response = await fetch(config.healthEndpoint);
       return response.status === 200;
     } catch (err) {
-      console.error("[Watchdog] Health check failed:", (err as Error).message);
+      log.error({ err }, "health check failed");
       return false;
     }
   }
@@ -52,7 +55,7 @@ export async function startWatchdog(config: WatchdogConfig): Promise<Watchdog | 
   }
 
   async function restartDaemon(): Promise<void> {
-    console.log("[Watchdog] Restarting daemon...");
+    log.info("restarting daemon");
     
     // Notify restart callback if provided
     if (config.onRestart) {
@@ -65,7 +68,7 @@ export async function startWatchdog(config: WatchdogConfig): Promise<Watchdog | 
     // 3. Wait for /health to return 200
 
     // For now, just log (actual restart logic would be environment-specific)
-    console.log("[Watchdog] Daemon restart triggered");
+    log.info("daemon restart triggered");
   }
 
   async function alertOpsTeam(restarts: RestartRecord[]): Promise<void> {
@@ -97,8 +100,7 @@ export async function startWatchdog(config: WatchdogConfig): Promise<Watchdog | 
 
     const alert = formatAlert(restarts, health ?? fallbackHealth);
 
-    console.error("[Watchdog] Max restarts exceeded, alerting ops team");
-    console.error(alert.body);
+    log.error({ alertBody: alert.body }, "max restarts exceeded, alerting ops team");
 
     if (config.onAlert) {
       await config.onAlert(alert);

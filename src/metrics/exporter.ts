@@ -20,7 +20,10 @@
  * - aof_agent_context_tokens{agentId}                gauge
  */
 
+import { createLogger } from "../logging/index.js";
 import { createServer, type Server } from "node:http";
+
+const metricsLog = createLogger("metrics");
 import {
   Registry,
   Gauge,
@@ -358,7 +361,7 @@ export function startMetricsServer(
   });
 
   server.listen(port, () => {
-    console.log(`📊 Metrics server listening on :${port}/metrics`);
+    metricsLog.info({ port }, "metrics server listening");
   });
 
   return server;

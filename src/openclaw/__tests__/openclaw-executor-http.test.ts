@@ -12,6 +12,23 @@ import { OpenClawAdapter } from "../openclaw-executor.js";
 import type { OpenClawApi } from "../types.js";
 import type { TaskContext } from "../../dispatch/executor.js";
 
+// Mock structured logger to suppress output and enable assertions
+const mockOcLogFns = {
+  trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(),
+  error: vi.fn(), fatal: vi.fn(), child: vi.fn(),
+};
+vi.mock("../../logging/index.js", () => ({
+  createLogger: () => ({
+    trace: (...args: unknown[]) => mockOcLogFns.trace(...args),
+    debug: (...args: unknown[]) => mockOcLogFns.debug(...args),
+    info: (...args: unknown[]) => mockOcLogFns.info(...args),
+    warn: (...args: unknown[]) => mockOcLogFns.warn(...args),
+    error: (...args: unknown[]) => mockOcLogFns.error(...args),
+    fatal: (...args: unknown[]) => mockOcLogFns.fatal(...args),
+    child: (...args: unknown[]) => mockOcLogFns.child(...args),
+  }),
+}));
+
 // Mock the dynamic import of extensionAPI
 const mockRunEmbeddedPiAgent = vi.fn();
 const mockResolveAgentWorkspaceDir = vi.fn(() => "/tmp/workspace/swe-backend");
@@ -109,7 +126,7 @@ describe("OpenClawAdapter (embedded agent)", () => {
   });
 
   it("logs agent run errors in background without affecting spawn result", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockOcLogFns.warn.mockClear();
     mockRunEmbeddedPiAgent.mockResolvedValueOnce({
       meta: {
         durationMs: 2000,
@@ -123,16 +140,15 @@ describe("OpenClawAdapter (embedded agent)", () => {
     // Spawn returns success (fire-and-forget)
     expect(result.success).toBe(true);
 
-    // Background logs the error
-    await vi.waitFor(() => expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("context_overflow"),
+    // Background logs the error via structured logger
+    await vi.waitFor(() => expect(mockOcLogFns.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ errorKind: "context_overflow" }),
+      expect.any(String),
     ));
-
-    warnSpy.mockRestore();
   });
 
   it("logs aborted agent run in background without affecting spawn result", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockOcLogFns.warn.mockClear();
     mockRunEmbeddedPiAgent.mockResolvedValueOnce({
       meta: { durationMs: 1000, aborted: true },
     });
@@ -141,26 +157,24 @@ describe("OpenClawAdapter (embedded agent)", () => {
 
     expect(result.success).toBe(true);
 
-    await vi.waitFor(() => expect(warnSpy).toHaveBeenCalledWith(
+    await vi.waitFor(() => expect(mockOcLogFns.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: "TASK-001" }),
       expect.stringContaining("aborted"),
     ));
-
-    warnSpy.mockRestore();
   });
 
   it("logs thrown exception in background without affecting spawn result", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockOcLogFns.error.mockClear();
     mockRunEmbeddedPiAgent.mockRejectedValueOnce(new Error("Runtime crash"));
 
     const result = await executor.spawnSession(taskContext);
 
     expect(result.success).toBe(true);
 
-    await vi.waitFor(() => expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining("Runtime crash"),
+    await vi.waitFor(() => expect(mockOcLogFns.error).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: "TASK-001" }),
+      expect.stringContaining("background agent run failed"),
     ));
-
-    errorSpy.mockRestore();
   });
 
   it("returns error when api.config is missing", async () => {

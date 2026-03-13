@@ -1,5 +1,8 @@
 import { join } from "node:path";
+import { createLogger } from "../logging/index.js";
 import { FilesystemTaskStore } from "../store/task-store.js";
+
+const log = createLogger("openclaw");
 import type { ITaskStore } from "../store/interfaces.js";
 import { EventLogger } from "../events/logger.js";
 import { AOFMetrics } from "../metrics/exporter.js";
@@ -80,12 +83,12 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
         if (result.success && result.chart) {
           return result.chart;
         } else {
-          console.warn("Failed to load org chart for permission enforcement:", result.errors);
+          log.warn({ errors: result.errors }, "failed to load org chart for permission enforcement");
           return undefined;
         }
       })
       .catch(err => {
-        console.warn("Failed to load org chart:", err);
+        log.warn({ err }, "failed to load org chart");
         return undefined;
       });
   }

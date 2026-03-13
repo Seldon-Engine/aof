@@ -12,7 +12,10 @@
 import { readFile, writeFile, readdir, mkdir, rename, rm, stat } from "node:fs/promises";
 import { join, resolve, basename, dirname } from "node:path";
 import writeFileAtomic from "write-file-atomic";
+import { createLogger } from "../logging/index.js";
 import { TaskFrontmatter, Task, isValidTransition } from "../schemas/task.js";
+
+const storeLog = createLogger("store");
 import type { TaskStatus } from "../schemas/task.js";
 import type { ITaskStore } from "./interfaces.js";
 import { parseTaskFile, serializeTask, extractTaskSections, contentHash } from "./task-parser.js";
@@ -230,7 +233,7 @@ export class FilesystemTaskStore implements ITaskStore {
           await stat(filePath);
           // File exists, so this is a parse error
           const errorMessage = (err as Error).message;
-          console.error(`[TaskStore] Parse error in ${filePath}: ${errorMessage}`);
+          storeLog.error({ filePath, error: errorMessage }, "parse error in task file");
           if (this.logger) {
             await this.logger.logValidationFailed(basename(filePath), errorMessage);
           }
@@ -300,7 +303,7 @@ export class FilesystemTaskStore implements ITaskStore {
         } catch (err) {
           // Skip malformed files but log the error explicitly
           const errorMessage = (err as Error).message;
-          console.error(`[TaskStore] Parse error in ${filePath}: ${errorMessage}`);
+          storeLog.error({ filePath, error: errorMessage }, "parse error in task file");
           
           // Emit validation.failed event
           if (this.logger) {

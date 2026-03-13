@@ -5,10 +5,13 @@
  * Checks if in-progress reviews are actually still active and cleans up stale state.
  */
 
+import { createLogger } from "../logging/index.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import type { EventLogger } from "../events/logger.js";
 import type { MurmurStateManager } from "./state-manager.js";
 import type { MurmurState } from "./state-manager.js";
+
+const murmurLog = createLogger("murmur");
 
 export interface CleanupOptions {
   /** Review timeout in milliseconds (default: 30 minutes). */
@@ -96,8 +99,9 @@ export async function cleanupStaleReview(
     };
   }
 
-  console.info(
-    `[AOF] Murmur cleanup: detected stale review for ${teamId} (task=${reviewTaskId}, reason=${cleanupReason})`
+  murmurLog.info(
+    { teamId, taskId: reviewTaskId, reason: cleanupReason },
+    "detected stale review",
   );
 
   // Log cleanup event
@@ -117,8 +121,9 @@ export async function cleanupStaleReview(
 
   // Don't mutate in dry-run mode
   if (dryRun) {
-    console.info(
-      `[AOF] Murmur cleanup: would clear stale review for ${teamId} (dry-run)`
+    murmurLog.info(
+      { teamId, dryRun: true },
+      "would clear stale review (dry-run)",
     );
     return {
       cleaned: true,
@@ -130,8 +135,9 @@ export async function cleanupStaleReview(
   // Clear stale state
   await stateManager.endReview(teamId);
 
-  console.info(
-    `[AOF] Murmur cleanup: cleared stale review state for ${teamId}`
+  murmurLog.info(
+    { teamId },
+    "cleared stale review state",
   );
 
   return {

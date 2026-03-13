@@ -9,6 +9,10 @@ import type { ITaskStore } from "../../store/interfaces.js";
 import type { EventLogger } from "../../events/logger.js";
 import type { Task } from "../../schemas/task.js";
 
+vi.mock("../../logging/index.js", () => ({
+  createLogger: () => ({ trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn(), child: vi.fn() }),
+}));
+
 describe("cleanupStaleReview", () => {
   let mockStore: ITaskStore;
   let mockStateManager: {

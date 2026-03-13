@@ -13,10 +13,13 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { getConfig } from "../config/registry.js";
+import { createLogger } from "../logging/index.js";
 import type { GatewayAdapter, TaskContext, SpawnResult, SessionStatus, AgentRunOutcome } from "../dispatch/executor.js";
 import type { OpenClawApi } from "./types.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import { readHeartbeat, markRunArtifactExpired } from "../recovery/run-artifacts.js";
+
+const log = createLogger("openclaw");
 
 /** Minimal shape of the functions we need from extensionAPI.js */
 interface ExtensionApi {
@@ -59,7 +62,7 @@ export class OpenClawAdapter implements GatewayAdapter {
     private readonly api: OpenClawApi,
     private readonly store?: ITaskStore,
   ) {
-    console.info("[AOF] OpenClawAdapter initialized (embedded agent mode)");
+    log.info("OpenClawAdapter initialized (embedded agent mode)");
   }
 
   async spawnSession(
@@ -70,14 +73,14 @@ export class OpenClawAdapter implements GatewayAdapter {
       onRunComplete?: (outcome: AgentRunOutcome) => void | Promise<void>;
     },
   ): Promise<SpawnResult> {
-    console.info(`[AOF] OpenClawAdapter.spawnSession() for task ${context.taskId}, agent: ${context.agent}`);
+    log.info({ taskId: context.taskId, agent: context.agent }, "spawnSession");
 
     let ext: ExtensionApi;
     try {
       ext = await this.loadExtensionApi();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[AOF] Failed to load extensionAPI: ${message}`);
+      log.error({ err }, "failed to load extensionAPI");
       return {
         success: false,
         error: `Failed to load gateway extensionAPI: ${message}`,
@@ -109,7 +112,7 @@ export class OpenClawAdapter implements GatewayAdapter {
 
       const prompt = this.formatTaskInstruction(context);
 
-      console.info(`[AOF] Launching embedded agent (fire-and-forget): agentId=${agentId}, sessionId=${sessionId}`);
+      log.info({ agentId, sessionId }, "launching embedded agent (fire-and-forget)");
 
       // Fire-and-forget: launch the agent in the background so the scheduler
       // isn't blocked by the spawnTimeoutMs (designed for fast HTTP dispatch).
@@ -139,7 +142,7 @@ export class OpenClawAdapter implements GatewayAdapter {
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[AOF] Embedded agent setup failed: ${message}`);
+      log.error({ err }, "embedded agent setup failed");
 
       const platformLimit = this.parsePlatformLimitError(message);
 
@@ -189,7 +192,7 @@ export class OpenClawAdapter implements GatewayAdapter {
     }
 
     this.sessionToTask.delete(sessionId);
-    console.info(`[AOF] Force-completed session ${sessionId} (task ${taskId})`);
+    log.info({ sessionId, taskId }, "force-completed session");
   }
 
   /** Run the embedded agent in the background, logging results when done. */
@@ -246,14 +249,16 @@ export class OpenClawAdapter implements GatewayAdapter {
       const result = await Promise.race([agentPromise, timeoutPromise]);
 
       if (result.meta.error) {
-        console.warn(
-          `[AOF] Agent run completed with error for ${params.taskId}: ${result.meta.error.kind}: ${result.meta.error.message}`,
+        log.warn(
+          { taskId: params.taskId, errorKind: result.meta.error.kind, errorMessage: result.meta.error.message },
+          "agent run completed with error",
         );
       } else if (result.meta.aborted) {
-        console.warn(`[AOF] Agent run was aborted for ${params.taskId}`);
+        log.warn({ taskId: params.taskId }, "agent run was aborted");
       } else {
-        console.info(
-          `[AOF] Agent run completed for ${params.taskId} in ${result.meta.durationMs}ms`,
+        log.info(
+          { taskId: params.taskId, durationMs: result.meta.durationMs },
+          "agent run completed",
         );
       }
 
@@ -267,7 +272,7 @@ export class OpenClawAdapter implements GatewayAdapter {
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[AOF] Background agent run failed for ${params.taskId}: ${message}`);
+      log.error({ err, taskId: params.taskId }, "background agent run failed");
 
       outcome = {
         taskId: params.taskId,
@@ -284,8 +289,7 @@ export class OpenClawAdapter implements GatewayAdapter {
       try {
         await params.onRunComplete(outcome);
       } catch (cbErr) {
-        const msg = cbErr instanceof Error ? cbErr.message : String(cbErr);
-        console.error(`[AOF] onRunComplete callback failed for ${params.taskId}: ${msg}`);
+        log.error({ err: cbErr, taskId: params.taskId }, "onRunComplete callback failed");
       }
     }
   }
@@ -371,7 +375,7 @@ export class OpenClawAdapter implements GatewayAdapter {
       }
     }
 
-    console.info(`[AOF] Loaded extensionAPI from ${extensionApiPath}`);
+    log.info({ path: extensionApiPath }, "loaded extensionAPI");
     return mod as unknown as ExtensionApi;
   }
 

@@ -2,6 +2,22 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { OpenClawAdapter } from "../openclaw-executor.js";
 import type { OpenClawApi } from "../types.js";
 
+const mockPlatLogFns = {
+  trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(),
+  error: vi.fn(), fatal: vi.fn(), child: vi.fn(),
+};
+vi.mock("../../logging/index.js", () => ({
+  createLogger: () => ({
+    trace: (...args: unknown[]) => mockPlatLogFns.trace(...args),
+    debug: (...args: unknown[]) => mockPlatLogFns.debug(...args),
+    info: (...args: unknown[]) => mockPlatLogFns.info(...args),
+    warn: (...args: unknown[]) => mockPlatLogFns.warn(...args),
+    error: (...args: unknown[]) => mockPlatLogFns.error(...args),
+    fatal: (...args: unknown[]) => mockPlatLogFns.fatal(...args),
+    child: (...args: unknown[]) => mockPlatLogFns.child(...args),
+  }),
+}));
+
 const mockRunEmbeddedPiAgent = vi.fn();
 const mockEnsureAgentWorkspace = vi.fn(async (p: { dir: string }) => ({ dir: p.dir }));
 const mockExtApi = {
@@ -79,7 +95,7 @@ describe("OpenClawAdapter - Platform Limit Detection", () => {
   it("should log platform limit from background agent result (fire-and-forget)", async () => {
     // When runEmbeddedPiAgent returns a meta.error with platform limit,
     // the error is logged in the background — spawnSession still returns success.
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockPlatLogFns.warn.mockClear();
     mockRunEmbeddedPiAgent.mockResolvedValueOnce({
       meta: {
         durationMs: 100,
@@ -101,10 +117,9 @@ describe("OpenClawAdapter - Platform Limit Detection", () => {
     // Fire-and-forget: spawn succeeds; error logged in background
     expect(result.success).toBe(true);
 
-    await vi.waitFor(() => expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("max active children"),
+    await vi.waitFor(() => expect(mockPlatLogFns.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ errorMessage: expect.stringContaining("max active children") }),
+      expect.any(String),
     ));
-
-    warnSpy.mockRestore();
   });
 });

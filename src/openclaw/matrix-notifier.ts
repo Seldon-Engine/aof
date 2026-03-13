@@ -5,7 +5,10 @@
  * This file is NOT part of the core library — it's OpenClaw-specific.
  */
 
+import { createLogger } from "../logging/index.js";
 import type { NotificationAdapter } from "../events/notifier.js";
+
+const log = createLogger("matrix-notifier");
 
 export interface MatrixMessageTool {
   send(target: string, message: string): Promise<void>;
@@ -23,7 +26,7 @@ export class MatrixNotifier implements NotificationAdapter {
       await this.messageTool.send(channel, message);
     } catch (err) {
       // Log error but don't fail — notifications are best-effort
-      console.error(`Failed to send notification to ${channel}:`, err);
+      log.error({ err, channel }, "failed to send notification");
     }
   }
 }

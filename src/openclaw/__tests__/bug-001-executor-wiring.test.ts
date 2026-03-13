@@ -10,6 +10,10 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { registerAofPlugin } from "../adapter.js";
 import type { OpenClawApi } from "../types.js";
 
+vi.mock("../../logging/index.js", () => ({
+  createLogger: () => ({ trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn(), child: vi.fn() }),
+}));
+
 describe("BUG-001: Executor Wiring (P0)", () => {
   let mockApi: OpenClawApi;
   let registeredServices: any[];

@@ -5,6 +5,10 @@ import plugin from "../../plugin.js";
 import * as adapter from "../adapter.js";
 import type { OpenClawApi } from "../types.js";
 
+vi.mock("../../logging/index.js", () => ({
+  createLogger: () => ({ trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn(), child: vi.fn() }),
+}));
+
 type Registry = {
   serviceIds: string[];
   toolNames: string[];

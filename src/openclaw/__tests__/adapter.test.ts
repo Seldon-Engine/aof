@@ -2,6 +2,10 @@ import { describe, it, expect, vi } from "vitest";
 import { registerAofPlugin } from "../adapter.js";
 import type { OpenClawApi } from "../types.js";
 
+vi.mock("../../logging/index.js", () => ({
+  createLogger: () => ({ trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn(), child: vi.fn() }),
+}));
+
 describe("OpenClaw adapter", () => {
   it("registers services, tools, http routes, and events", () => {
     const services: Array<{ id: string }> = [];
