@@ -17,6 +17,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import writeFileAtomic from "write-file-atomic";
 
+const { mockLogWarn } = vi.hoisted(() => ({
+  mockLogWarn: vi.fn(),
+}));
+vi.mock("../../logging/index.js", () => ({
+  createLogger: () => ({
+    info: vi.fn(), warn: mockLogWarn, error: vi.fn(), debug: vi.fn(), fatal: vi.fn(),
+    child: vi.fn().mockReturnThis(),
+  }),
+}));
+
 describe("Resource Serialization (TASK-054)", () => {
   let testDataDir: string;
   let store: ITaskStore;
@@ -249,9 +259,14 @@ describe("Resource Serialization (TASK-054)", () => {
     // Run poll
     await poll(store, logger, config);
 
-    // Verify warning was logged with correct format
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('[AOF] Resource lock: skipping TASK-2026-02-09-006 (resource "project-aof" occupied by TASK-2026-02-09-005)')
+    // Verify warning was logged via structured logger
+    expect(mockLogWarn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: "TASK-2026-02-09-006",
+        resource: "project-aof",
+        occupyingTaskId: "TASK-2026-02-09-005",
+      }),
+      expect.stringContaining("resource lock"),
     );
   });
 

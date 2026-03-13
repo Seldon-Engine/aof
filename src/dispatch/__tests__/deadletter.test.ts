@@ -8,7 +8,7 @@
  * - Events are logged for deadletter transitions
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,6 +18,16 @@ import { EventLogger } from "../../events/logger.js";
 import { trackDispatchFailure, shouldTransitionToDeadletter, transitionToDeadletter } from "../failure-tracker.js";
 import type { Task } from "../../schemas/task.js";
 import type { BaseEvent } from "../../schemas/event.js";
+
+const { mockLogError } = vi.hoisted(() => ({
+  mockLogError: vi.fn(),
+}));
+vi.mock("../../logging/index.js", () => ({
+  createLogger: () => ({
+    info: vi.fn(), warn: vi.fn(), error: mockLogError, debug: vi.fn(), fatal: vi.fn(),
+    child: vi.fn().mockReturnThis(),
+  }),
+}));
 
 describe("Dispatch Failure Tracking", () => {
   let testDir: string;
@@ -358,21 +368,18 @@ Test task body`;
 
     await writeFile(join(testDir, "tasks", "ready", `${taskId}.md`), taskContent);
 
-    const consoleErrors: string[] = [];
-    const originalError = console.error;
-    console.error = (...args: unknown[]) => consoleErrors.push(args.join(" "));
+    mockLogError.mockClear();
+    await transitionToDeadletter(store, eventLogger, taskId, "gateway timeout");
 
-    try {
-      await transitionToDeadletter(store, eventLogger, taskId, "gateway timeout");
-    } finally {
-      console.error = originalError;
-    }
-
-    // Verify retryCount and errorClass appear in console output
-    const output = consoleErrors.join("\n");
-    expect(output).toContain("Retries: 2");
-    expect(output).toContain("Error class: transient");
-    expect(output).toContain("Failure count: 3");
+    // Verify retryCount and errorClass appear in structured log output
+    expect(mockLogError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        retryCount: 2,
+        errorClass: "transient",
+        failureCount: 3,
+      }),
+      expect.stringContaining("DEADLETTER"),
+    );
   });
 
   it("handles missing metadata fields gracefully", async () => {

@@ -7,6 +7,7 @@
 
 import type { Task, TaskStatus } from "../schemas/task.js";
 import { MurmurStateManager } from "../murmur/state-manager.js";
+import { createLogger } from "../logging/index.js";
 import { join } from "node:path";
 
 /**
@@ -21,6 +22,8 @@ import { join } from "node:path";
  * @param stateManager - Optional state manager instance (created if not provided)
  * @returns Hook function for task store
  */
+const log = createLogger("murmur-hooks");
+
 export function createMurmurHook(
   projectRoot: string,
   stateManager?: MurmurStateManager
@@ -61,10 +64,7 @@ export function createMurmurHook(
         await manager.incrementFailures(team);
       }
     } catch (error) {
-      // Murmur state updates should not crash the task store
-      console.error(
-        `[AOF] Murmur hook error for task ${task.frontmatter.id}: ${(error as Error).message}`
-      );
+      log.warn({ err: error, taskId: task.frontmatter.id, op: "murmurHook" }, "murmur hook error");
     }
   };
 }

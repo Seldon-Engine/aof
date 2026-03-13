@@ -13,6 +13,7 @@
 import type { Task, TaskStatus } from "../schemas/task.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import type { EventLogger } from "../events/logger.js";
+import { createLogger } from "../logging/index.js";
 import type { GatewayAdapter } from "./executor.js";
 import type { TaskLockManager } from "../protocol/task-lock.js";
 import { isLeaseActive } from "./lease-manager.js";
@@ -22,6 +23,8 @@ import { orgChartPath } from "../config/paths.js";
 
 export { executeAssignAction, loadProjectManifest } from "./assign-executor.js";
 import { loadProjectManifest } from "./assign-executor.js";
+
+const log = createLogger("task-dispatcher");
 
 export interface DispatchConfig {
   dataDir: string;
@@ -98,7 +101,7 @@ export async function buildDispatchActions(
       orgChart = result;
     }
   } catch (err) {
-    // Org chart is optional - continue without per-team overrides
+    log.warn({ err, op: "loadOrgChart" }, "org chart load failed, continuing without per-team overrides");
   }
   
   // AOF-adf: Build team configuration map
@@ -129,10 +132,7 @@ export async function buildDispatchActions(
   let dispatchesThisPoll = 0;
   
   // Log concurrency status
-  console.info(
-    `[AOF] Concurrency limit: ${currentInProgress}/${maxDispatches} in-progress` +
-    (effectiveConcurrencyLimit !== null ? ` (platform-adjusted from ${config.maxConcurrentDispatches ?? 3})` : "")
-  );
+  log.info({ currentInProgress, maxDispatches, platformAdjusted: effectiveConcurrencyLimit !== null }, "concurrency limit status");
   
   for (const task of readyTasks) {
     if (metrics.blockedBySubtasks.has(task.frontmatter.id)) continue;
@@ -164,16 +164,14 @@ export async function buildDispatchActions(
       }
       
       if (unresolvedDeps.length > 0) {
-        console.warn(`[AOF] Dependency gate: skipping ${task.frontmatter.id} (waiting on: ${unresolvedDeps.join(", ")})`);
+        log.warn({ taskId: task.frontmatter.id, unresolvedDeps, op: "dependencyGate" }, "dependency gate: skipping task");
         continue;
       }
     }
     
     if (isLeaseActive(task.frontmatter.lease)) {
       const lease = task.frontmatter.lease;
-      console.warn(
-        `[AOF] Dispatch dedup: skipping ${task.frontmatter.id} (active lease held by ${lease?.agent} until ${lease?.expiresAt})`,
-      );
+      log.warn({ taskId: task.frontmatter.id, leaseAgent: lease?.agent, leaseExpiresAt: lease?.expiresAt, op: "dispatchDedup" }, "dispatch dedup: skipping task (active lease)");
       continue;
     }
 
@@ -181,7 +179,7 @@ export async function buildDispatchActions(
     const resource = task.frontmatter.resource;
     if (resource && metrics.occupiedResources.has(resource)) {
       const occupyingTaskId = metrics.occupiedResources.get(resource)!;
-      console.warn(`[AOF] Resource lock: skipping ${task.frontmatter.id} (resource "${resource}" occupied by ${occupyingTaskId})`);
+      log.warn({ taskId: task.frontmatter.id, resource, occupyingTaskId, op: "resourceLock" }, "resource lock: skipping task");
       continue;
     }
     
@@ -208,7 +206,7 @@ export async function buildDispatchActions(
     });
     
     if (!throttleCheck.allowed) {
-      console.info(`[AOF] Dispatch throttled: ${task.frontmatter.id} (${throttleCheck.reason})`);
+      log.info({ taskId: task.frontmatter.id, reason: throttleCheck.reason, op: "throttle" }, "dispatch throttled");
       // If global interval not elapsed, throttle ALL remaining tasks in this poll
       if (throttleCheck.reason?.includes("global interval")) {
         break;
@@ -254,10 +252,7 @@ export async function buildDispatchActions(
     } else if (routing.tags && routing.tags.length > 0) {
       // GAP-004 fix: Task has tags but no explicit agent/role/team
       // Log error and create alert action (tags-only routing not supported)
-      console.error(`[AOF] [GAP-004] Task ${task.frontmatter.id} has tags-only routing (not supported)`);
-      console.error(`[AOF] [GAP-004]   Tags: ${routing.tags.join(", ")}`);
-      console.error(`[AOF] [GAP-004]   Task needs explicit assignee via routing.agent, routing.role, or routing.team`);
-      console.error(`[AOF] [GAP-004]   Use: aof_dispatch --agent <agent-id> to assign explicitly`);
+      log.error({ taskId: task.frontmatter.id, tags: routing.tags, op: "routing" }, "task has tags-only routing (not supported), needs explicit agent/role/team assignment");
 
       actions.push({
         type: "alert",

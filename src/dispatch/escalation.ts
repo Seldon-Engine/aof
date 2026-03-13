@@ -10,6 +10,7 @@ import type { Task } from "../schemas/task.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import { serializeTask } from "../store/task-store.js";
 import { EventLogger } from "../events/logger.js";
+import { createLogger } from "../logging/index.js";
 import writeFileAtomic from "write-file-atomic";
 import { parseDuration } from "./duration-parser.js";
 import type { TaskContext } from "./executor.js";
@@ -18,6 +19,8 @@ import { buildHopContext } from "./dag-context-builder.js";
 // Import types from scheduler to avoid duplication
 export type { SchedulerConfig, SchedulerAction } from "./scheduler.js";
 import type { SchedulerConfig, SchedulerAction } from "./scheduler.js";
+
+const log = createLogger("escalation");
 
 // ---------------------------------------------------------------------------
 // DAG Hop Timeout Checking
@@ -63,8 +66,8 @@ async function escalateHopTimeout(
           reason: "already escalated (one-shot rule)",
         },
       });
-    } catch {
-      // Logging errors should not crash the scheduler
+    } catch (err) {
+      log.warn({ err, taskId: task.frontmatter.id, op: "eventLog" }, "event logger write failed (best-effort)");
     }
 
     return {
@@ -87,8 +90,8 @@ async function escalateHopTimeout(
           reason: "no escalation configured",
         },
       });
-    } catch {
-      // Logging errors should not crash the scheduler
+    } catch (err) {
+      log.warn({ err, taskId: task.frontmatter.id, op: "eventLog" }, "event logger write failed (best-effort)");
     }
 
     return {
@@ -116,8 +119,8 @@ async function escalateHopTimeout(
   if (config.executor && hopState.correlationId) {
     try {
       await config.executor.forceCompleteSession(hopState.correlationId);
-    } catch {
-      // Force-complete failure is non-fatal — continue with escalation
+    } catch (err) {
+      log.warn({ err, taskId: task.frontmatter.id, hopId, op: "forceCompleteSession" }, "force-complete failed, continuing with escalation");
     }
   }
 
@@ -189,8 +192,8 @@ async function escalateHopTimeout(
         timeout: hop.timeout,
       },
     });
-  } catch {
-    // Logging errors should not crash the scheduler
+  } catch (err) {
+    log.warn({ err, taskId: task.frontmatter.id, op: "eventLog" }, "event logger write failed (best-effort)");
   }
 
   return {
@@ -253,9 +256,7 @@ export async function checkHopTimeouts(
       // Parse timeout duration
       const timeoutMs = parseDuration(hop.timeout);
       if (!timeoutMs) {
-        console.warn(
-          `[AOF] Invalid timeout format for hop ${hop.id}: ${hop.timeout}`,
-        );
+        log.warn({ hopId: hop.id, timeout: hop.timeout, taskId: task.frontmatter.id, op: "parseTimeout" }, "invalid timeout format for hop");
         continue;
       }
 

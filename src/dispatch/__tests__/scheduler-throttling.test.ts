@@ -25,6 +25,16 @@ import { EventLogger } from "../../events/logger.js";
 import { poll, resetThrottleState } from "../scheduler.js";
 import { MockAdapter } from "../executor.js";
 
+const { mockLogInfo } = vi.hoisted(() => ({
+  mockLogInfo: vi.fn(),
+}));
+vi.mock("../../logging/index.js", () => ({
+  createLogger: () => ({
+    info: mockLogInfo, warn: vi.fn(), error: vi.fn(), debug: vi.fn(), fatal: vi.fn(),
+    child: vi.fn().mockReturnThis(),
+  }),
+}));
+
 describe("Scheduler Throttling (AOF-adf)", () => {
   let tmpDir: string;
   let store: ITaskStore;
@@ -335,7 +345,7 @@ describe("Scheduler Throttling (AOF-adf)", () => {
    * When throttling kicks in, log should explain which limit was hit.
    */
   it("logs informative throttle messages", async () => {
-    const consoleInfoSpy = vi.spyOn(console, "info");
+    mockLogInfo.mockClear();
 
     const config = {
       dataDir: tmpDir,
@@ -365,15 +375,11 @@ describe("Scheduler Throttling (AOF-adf)", () => {
 
     await poll(store, logger, config);
 
-    // Should log throttle reason
-    expect(consoleInfoSpy).toHaveBeenCalledWith(
-      expect.stringContaining("Dispatch throttled")
+    // Should log structured throttle reason with "dispatch throttled" message
+    expect(mockLogInfo).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: expect.stringContaining("global concurrency") }),
+      "dispatch throttled",
     );
-    expect(consoleInfoSpy).toHaveBeenCalledWith(
-      expect.stringContaining("global concurrency")
-    );
-
-    consoleInfoSpy.mockRestore();
   });
 
   /**

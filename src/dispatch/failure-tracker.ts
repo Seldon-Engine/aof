@@ -11,8 +11,11 @@ import { join } from "node:path";
 import writeFileAtomic from "write-file-atomic";
 import type { ITaskStore } from "../store/interfaces.js";
 import type { EventLogger } from "../events/logger.js";
+import { createLogger } from "../logging/index.js";
 import type { Task } from "../schemas/task.js";
 import { serializeTask } from "../store/task-store.js";
+
+const log = createLogger("failure-tracker");
 
 const MAX_DISPATCH_FAILURES = 3;
 
@@ -99,14 +102,9 @@ export async function transitionToDeadletter(
     },
   });
 
-  // Emit ops alert (console) with full diagnostic context
+  // Emit ops alert with full diagnostic context
   // AOF-1m9: Mandatory ops alerting for deadletter transitions
-  console.error(`[AOF] DEADLETTER: Task ${taskId} (${task.frontmatter.title})`);
-  console.error(`[AOF] DEADLETTER:   Failure count: ${failureCount}, Retries: ${retryCount}`);
-  console.error(`[AOF] DEADLETTER:   Error class: ${errorClass}`);
-  console.error(`[AOF] DEADLETTER:   Last failure: ${lastFailureReason}`);
-  console.error(`[AOF] DEADLETTER:   Agent: ${agent ?? "unassigned"}`);
-  console.error(`[AOF] DEADLETTER:   Action: Investigate failure cause before resurrection`);
+  log.error({ taskId, taskTitle: task.frontmatter.title, failureCount, retryCount, errorClass, lastFailureReason, agent: agent ?? "unassigned" }, "DEADLETTER: task transitioned to deadletter, investigate failure cause before resurrection");
 }
 
 /**

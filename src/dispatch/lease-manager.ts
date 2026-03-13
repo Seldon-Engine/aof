@@ -7,6 +7,9 @@
 import { renewLease } from "../store/lease.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import type { Task } from "../schemas/task.js";
+import { createLogger } from "../logging/index.js";
+
+const log = createLogger("lease-manager");
 
 /** Maximum number of lease renewals before auto-expiry. */
 export const LEASE_RENEWAL_MAX = 20;
@@ -59,7 +62,8 @@ export function startLeaseRenewal(
     void renewLease(store, taskId, agentId, {
       ttlMs: leaseTtlMs,
       maxRenewals: LEASE_RENEWAL_MAX,
-    }).catch(() => {
+    }).catch((err) => {
+      log.warn({ err, taskId, op: "leaseRenewal" }, "lease renewal failed");
       stopLeaseRenewal(store, taskId);
     });
   }, intervalMs);

@@ -20,6 +20,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { createLogger } from "../logging/index.js";
 import type {
   WorkflowDefinition,
   WorkflowState,
@@ -40,6 +41,8 @@ import type { ITaskStore } from "../store/interfaces.js";
 import type { RunResult } from "../schemas/run-result.js";
 import { trackDispatchFailure, shouldTransitionToDeadletter, transitionToDeadletter } from "./failure-tracker.js";
 import { captureTrace } from "../trace/trace-writer.js";
+
+const log = createLogger("dag-transition");
 
 // ---------------------------------------------------------------------------
 // Result Types
@@ -300,7 +303,7 @@ export async function dispatchDAGHop(
   // Create per-hop artifact directory before spawn
   const hopWorkDir = join(dirname(task.path!), "work", hopId);
   await mkdir(hopWorkDir, { recursive: true });
-  console.log(`[dag] Created artifact dir: ${hopWorkDir}`);
+  log.info({ hopId, taskId: task.frontmatter.id, hopWorkDir }, "created artifact directory");
 
   // Build hop-scoped context
   const hopContext = buildHopContext(task, hopId);
@@ -341,8 +344,8 @@ export async function dispatchDAGHop(
             logger,
             debug: traceDebug,
           });
-        } catch {
-          // Trace capture must never crash the scheduler
+        } catch (err) {
+          log.warn({ err, taskId: task.frontmatter.id, hopId, op: "traceCapture" }, "trace capture failed (best-effort)");
         }
         return;
       }
@@ -353,7 +356,7 @@ export async function dispatchDAGHop(
         `Session lasted ${(outcome.durationMs / 1000).toFixed(1)}s. ` +
         `Run \`aof trace ${task.frontmatter.id}\` for details.`;
 
-      console.error(`[AOF] ${enforcementReason}`);
+      log.error({ taskId: task.frontmatter.id, hopId, op: "dagEnforcement" }, enforcementReason);
 
       try {
         // Track dispatch failure on the parent task
@@ -387,8 +390,7 @@ export async function dispatchDAGHop(
           },
         });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[AOF] DAG enforcement failed for hop ${hopId} on task ${task.frontmatter.id}: ${msg}`);
+        log.error({ err, taskId: task.frontmatter.id, hopId, op: "dagEnforcement" }, "DAG enforcement failed");
       }
 
       // --- Trace capture (Phase 26) --- best-effort, never blocks transitions
@@ -404,8 +406,8 @@ export async function dispatchDAGHop(
           logger,
           debug: traceDebug,
         });
-      } catch {
-        // Trace capture must never crash the scheduler
+      } catch (err) {
+        log.warn({ err, taskId: task.frontmatter.id, hopId, op: "traceCapture" }, "trace capture failed (best-effort)");
       }
     },
   });
