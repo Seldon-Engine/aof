@@ -2,10 +2,51 @@
  * AOF task CRUD tools — create, update, edit, cancel operations.
  */
 
+import { z } from "zod";
 import type { ITaskStore } from "../store/interfaces.js";
 import type { TaskStatus, TaskPriority, Task } from "../schemas/task.js";
 import { compactResponse, type ToolResponseEnvelope } from "./envelope.js";
 import type { ToolContext } from "./aof-tools.js";
+
+/**
+ * Zod schema for aof_task_update input.
+ */
+export const taskUpdateSchema = z.object({
+  taskId: z.string(),
+  status: z.enum(["backlog", "ready", "in-progress", "blocked", "review", "done"]).optional(),
+  body: z.string().optional(),
+  reason: z.string().optional(),
+  actor: z.string().optional(),
+  project: z.string().optional(),
+});
+
+/**
+ * Zod schema for aof_task_edit input.
+ */
+export const taskEditSchema = z.object({
+  taskId: z.string(),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  priority: z.enum(["low", "normal", "high", "critical"]).optional(),
+  routing: z.object({
+    role: z.string().optional(),
+    team: z.string().optional(),
+    agent: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+  }).optional(),
+  actor: z.string().optional(),
+  project: z.string().optional(),
+});
+
+/**
+ * Zod schema for aof_task_cancel input.
+ */
+export const taskCancelSchema = z.object({
+  taskId: z.string(),
+  reason: z.string().optional(),
+  actor: z.string().optional(),
+  project: z.string().optional(),
+});
 
 async function resolveTask(store: ITaskStore, taskId: string) {
   const task = await store.get(taskId);

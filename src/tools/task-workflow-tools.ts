@@ -2,10 +2,60 @@
  * AOF task workflow tools — complete, dependencies, block/unblock operations.
  */
 
+import { z } from "zod";
 import type { ITaskStore } from "../store/interfaces.js";
 import type { TaskStatus } from "../schemas/task.js";
 import { compactResponse, type ToolResponseEnvelope } from "./envelope.js";
 import type { ToolContext } from "./aof-tools.js";
+
+/**
+ * Zod schema for aof_task_complete input.
+ */
+export const taskCompleteSchema = z.object({
+  taskId: z.string(),
+  summary: z.string().optional(),
+  actor: z.string().optional(),
+  project: z.string().optional(),
+});
+
+/**
+ * Zod schema for aof_task_dep_add input.
+ */
+export const taskDepAddSchema = z.object({
+  taskId: z.string(),
+  blockerId: z.string(),
+  actor: z.string().optional(),
+  project: z.string().optional(),
+});
+
+/**
+ * Zod schema for aof_task_dep_remove input.
+ */
+export const taskDepRemoveSchema = z.object({
+  taskId: z.string(),
+  blockerId: z.string(),
+  actor: z.string().optional(),
+  project: z.string().optional(),
+});
+
+/**
+ * Zod schema for aof_task_block input.
+ */
+export const taskBlockSchema = z.object({
+  taskId: z.string(),
+  reason: z.string(),
+  actor: z.string().optional(),
+  project: z.string().optional(),
+});
+
+/**
+ * Zod schema for aof_task_unblock input.
+ */
+export const taskUnblockSchema = z.object({
+  taskId: z.string(),
+  actor: z.string().optional(),
+  project: z.string().optional(),
+});
 
 async function resolveTask(store: ITaskStore, taskId: string) {
   const task = await store.get(taskId);

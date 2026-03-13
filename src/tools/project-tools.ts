@@ -2,9 +2,29 @@
  * AOF project tools — task creation and dispatch operations.
  */
 
+import { z } from "zod";
 import type { TaskStatus, TaskPriority } from "../schemas/task.js";
 import { compactResponse, type ToolResponseEnvelope } from "./envelope.js";
 import type { ToolContext } from "./aof-tools.js";
+
+/**
+ * Zod schema for aof_dispatch input (shared between MCP and OpenClaw).
+ */
+export const dispatchSchema = z.object({
+  title: z.string().min(1),
+  brief: z.string().min(1),
+  description: z.string().optional(),
+  agent: z.string().optional(),
+  team: z.string().optional(),
+  role: z.string().optional(),
+  priority: z.enum(["low", "medium", "high", "critical", "normal"]).optional(),
+  dependsOn: z.array(z.string()).optional(),
+  parentId: z.string().optional(),
+  metadata: z.record(z.unknown()).optional(),
+  tags: z.array(z.string()).optional(),
+  actor: z.string().optional(),
+  project: z.string().optional(),
+});
 
 /**
  * Input parameters for creating and dispatching a new task.

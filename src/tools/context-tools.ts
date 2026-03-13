@@ -4,9 +4,17 @@
  * Provides agent-callable tools for lazy-loading skills and other context interfaces.
  */
 
+import { z } from "zod";
 import { wrapResponse, type ToolResponseEnvelope } from "./envelope.js";
 import { SkillResolver } from "../context/resolvers.js";
 import type { ContextInterfaceRegistry } from "../context/registry.js";
+
+/**
+ * Zod schema for aof_context_load input.
+ */
+export const contextLoadSchema = z.object({
+  skillName: z.string().min(1),
+});
 
 /**
  * Input for aofContextLoad tool.

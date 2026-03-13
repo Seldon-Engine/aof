@@ -2,9 +2,22 @@
  * AOF query tools — read-only status and search operations.
  */
 
+import { z } from "zod";
 import type { TaskStatus } from "../schemas/task.js";
 import { wrapResponse, compactResponse, type ToolResponseEnvelope } from "./envelope.js";
 import type { ToolContext } from "./aof-tools.js";
+
+/**
+ * Zod schema for aof_status_report input.
+ */
+export const statusReportSchema = z.object({
+  agent: z.string().optional(),
+  status: z.enum(["backlog", "ready", "in-progress", "blocked", "review", "done"]).optional(),
+  compact: z.boolean().optional(),
+  limit: z.number().int().positive().optional(),
+  actor: z.string().optional(),
+  project: z.string().optional(),
+});
 
 /**
  * Input parameters for generating a task status report.
