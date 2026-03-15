@@ -12,20 +12,17 @@ import {
 import type { SchedulerAction, SchedulerConfig } from "../scheduler.js";
 import type { ITaskStore } from "../../store/interfaces.js";
 import type { EventLogger } from "../../events/logger.js";
+import { createMockStore, createMockLogger } from "../../testing/index.js";
 
 function makeStore(): ITaskStore {
-  return {
-    get: vi.fn().mockResolvedValue(null),
-    transition: vi.fn().mockResolvedValue(undefined),
-    tasksDir: "/tmp/tasks",
-  } as unknown as ITaskStore;
+  const store = createMockStore();
+  store.get.mockResolvedValue(null);
+  store.transition.mockResolvedValue(undefined);
+  return store as unknown as ITaskStore;
 }
 
 function makeLogger(): EventLogger {
-  return {
-    logTransition: vi.fn().mockResolvedValue(undefined),
-    log: vi.fn().mockResolvedValue(undefined),
-  } as unknown as EventLogger;
+  return createMockLogger() as unknown as EventLogger;
 }
 
 describe("handleAlert", () => {

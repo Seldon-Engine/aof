@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { MockAdapter } from "../executor.js";
 import { SubscriptionStore } from "../../store/subscription-store.js";
+import { createMockStore, createMockLogger } from "../../testing/index.js";
 import {
   deliverCallbacks,
   retryPendingDeliveries,
@@ -28,27 +29,15 @@ vi.mock("../../trace/trace-writer.js", () => ({
 import { captureTrace } from "../../trace/trace-writer.js";
 const mockCaptureTrace = vi.mocked(captureTrace);
 
-// Minimal mock task store
+// Typed mock task store with optional pre-loaded task
 function createMockTaskStore(task: Task | null) {
-  return {
-    get: vi.fn().mockResolvedValue(task),
-    list: vi.fn().mockResolvedValue(task ? [task] : []),
-    projectRoot: "/tmp/mock",
-    projectId: "test",
-    tasksDir: "/tmp/mock/tasks",
-    init: vi.fn(),
-    create: vi.fn(),
-    transition: vi.fn(),
-  } as any;
+  const store = createMockStore();
+  store.get.mockResolvedValue(task);
+  store.list.mockResolvedValue(task ? [task] : []);
+  return store;
 }
 
-// Minimal mock logger
-function createMockLogger() {
-  return {
-    log: vi.fn(),
-    emit: vi.fn(),
-  } as any;
-}
+// Re-export shared createMockLogger (already imported above)
 
 function makeTask(overrides: Partial<Task> = {}): Task {
   const base = {

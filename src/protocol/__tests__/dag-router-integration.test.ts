@@ -12,6 +12,7 @@ import type { RunResult } from "../../schemas/run-result.js";
 import type { EventType } from "../../schemas/event.js";
 import type { ITaskStore } from "../../store/interfaces.js";
 import type { GatewayAdapter, TaskContext, SpawnResult, SessionStatus } from "../../dispatch/executor.js";
+import { createMockStore, createMockLogger } from "../../testing/index.js";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -93,27 +94,15 @@ import { ProtocolRouter } from "../router.js";
 // ---------------------------------------------------------------------------
 
 function makeStore(): ITaskStore {
-  return {
-    init: vi.fn(),
-    get: vi.fn(),
-    list: vi.fn().mockResolvedValue([]),
-    create: vi.fn(),
-    updateBody: vi.fn(),
-    transition: vi.fn().mockImplementation(async (id: string, status: string) => ({
-      frontmatter: { id, status },
-    })),
-    delete: vi.fn(),
-    tasksDir: "/tmp/tasks",
-  } as unknown as ITaskStore;
+  const store = createMockStore();
+  store.transition.mockImplementation(async (id: string, status: string) => ({
+    frontmatter: { id, status },
+  }) as any);
+  return store as unknown as ITaskStore;
 }
 
 function makeLogger() {
-  return {
-    log: vi.fn().mockResolvedValue(undefined),
-    logSchedulerPoll: vi.fn(),
-    logSystem: vi.fn(),
-    logTransition: vi.fn(),
-  } as unknown as { log: (type: EventType, actor: string, opts?: Record<string, unknown>) => Promise<void> };
+  return createMockLogger() as unknown as { log: (type: EventType, actor: string, opts?: Record<string, unknown>) => Promise<void> };
 }
 
 function makeExecutor(): GatewayAdapter {

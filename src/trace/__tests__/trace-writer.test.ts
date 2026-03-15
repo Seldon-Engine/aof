@@ -38,6 +38,7 @@ import { parseSession } from "../session-parser.js";
 import { detectNoop } from "../noop-detector.js";
 import { captureTrace, type CaptureTraceOptions } from "../trace-writer.js";
 import { TraceSchema } from "../../schemas/trace.js";
+import { createMockStore, createMockLogger } from "../../testing/index.js";
 
 // Typed mocks
 const mockReaddir = readdir as unknown as Mock;
@@ -46,23 +47,6 @@ const mockAccess = access as unknown as Mock;
 const mockWriteFileAtomic = writeFileAtomic as unknown as Mock;
 const mockParseSession = parseSession as unknown as Mock;
 const mockDetectNoop = detectNoop as unknown as Mock;
-
-/** Minimal mock logger. */
-function createMockLogger() {
-  return {
-    log: vi.fn().mockResolvedValue({ eventId: 1, type: "test", timestamp: new Date().toISOString(), actor: "test", payload: {} }),
-  };
-}
-
-/** Minimal mock store. */
-function createMockStore(projectRoot = "/projects/test") {
-  return {
-    projectRoot,
-    projectId: "test",
-    tasksDir: join(projectRoot, "tasks"),
-    get: vi.fn(),
-  };
-}
 
 /** Default parsed session (successful, one tool call). */
 function defaultParsedSession() {

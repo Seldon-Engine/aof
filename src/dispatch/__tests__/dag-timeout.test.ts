@@ -13,6 +13,7 @@ import type { TaskWorkflow } from "../../schemas/workflow-dag.js";
 import type { GatewayAdapter, SpawnResult } from "../executor.js";
 import type { ITaskStore } from "../../store/interfaces.js";
 import type { SchedulerConfig } from "../scheduler.js";
+import { createMockLogger } from "../../testing/index.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -96,12 +97,7 @@ function makeStore(tasks: Task[]): ITaskStore {
 }
 
 function makeLogger() {
-  return {
-    log: vi.fn().mockResolvedValue(undefined),
-    logSchedulerPoll: vi.fn().mockResolvedValue(undefined),
-    logSystem: vi.fn(),
-    logTransition: vi.fn(),
-  } as any;
+  return createMockLogger() as any;
 }
 
 function makeExecutor(overrides?: Partial<GatewayAdapter>): GatewayAdapter {

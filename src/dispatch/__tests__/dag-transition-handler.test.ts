@@ -12,6 +12,7 @@ import type { RunResult } from "../../schemas/run-result.js";
 import type { EventLogger } from "../../events/logger.js";
 import type { ITaskStore } from "../../store/interfaces.js";
 import type { GatewayAdapter, TaskContext } from "../executor.js";
+import { createMockStore, createMockLogger } from "../../testing/index.js";
 
 // Mock evaluateDAG
 vi.mock("../dag-evaluator.js", () => ({
@@ -85,24 +86,11 @@ function makeRunResult(overrides?: Partial<RunResult>): RunResult {
 }
 
 function makeLogger(): EventLogger {
-  return {
-    log: vi.fn().mockResolvedValue({}),
-    logTransition: vi.fn().mockResolvedValue(undefined),
-    logLease: vi.fn().mockResolvedValue(undefined),
-    logDispatch: vi.fn().mockResolvedValue(undefined),
-    logAction: vi.fn().mockResolvedValue(undefined),
-  } as unknown as EventLogger;
+  return createMockLogger() as unknown as EventLogger;
 }
 
 function makeStore(): ITaskStore {
-  return {
-    projectRoot: "/tmp/project",
-    projectId: "test",
-    tasksDir: "/tmp/project/tasks",
-    get: vi.fn().mockResolvedValue(undefined),
-    save: vi.fn().mockResolvedValue(undefined),
-    saveToPath: vi.fn().mockResolvedValue(undefined),
-  } as unknown as ITaskStore;
+  return createMockStore() as unknown as ITaskStore;
 }
 
 function makeExecutor(success = true): GatewayAdapter {

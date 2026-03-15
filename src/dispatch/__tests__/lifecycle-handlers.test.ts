@@ -13,6 +13,7 @@ import type { SchedulerAction, SchedulerConfig } from "../scheduler.js";
 import type { ITaskStore } from "../../store/interfaces.js";
 import type { EventLogger } from "../../events/logger.js";
 import type { Task } from "../../schemas/task.js";
+import { createMockStore, createMockLogger } from "../../testing/index.js";
 
 // Mock write-file-atomic to avoid filesystem writes
 vi.mock("write-file-atomic", () => ({
@@ -55,20 +56,14 @@ function makeStore(task?: Partial<Task>): ITaskStore {
     path: "/tmp/tasks/in-progress/task-1.md",
     ...task,
   };
-  return {
-    get: vi.fn().mockResolvedValue(defaultTask),
-    transition: vi.fn().mockResolvedValue(undefined),
-    save: vi.fn().mockResolvedValue(undefined),
-    saveToPath: vi.fn().mockResolvedValue(undefined),
-    tasksDir: "/tmp/tasks",
-  } as unknown as ITaskStore;
+  const store = createMockStore();
+  store.get.mockResolvedValue(defaultTask);
+  store.transition.mockResolvedValue(undefined);
+  return store as unknown as ITaskStore;
 }
 
 function makeLogger(): EventLogger {
-  return {
-    logTransition: vi.fn().mockResolvedValue(undefined),
-    log: vi.fn().mockResolvedValue(undefined),
-  } as unknown as EventLogger;
+  return createMockLogger() as unknown as EventLogger;
 }
 
 function makeAction(overrides?: Partial<SchedulerAction>): SchedulerAction {

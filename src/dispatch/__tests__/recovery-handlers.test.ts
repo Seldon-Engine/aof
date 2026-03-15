@@ -7,6 +7,7 @@ import { handleStaleHeartbeat } from "../recovery-handlers.js";
 import type { SchedulerAction, SchedulerConfig } from "../scheduler.js";
 import type { ITaskStore } from "../../store/interfaces.js";
 import type { EventLogger } from "../../events/logger.js";
+import { createMockStore, createMockLogger } from "../../testing/index.js";
 
 // Mock run-artifacts
 vi.mock("../../recovery/run-artifacts.js", () => ({
@@ -41,18 +42,14 @@ function makeStore(task?: any): ITaskStore {
     },
     body: "",
   };
-  return {
-    get: vi.fn().mockResolvedValue(task ?? defaultTask),
-    transition: vi.fn().mockResolvedValue(undefined),
-    tasksDir: "/tmp/tasks",
-  } as unknown as ITaskStore;
+  const store = createMockStore();
+  store.get.mockResolvedValue(task ?? defaultTask);
+  store.transition.mockResolvedValue(undefined);
+  return store as unknown as ITaskStore;
 }
 
 function makeLogger(): EventLogger {
-  return {
-    logTransition: vi.fn().mockResolvedValue(undefined),
-    log: vi.fn().mockResolvedValue(undefined),
-  } as unknown as EventLogger;
+  return createMockLogger() as unknown as EventLogger;
 }
 
 function makeAction(): SchedulerAction {

@@ -13,6 +13,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Task } from "../../schemas/task.js";
 import type { TaskWorkflow } from "../../schemas/workflow-dag.js";
 import type { GatewayAdapter } from "../executor.js";
+import { createMockLogger } from "../../testing/index.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -140,12 +141,7 @@ describe("poll cycle — DAG hop dispatch", () => {
   }
 
   function makeLogger() {
-    return {
-      log: vi.fn().mockResolvedValue(undefined),
-      logSchedulerPoll: vi.fn().mockResolvedValue(undefined),
-      logSystem: vi.fn(),
-      logTransition: vi.fn(),
-    } as any;
+    return createMockLogger() as any;
   }
 
   function makeExecutor(): GatewayAdapter {

@@ -14,6 +14,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { Command } from "commander";
+import { createMockStore } from "../../../testing/index.js";
 
 // Mock dependencies before importing the module under test
 vi.mock("../../project-utils.js", () => ({
@@ -105,9 +106,10 @@ describe("trace command action", () => {
   });
 
   it("prints error when task not found", async () => {
-    const mockStore = { getByPrefix: vi.fn().mockResolvedValue(undefined) };
+    const mockStore = createMockStore();
+    mockStore.getByPrefix.mockResolvedValue(undefined);
     vi.mocked(createProjectStore).mockResolvedValue({
-      store: mockStore as any,
+      store: mockStore,
       projectRoot: "/tmp/project",
       vaultRoot: "/tmp/aof",
     });
@@ -121,13 +123,12 @@ describe("trace command action", () => {
   });
 
   it("prints error when no traces found", async () => {
-    const mockStore = {
-      getByPrefix: vi.fn().mockResolvedValue({
-        frontmatter: { id: "TASK-2026-01-01-001" },
-      }),
-    };
+    const mockStore = createMockStore();
+    mockStore.getByPrefix.mockResolvedValue({
+      frontmatter: { id: "TASK-2026-01-01-001" },
+    } as any);
     vi.mocked(createProjectStore).mockResolvedValue({
-      store: mockStore as any,
+      store: mockStore,
       projectRoot: "/tmp/project",
       vaultRoot: "/tmp/aof",
     });
@@ -143,13 +144,12 @@ describe("trace command action", () => {
 
   it("calls formatTraceSummary by default", async () => {
     const trace = makeTrace();
-    const mockStore = {
-      getByPrefix: vi.fn().mockResolvedValue({
-        frontmatter: { id: "TASK-2026-01-01-001" },
-      }),
-    };
+    const mockStore = createMockStore();
+    mockStore.getByPrefix.mockResolvedValue({
+      frontmatter: { id: "TASK-2026-01-01-001" },
+    } as any);
     vi.mocked(createProjectStore).mockResolvedValue({
-      store: mockStore as any,
+      store: mockStore,
       projectRoot: "/tmp/project",
       vaultRoot: "/tmp/aof",
     });
@@ -167,13 +167,12 @@ describe("trace command action", () => {
 
   it("calls formatTraceDebug with --debug flag", async () => {
     const trace = makeTrace();
-    const mockStore = {
-      getByPrefix: vi.fn().mockResolvedValue({
-        frontmatter: { id: "TASK-2026-01-01-001" },
-      }),
-    };
+    const mockStore = createMockStore();
+    mockStore.getByPrefix.mockResolvedValue({
+      frontmatter: { id: "TASK-2026-01-01-001" },
+    } as any);
     vi.mocked(createProjectStore).mockResolvedValue({
-      store: mockStore as any,
+      store: mockStore,
       projectRoot: "/tmp/project",
       vaultRoot: "/tmp/aof",
     });
@@ -191,13 +190,12 @@ describe("trace command action", () => {
 
   it("calls formatTraceJson with --json flag", async () => {
     const trace = makeTrace();
-    const mockStore = {
-      getByPrefix: vi.fn().mockResolvedValue({
-        frontmatter: { id: "TASK-2026-01-01-001" },
-      }),
-    };
+    const mockStore = createMockStore();
+    mockStore.getByPrefix.mockResolvedValue({
+      frontmatter: { id: "TASK-2026-01-01-001" },
+    } as any);
     vi.mocked(createProjectStore).mockResolvedValue({
-      store: mockStore as any,
+      store: mockStore,
       projectRoot: "/tmp/project",
       vaultRoot: "/tmp/aof",
     });
@@ -210,9 +208,10 @@ describe("trace command action", () => {
   });
 
   it("sends errors to stderr in --json mode", async () => {
-    const mockStore = { getByPrefix: vi.fn().mockResolvedValue(undefined) };
+    const mockStore = createMockStore();
+    mockStore.getByPrefix.mockResolvedValue(undefined);
     vi.mocked(createProjectStore).mockResolvedValue({
-      store: mockStore as any,
+      store: mockStore,
       projectRoot: "/tmp/project",
       vaultRoot: "/tmp/aof",
     });
@@ -243,13 +242,12 @@ describe("trace command action", () => {
         },
       },
     };
-    const mockStore = {
-      getByPrefix: vi.fn().mockResolvedValue({
-        frontmatter: { id: "TASK-2026-01-01-001", workflow },
-      }),
-    };
+    const mockStore = createMockStore();
+    mockStore.getByPrefix.mockResolvedValue({
+      frontmatter: { id: "TASK-2026-01-01-001", workflow },
+    } as any);
     vi.mocked(createProjectStore).mockResolvedValue({
-      store: mockStore as any,
+      store: mockStore,
       projectRoot: "/tmp/project",
       vaultRoot: "/tmp/aof",
     });
@@ -268,9 +266,10 @@ describe("trace command action", () => {
   });
 
   it("uses _inbox as default project", async () => {
-    const mockStore = { getByPrefix: vi.fn().mockResolvedValue(undefined) };
+    const mockStore = createMockStore();
+    mockStore.getByPrefix.mockResolvedValue(undefined);
     vi.mocked(createProjectStore).mockResolvedValue({
-      store: mockStore as any,
+      store: mockStore,
       projectRoot: "/tmp/project",
       vaultRoot: "/tmp/aof",
     });
