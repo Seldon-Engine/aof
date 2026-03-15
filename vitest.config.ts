@@ -7,21 +7,15 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],
-      // Track boundary coverage, not line coverage
-      // These are the public API surfaces we care about
       include: [
-        "src/dispatch/scheduler.ts",
-        "src/store/task-store.ts",
-        "src/service/aof-service.ts",
-        "src/gateway/handlers.ts",
-        "src/metrics/exporter.ts",
-        "src/events/logger.ts",
+        "src/**/*.ts",
       ],
-      // Explicitly exclude internals — we don't test these directly
       exclude: [
         "src/**/__tests__/**",
         "src/testing/**",
-        "src/schemas/**",   // Zod schemas tested via integration
+        "src/schemas/**",
+        "src/**/index.ts",
+        "src/types/**",
       ],
     },
   },

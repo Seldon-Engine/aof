@@ -34,16 +34,16 @@ export function createMockStore(opts?: CreateMockStoreOptions): MockTaskStore {
     init: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     create: vi.fn<() => Promise<Task>>().mockResolvedValue(undefined as unknown as Task),
     get: vi.fn<(id: string) => Promise<Task | undefined>>().mockImplementation(
-      async (id: string) => tasks.find((t) => t.id === id),
+      async (id: string) => tasks.find((t) => t.frontmatter.id === id),
     ),
     getByPrefix: vi.fn<(prefix: string) => Promise<Task | undefined>>().mockImplementation(
-      async (prefix: string) => tasks.find((t) => t.id.startsWith(prefix)),
+      async (prefix: string) => tasks.find((t) => t.frontmatter.id.startsWith(prefix)),
     ),
     list: vi.fn<() => Promise<Task[]>>().mockResolvedValue(tasks),
     countByStatus: vi.fn<() => Promise<Record<string, number>>>().mockImplementation(async () => {
       const counts: Record<string, number> = {};
       for (const t of tasks) {
-        counts[t.status] = (counts[t.status] ?? 0) + 1;
+        counts[t.frontmatter.status] = (counts[t.frontmatter.status] ?? 0) + 1;
       }
       return counts;
     }),

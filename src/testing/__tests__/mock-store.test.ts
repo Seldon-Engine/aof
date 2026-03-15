@@ -49,20 +49,23 @@ describe("createMockStore", () => {
   });
 
   it("pre-seeds get/list when tasks provided", async () => {
-    const task1: Task = {
-      schemaVersion: 2,
-      id: "TASK-2026-01-01-001",
-      project: "test",
-      title: "Test task",
-      status: "ready",
-      priority: "normal",
-      created: "2026-01-01T00:00:00Z",
-      updated: "2026-01-01T00:00:00Z",
-      createdBy: "test",
-      routing: { tags: [] },
-      history: [],
-      dependsOn: [],
-      contentHash: "abc123",
+    const task1 = {
+      frontmatter: {
+        schemaVersion: 2,
+        id: "TASK-2026-01-01-001",
+        project: "test",
+        title: "Test task",
+        status: "ready",
+        priority: "normal",
+        created: "2026-01-01T00:00:00Z",
+        updated: "2026-01-01T00:00:00Z",
+        createdBy: "test",
+        routing: { tags: [] },
+        history: [],
+        dependsOn: [],
+        contentHash: "abc123",
+      },
+      body: "",
       path: "/tmp/test",
     } as Task;
 
@@ -76,19 +79,22 @@ describe("createMockStore", () => {
 
   it("pre-seeds countByStatus when tasks provided", async () => {
     const makeTask = (id: string, status: string) => ({
-      schemaVersion: 2,
-      id,
-      project: "test",
-      title: "Test",
-      status,
-      priority: "normal",
-      created: "2026-01-01T00:00:00Z",
-      updated: "2026-01-01T00:00:00Z",
-      createdBy: "test",
-      routing: { tags: [] },
-      history: [],
-      dependsOn: [],
-      contentHash: "abc",
+      frontmatter: {
+        schemaVersion: 2,
+        id,
+        project: "test",
+        title: "Test",
+        status,
+        priority: "normal",
+        created: "2026-01-01T00:00:00Z",
+        updated: "2026-01-01T00:00:00Z",
+        createdBy: "test",
+        routing: { tags: [] },
+        history: [],
+        dependsOn: [],
+        contentHash: "abc",
+      },
+      body: "",
       path: "/tmp/test",
     }) as Task;
 
