@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.10
 milestone_name: Codebase Cleanups
-status: completed
-stopped_at: Phase 40 context gathered
-last_updated: "2026-03-14T00:08:53.208Z"
-last_activity: 2026-03-13 — Completed 39-03 (Store abstraction enforcement, save/saveToPath migration)
+status: in-progress
+stopped_at: Completed 40-01-PLAN.md
+last_updated: "2026-03-15T22:44:30Z"
+last_activity: 2026-03-15 — Completed 40-01 (Test infrastructure utilities)
 progress:
   total_phases: 7
   completed_phases: 6
-  total_plans: 15
-  completed_plans: 15
-  percent: 100
+  total_plans: 17
+  completed_plans: 16
+  percent: 94
 ---
 
 # Project State
@@ -21,20 +21,20 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-12)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** Phase 39 - Architecture Fixes (v1.10 Codebase Cleanups)
+**Current focus:** Phase 40 - Test Infrastructure (v1.10 Codebase Cleanups)
 
 ## Current Position
 
-Phase: 39 of 40 (Architecture Fixes) — sixth of 7 phases in v1.10
-Plan: 3 of 3 (39-03 complete -- phase done)
-Status: Phase Complete
-Last activity: 2026-03-13 — Completed 39-03 (Store abstraction enforcement, save/saveToPath migration)
+Phase: 40 of 40 (Test Infrastructure) — seventh of 7 phases in v1.10
+Plan: 1 of 2 (40-01 complete)
+Status: In Progress
+Last activity: 2026-03-15 — Completed 40-01 (Test infrastructure utilities)
 
-Progress: [██████████] 100%
+Progress: [█████████▒] 94%
 
 ## Performance Metrics
 
-**All milestones:** v1.0 (7 plans), v1.1 (16 plans), v1.2 (16 plans), v1.3 (7 plans), v1.4 (6 plans), v1.5 (6 plans), v1.8 (9 plans) -- 67 plans total across 33 phases
+**All milestones:** v1.0 (7 plans), v1.1 (16 plans), v1.2 (16 plans), v1.3 (7 plans), v1.4 (6 plans), v1.5 (6 plans), v1.8 (9 plans), v1.10 (16 of 17 plans) -- 83 plans total across 40 phases
 
 ## Accumulated Context
 
@@ -75,6 +75,10 @@ All decisions logged in PROJECT.md Key Decisions table.
 - [Phase 39]: createProjectStore re-exported from cli/project-utils.ts for backward compatibility
 - [39-03] PermissionAwareTaskStore delegates save/saveToPath directly without permission checks (internal persistence)
 - [Phase 39]: ITaskStore.save() and saveToPath() enforce store encapsulation for all task persistence
+- [40-01] Used satisfies ITaskStore for compile-time mock completeness checking
+- [40-01] Mock logger uses as-unknown cast since EventLogger has private fields
+- [40-01] readTasks scans all status subdirectories matching FilesystemTaskStore layout
+- [40-01] Added @vitest/coverage-v8 as dev dependency for coverage support
 
 ### Roadmap Evolution
 
@@ -98,5 +102,5 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-14T00:08:53.205Z
-Stopped at: Phase 40 context gathered
+Last session: 2026-03-15T22:44:30Z
+Stopped at: Completed 40-01-PLAN.md

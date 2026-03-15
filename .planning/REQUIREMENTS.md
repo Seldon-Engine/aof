@@ -65,11 +65,11 @@ Requirements for codebase cleanup milestone. Each maps to roadmap phases.
 
 ### Test Infrastructure
 
-- [ ] **TEST-01**: Shared test harness created (createTestHarness/withTestProject) — eliminates ~60 duplicated setup/teardown blocks
-- [ ] **TEST-02**: Typed mock factories created (createMockStore, createMockLogger) — replaces as-any cast pattern across test files
-- [ ] **TEST-03**: Coverage config expanded beyond current 6 files to track all source modules
+- [x] **TEST-01**: Shared test harness created (createTestHarness/withTestProject) — eliminates ~60 duplicated setup/teardown blocks
+- [x] **TEST-02**: Typed mock factories created (createMockStore, createMockLogger) — replaces as-any cast pattern across test files
+- [x] **TEST-03**: Coverage config expanded beyond current 6 files to track all source modules
 - [ ] **TEST-04**: 8 test files with missing temp dir cleanup fixed
-- [ ] **TEST-05**: Existing src/testing/ utilities promoted — adoption across test files that currently duplicate their functionality
+- [x] **TEST-05**: Existing src/testing/ utilities promoted — adoption across test files that currently duplicate their functionality
 
 ## Future Requirements
 
@@ -140,11 +140,11 @@ Requirements for codebase cleanup milestone. Each maps to roadmap phases.
 | ARCH-04 | Phase 39 | Complete |
 | ARCH-05 | Phase 39 | Complete |
 | ARCH-06 | Phase 39 | Complete |
-| TEST-01 | Phase 40 | Pending |
-| TEST-02 | Phase 40 | Pending |
-| TEST-03 | Phase 40 | Pending |
+| TEST-01 | Phase 40 | Complete |
+| TEST-02 | Phase 40 | Complete |
+| TEST-03 | Phase 40 | Complete |
 | TEST-04 | Phase 40 | Pending |
-| TEST-05 | Phase 40 | Pending |
+| TEST-05 | Phase 40 | Complete |
 
 **Coverage:**
 - v1.10 requirements: 43 total

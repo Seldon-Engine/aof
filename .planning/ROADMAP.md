@@ -214,7 +214,7 @@ Plans:
   2. `createMockStore()` and `createMockLogger()` factories return properly typed mocks — test files using them have zero `as any` casts for store/logger construction
   3. Vitest coverage config tracks all src/ modules (not just the current 6 files) — `vitest run --coverage` produces a report covering the full source tree
   4. The 8 test files with missing temp dir cleanup have proper `afterEach` blocks that remove temporary directories
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
 - [ ] 40-01-PLAN.md — Create test harness, mock factories, coverage config (TEST-01, TEST-02, TEST-03, TEST-05)
 - [ ] 40-02-PLAN.md — Migrate test files to shared harness and typed mocks (TEST-01, TEST-02, TEST-04, TEST-05)
@@ -264,4 +264,4 @@ Phases execute in numeric order: 34 -> 35 -> 36 -> 37 -> 38 -> 39 -> 40
 | 37. Structured Logging | 3/3 | Complete    | 2026-03-13 | - |
 | 38. Code Refactoring | 3/3 | Complete    | 2026-03-13 | - |
 | 39. Architecture Fixes | 3/3 | Complete    | 2026-03-13 | - |
-| 40. Test Infrastructure | v1.10 | 0/2 | Not started | - |
+| 40. Test Infrastructure | 1/2 | In Progress|  | - |
