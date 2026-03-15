@@ -112,7 +112,7 @@ See: `.planning/milestones/v1.8-ROADMAP.md` for full details
 - [x] **Phase 37: Structured Logging** - Replace core module console.* calls with leveled JSON logger, remediate silent catch blocks (completed 2026-03-13)
 - [x] **Phase 38: Code Refactoring** - Extract helpers from god functions, unify tool registration, deduplicate patterns (completed 2026-03-13)
 - [x] **Phase 39: Architecture Fixes** - Break circular dependencies, fix store abstraction bypass, fix layering violations (completed 2026-03-13)
-- [x] **Phase 40: Test Infrastructure** - Shared test harness, typed mock factories, coverage config expansion, temp dir cleanup (completed 2026-03-15)
+- 🚧 **Phase 40: Test Infrastructure** - Shared test harness, typed mock factories, coverage config expansion, temp dir cleanup (gap closure in progress)
 
 ## Phase Details
 
@@ -125,7 +125,7 @@ See: `.planning/milestones/v1.8-ROADMAP.md` for full details
   2. `grep -r` for gate-evaluator, gate-conditional, gate-context-builder, GateSchema, WorkflowGateSchema across src/ and tests/ returns zero hits (excluding migration stubs)
   3. No unused imports remain in scheduler.ts, no deprecated type aliases exist in executor.ts or dispatch/index.ts, no commented-out code blocks remain in event.ts or promotion.ts
   4. All existing tests pass (vitest full suite green) — no regressions from removals
-**Plans:** 2/2 plans complete
+**Plans:** 3 plans (2 complete, 1 gap closure)
 Plans:
 - [ ] 34-01-PLAN.md — Gate system removal (source, tests, re-exports, migration, imports)
 - [ ] 34-02-PLAN.md — Cleanup unused MCP schemas, deprecated aliases, commented code, notifier
@@ -139,7 +139,7 @@ Plans:
   2. Daemon startTime reflects actual daemon start (inside `startAofDaemon()`) not module import time — `/status` endpoint reports correct uptime after restart
   3. `UpdatePatch.blockers` is correctly positioned in the type definition (or removed if unused) — no type errors when using task update operations
   4. Scheduler-initiated state transitions (transitionTask, acquireLease) go through the task lock manager — concurrent operations on the same task are serialized
-**Plans:** 2/2 plans complete
+**Plans:** 3 plans (2 complete, 1 gap closure)
 Plans:
 - [ ] 35-01-PLAN.md — Fix buildTaskStats counts, daemon startTime, remove blockers dead code (BUG-01, BUG-02, BUG-03)
 - [ ] 35-02-PLAN.md — Route scheduler transitions through shared task lock manager (BUG-04)
@@ -153,7 +153,7 @@ Plans:
   2. `resetConfig()` provides complete test isolation — tests can override config values without affecting other tests
   3. `grep -r "process.env" src/` returns zero hits outside src/config/ (except the documented AOF_CALLBACK_DEPTH cross-process mutation in callback-delivery.ts)
   4. The config module imports nothing from dispatch/, service/, store/, or any module above it in the dependency hierarchy
-**Plans:** 2/2 plans complete
+**Plans:** 3 plans (2 complete, 1 gap closure)
 Plans:
 - [ ] 36-01-PLAN.md — Config registry singleton with Zod schema, rename manager.ts, barrel updates (CFG-01, CFG-02, CFG-04)
 - [ ] 36-02-PLAN.md — Consolidate all process.env reads into registry (CFG-03)
@@ -214,10 +214,11 @@ Plans:
   2. `createMockStore()` and `createMockLogger()` factories return properly typed mocks — test files using them have zero `as any` casts for store/logger construction
   3. Vitest coverage config tracks all src/ modules (not just the current 6 files) — `vitest run --coverage` produces a report covering the full source tree
   4. The 8 test files with missing temp dir cleanup have proper `afterEach` blocks that remove temporary directories
-**Plans:** 2/2 plans complete
+**Plans:** 3 plans (2 complete, 1 gap closure)
 Plans:
 - [ ] 40-01-PLAN.md — Create test harness, mock factories, coverage config (TEST-01, TEST-02, TEST-03, TEST-05)
 - [ ] 40-02-PLAN.md — Migrate test files to shared harness and typed mocks (TEST-01, TEST-02, TEST-04, TEST-05)
+- [ ] 40-03-PLAN.md — Gap closure: add getMetric to harness, migrate 12 files to createTestHarness (TEST-01, TEST-05)
 ## Progress
 
 **Execution Order:**
@@ -264,4 +265,4 @@ Phases execute in numeric order: 34 -> 35 -> 36 -> 37 -> 38 -> 39 -> 40
 | 37. Structured Logging | 3/3 | Complete    | 2026-03-13 | - |
 | 38. Code Refactoring | 3/3 | Complete    | 2026-03-13 | - |
 | 39. Architecture Fixes | 3/3 | Complete    | 2026-03-13 | - |
-| 40. Test Infrastructure | 2/2 | Complete   | 2026-03-15 | - |
+| 40. Test Infrastructure | 2/3 | Gap Closure | 2026-03-15 | - |
