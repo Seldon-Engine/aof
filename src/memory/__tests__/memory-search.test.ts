@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -22,6 +22,7 @@ describe("memory_search tool", () => {
   let ftsStore: FtsStore;
   let searchEngine: HybridSearchEngine;
   let embeddingProvider: EmbeddingProvider;
+  const tmpDirs: string[] = [];
 
   beforeEach(() => {
     db = initMemoryDb(":memory:", EMBEDDING_DIMENSIONS);
@@ -40,10 +41,13 @@ describe("memory_search tool", () => {
 
   afterEach(() => {
     db.close();
+    for (const d of tmpDirs) rmSync(d, { recursive: true, force: true });
+    tmpDirs.length = 0;
   });
 
   it("returns formatted results with line numbers", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "aof-memory-search-"));
+    tmpDirs.push(dir);
     const filePath = path.join(dir, "alpha.md");
     const content = "alpha line 1\nalpha line 2\nalpha line 3";
     writeFileSync(filePath, content, "utf-8");
@@ -81,6 +85,7 @@ describe("memory_search tool", () => {
 
   it("filters results by tier and pool", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "aof-memory-search-filter-"));
+    tmpDirs.push(dir);
     const hotPath = path.join(dir, "hot.md");
     const coldPath = path.join(dir, "cold.md");
     writeFileSync(hotPath, "alpha hot", "utf-8");

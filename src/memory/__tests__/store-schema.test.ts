@@ -1,13 +1,17 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 import { initMemoryDb } from "../store";
 
-const createDbPath = () =>
-  path.join(mkdtempSync(path.join(tmpdir(), "aof-memory-")), "memory.db");
+const tmpDirs: string[] = [];
+const createDbPath = () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "aof-memory-"));
+  tmpDirs.push(dir);
+  return path.join(dir, "memory.db");
+};
 
 const requiredTables = ["files", "chunks", "vec_chunks", "fts_chunks"];
 
@@ -19,6 +23,10 @@ const listTables = (db: ReturnType<typeof initMemoryDb>) =>
     .all()
     .map((row) => row.name)
     .sort();
+
+afterAll(() => {
+  for (const d of tmpDirs) rmSync(d, { recursive: true, force: true });
+});
 
 describe("initMemoryDb", () => {
   it("creates memory tables and virtual tables", () => {

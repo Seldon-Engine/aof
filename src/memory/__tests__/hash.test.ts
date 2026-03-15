@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { afterAll, describe, expect, it, beforeEach, afterEach } from "vitest";
 
 import { computeFileHash, hasFileChanged, updateFileRecord } from "../chunking/hash";
 import { initMemoryDb } from "../store";
@@ -11,8 +11,16 @@ import { FtsStore } from "../store/fts-store";
 import type { EmbeddingProvider } from "../embeddings/provider";
 import { IndexSyncService } from "../tools/indexing";
 
-const createDbPath = () =>
-  path.join(mkdtempSync(path.join(tmpdir(), "aof-memory-")), "memory.db");
+const dbTmpDirs: string[] = [];
+const createDbPath = () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "aof-memory-"));
+  dbTmpDirs.push(dir);
+  return path.join(dir, "memory.db");
+};
+
+afterAll(() => {
+  for (const d of dbTmpDirs) rmSync(d, { recursive: true, force: true });
+});
 
 describe("hash helpers", () => {
   it("computes stable sha256 hashes", () => {

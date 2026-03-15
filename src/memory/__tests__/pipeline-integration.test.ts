@@ -3,7 +3,7 @@
  *
  * Exercises: ingest → chunk → embed → store (vector + FTS) → hybrid search → retrieve → delete
  */
-import { mkdtempSync, mkdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -58,6 +58,7 @@ describe("Memory pipeline integration", () => {
 
   afterEach(() => {
     db.close();
+    rmSync(poolDir, { recursive: true, force: true });
   });
 
   it("stores documents, searches by semantic similarity, and ranks correctly", async () => {

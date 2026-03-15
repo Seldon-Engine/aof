@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, unlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -18,6 +18,7 @@ describe("memory_delete tool", () => {
   let vectorStore: VectorStore;
   let ftsStore: FtsStore;
   let embeddingProvider: EmbeddingProvider;
+  const tmpDirs: string[] = [];
 
   beforeEach(() => {
     db = initMemoryDb(":memory:", EMBEDDING_DIMENSIONS);
@@ -35,10 +36,13 @@ describe("memory_delete tool", () => {
 
   afterEach(() => {
     db.close();
+    for (const d of tmpDirs) rmSync(d, { recursive: true, force: true });
+    tmpDirs.length = 0;
   });
 
   it("deletes the file and clears indexes", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "aof-memory-delete-"));
+    tmpDirs.push(dir);
     const poolPaths = { core: dir };
 
     const storeTool = createMemoryStoreTool({
@@ -72,6 +76,7 @@ describe("memory_delete tool", () => {
 
   it("reports missing files while clearing indexes", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "aof-memory-delete-missing-"));
+    tmpDirs.push(dir);
     const poolPaths = { core: dir };
 
     const storeTool = createMemoryStoreTool({

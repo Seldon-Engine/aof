@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -18,6 +18,7 @@ describe("memory_list tool", () => {
   let vectorStore: VectorStore;
   let ftsStore: FtsStore;
   let embeddingProvider: EmbeddingProvider;
+  const tmpDirs: string[] = [];
 
   beforeEach(() => {
     db = initMemoryDb(":memory:", EMBEDDING_DIMENSIONS);
@@ -35,10 +36,13 @@ describe("memory_list tool", () => {
 
   afterEach(() => {
     db.close();
+    for (const d of tmpDirs) rmSync(d, { recursive: true, force: true });
+    tmpDirs.length = 0;
   });
 
   it("lists memories with optional filters", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "aof-memory-list-"));
+    tmpDirs.push(dir);
     const poolPaths = { core: dir, archive: dir };
 
     const storeTool = createMemoryStoreTool({

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -17,6 +17,7 @@ describe("memory_store tool", () => {
   let vectorStore: VectorStore;
   let ftsStore: FtsStore;
   let embeddingProvider: EmbeddingProvider;
+  const tmpDirs: string[] = [];
 
   beforeEach(() => {
     db = initMemoryDb(":memory:", EMBEDDING_DIMENSIONS);
@@ -34,10 +35,13 @@ describe("memory_store tool", () => {
 
   afterEach(() => {
     db.close();
+    for (const d of tmpDirs) rmSync(d, { recursive: true, force: true });
+    tmpDirs.length = 0;
   });
 
   it("writes a file, chunks it, and indexes metadata", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "aof-memory-store-"));
+    tmpDirs.push(dir);
     const poolPaths = { core: dir };
 
     const tool = createMemoryStoreTool({
@@ -85,6 +89,7 @@ describe("memory_store tool", () => {
 
   it("resolves relative paths inside the pool", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "aof-memory-store-path-"));
+    tmpDirs.push(dir);
     const poolPaths = { core: dir };
 
     const tool = createMemoryStoreTool({

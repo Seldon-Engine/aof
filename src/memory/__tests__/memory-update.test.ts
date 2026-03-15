@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -18,6 +18,7 @@ describe("memory_update tool", () => {
   let vectorStore: VectorStore;
   let ftsStore: FtsStore;
   let embeddingProvider: EmbeddingProvider;
+  const tmpDirs: string[] = [];
 
   beforeEach(() => {
     db = initMemoryDb(":memory:", EMBEDDING_DIMENSIONS);
@@ -35,10 +36,13 @@ describe("memory_update tool", () => {
 
   afterEach(() => {
     db.close();
+    for (const d of tmpDirs) rmSync(d, { recursive: true, force: true });
+    tmpDirs.length = 0;
   });
 
   it("updates the file and re-indexes chunks", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "aof-memory-update-"));
+    tmpDirs.push(dir);
     const poolPaths = { core: dir };
 
     const storeTool = createMemoryStoreTool({
@@ -88,6 +92,7 @@ describe("memory_update tool", () => {
 
   it("skips reindexing when no changes are detected", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "aof-memory-update-skip-"));
+    tmpDirs.push(dir);
     const poolPaths = { core: dir };
 
     const storeTool = createMemoryStoreTool({
