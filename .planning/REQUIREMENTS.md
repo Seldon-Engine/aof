@@ -68,7 +68,7 @@ Requirements for codebase cleanup milestone. Each maps to roadmap phases.
 - [x] **TEST-01**: Shared test harness created (createTestHarness/withTestProject) — eliminates ~60 duplicated setup/teardown blocks
 - [x] **TEST-02**: Typed mock factories created (createMockStore, createMockLogger) — replaces as-any cast pattern across test files
 - [x] **TEST-03**: Coverage config expanded beyond current 6 files to track all source modules
-- [ ] **TEST-04**: 8 test files with missing temp dir cleanup fixed
+- [x] **TEST-04**: 8 test files with missing temp dir cleanup fixed
 - [x] **TEST-05**: Existing src/testing/ utilities promoted — adoption across test files that currently duplicate their functionality
 
 ## Future Requirements
@@ -143,7 +143,7 @@ Requirements for codebase cleanup milestone. Each maps to roadmap phases.
 | TEST-01 | Phase 40 | Complete |
 | TEST-02 | Phase 40 | Complete |
 | TEST-03 | Phase 40 | Complete |
-| TEST-04 | Phase 40 | Pending |
+| TEST-04 | Phase 40 | Complete |
 | TEST-05 | Phase 40 | Complete |
 
 **Coverage:**
