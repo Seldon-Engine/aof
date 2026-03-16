@@ -15,6 +15,7 @@ import type { ITaskStore } from "../store/interfaces.js";
 import type { BaseEvent } from "../schemas/event.js";
 import { readEventLogEntries } from "./event-log-reader.js";
 import { readTasksInDir } from "./task-reader.js";
+import { getMetricValue } from "./metrics-reader.js";
 
 export interface TestHarness {
   /** Temporary project root directory. */
@@ -31,6 +32,8 @@ export interface TestHarness {
   readEvents(): Promise<BaseEvent[]>;
   /** Read all tasks from the store's tasksDir (scans all status subdirectories). */
   readTasks(): Promise<Array<ReturnType<typeof import("../store/task-store.js").parseTaskFile>>>;
+  /** Convenience re-export of getMetricValue for metric assertions. */
+  getMetric: typeof getMetricValue;
 }
 
 /**
@@ -78,6 +81,7 @@ export async function createTestHarness(prefix?: string): Promise<TestHarness> {
     },
     readEvents: async () => readEventLogEntries(eventsDir),
     readTasks: async () => readAllTasks(store.tasksDir),
+    getMetric: getMetricValue,
   };
 }
 

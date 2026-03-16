@@ -58,6 +58,11 @@ describe("createTestHarness", () => {
     expect(tasks.length).toBeGreaterThanOrEqual(1);
   });
 
+  it("exposes getMetric as a function", async () => {
+    harness = await createTestHarness();
+    expect(typeof harness.getMetric).toBe("function");
+  });
+
   it("accepts an optional prefix for tmpDir naming", async () => {
     harness = await createTestHarness("custom-prefix");
     expect(harness.tmpDir).toContain("custom-prefix");
