@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.10.1](https://github.com/d0labs/aof/compare/v1.10.0...v1.10.1) (2026-03-16)
+
+### Bug Fixes
+
+* **installer:** add direct JSON fallback when openclaw CLI not in PATH ([310ba5b](https://github.com/d0labs/aof/commit/310ba5b026cd2942fe3270b489f360aa62078113))
+
 ## [1.9.1](https://github.com/d0labs/aof/compare/v1.9.0...v1.9.1) (2026-03-12)
 
 ### Features
