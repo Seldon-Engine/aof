@@ -10,33 +10,23 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { FilesystemTaskStore } from "../../store/task-store.js";
-import { EventLogger } from "../../events/logger.js";
+import { createTestHarness, type TestHarness, getMetricValue } from "../../testing/index.js";
 import { AOFMetrics } from "../../metrics/exporter.js";
 import { AOFService } from "../../service/aof-service.js";
 import { collectMetrics } from "../../metrics/collector.js";
 import { acquireLease } from "../../store/lease.js";
-import { getMetricValue } from "../../testing/index.js";
 
 describe("Metrics emission (AOF-honeycomb-005)", () => {
-  let tmpDir: string;
-  let store: FilesystemTaskStore;
-  let logger: EventLogger;
+  let harness: TestHarness;
   let metrics: AOFMetrics;
 
   beforeEach(async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), "aof-metrics-emission-"));
-    store = new FilesystemTaskStore(tmpDir);
-    await store.init();
-    logger = new EventLogger(join(tmpDir, "events"));
+    harness = await createTestHarness("aof-metrics-emission");
     metrics = new AOFMetrics();
   });
 
   afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true });
+    await harness.cleanup();
     vi.restoreAllMocks();
   });
 
@@ -45,8 +35,8 @@ describe("Metrics emission (AOF-honeycomb-005)", () => {
       (await getMetricValue(metrics, "aof_scheduler_loop_duration_seconds_count")) ?? 0;
 
     const service = new AOFService(
-      { store, logger, metrics },
-      { dataDir: tmpDir, dryRun: true, pollIntervalMs: 60_000 },
+      { store: harness.store, logger: harness.logger, metrics },
+      { dataDir: harness.tmpDir, dryRun: true, pollIntervalMs: 60_000 },
     );
     await service.start();
     await service.stop();
@@ -62,8 +52,8 @@ describe("Metrics emission (AOF-honeycomb-005)", () => {
 
     const failingPoller = vi.fn().mockRejectedValue(new Error("simulated poll failure"));
     const service = new AOFService(
-      { store, logger, metrics, poller: failingPoller },
-      { dataDir: tmpDir, dryRun: false, pollIntervalMs: 60_000 },
+      { store: harness.store, logger: harness.logger, metrics, poller: failingPoller },
+      { dataDir: harness.tmpDir, dryRun: false, pollIntervalMs: 60_000 },
     );
     await service.start();
     await service.stop();
@@ -74,14 +64,14 @@ describe("Metrics emission (AOF-honeycomb-005)", () => {
   });
 
   it("aof_tasks_total gauge reflects task state after collectMetrics + updateFromState", async () => {
-    const task = await store.create({
+    const task = await harness.store.create({
       title: "Ready Task",
       routing: { agent: "swe-qa" },
       createdBy: "test",
     });
-    await store.transition(task.frontmatter.id, "ready");
+    await harness.store.transition(task.frontmatter.id, "ready");
 
-    const state = await collectMetrics(store);
+    const state = await collectMetrics(harness.store);
     metrics.updateFromState(state);
 
     const count = await getMetricValue(metrics, "aof_tasks_total", {
@@ -92,15 +82,15 @@ describe("Metrics emission (AOF-honeycomb-005)", () => {
   });
 
   it("per-agent task gauge labelled correctly after dispatch", async () => {
-    const task = await store.create({
+    const task = await harness.store.create({
       title: "In-Progress Task",
       routing: { agent: "swe-backend" },
       createdBy: "test",
     });
-    await store.transition(task.frontmatter.id, "ready");
-    await acquireLease(store, task.frontmatter.id, "swe-backend");
+    await harness.store.transition(task.frontmatter.id, "ready");
+    await acquireLease(harness.store, task.frontmatter.id, "swe-backend");
 
-    const state = await collectMetrics(store);
+    const state = await collectMetrics(harness.store);
     metrics.updateFromState(state);
 
     const perAgent = await getMetricValue(metrics, "aof_tasks_total", {

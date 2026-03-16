@@ -1,33 +1,23 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, mkdir, readFile, readdir } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { FilesystemTaskStore } from "../../store/task-store.js";
-import type { ITaskStore } from "../../store/interfaces.js";
-import { EventLogger } from "../../events/logger.js";
+import { createTestHarness, type TestHarness } from "../../testing/index.js";
 import { aofTaskUpdate, aofTaskComplete, aofStatusReport } from "../aof-tools.js";
 import type { ToolResponseEnvelope } from "../envelope.js";
 
 describe("AOF tool handlers", () => {
-  let tmpDir: string;
-  let store: ITaskStore;
-  let logger: EventLogger;
+  let harness: TestHarness;
 
   beforeEach(async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), "aof-tools-test-"));
-    store = new FilesystemTaskStore(tmpDir);
-    await store.init();
-    const eventsDir = join(tmpDir, "events");
-    await mkdir(eventsDir, { recursive: true });
-    logger = new EventLogger(eventsDir);
+    harness = await createTestHarness("aof-tools-test");
   });
 
   afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true });
+    await harness.cleanup();
   });
 
   const readLastEvent = async (): Promise<{ type: string; payload: Record<string, unknown> }> => {
-    const eventsDir = join(tmpDir, "events");
+    const eventsDir = harness.eventsDir;
     const files = await readdir(eventsDir);
     const content = await readFile(join(eventsDir, files[0]!), "utf-8");
     const lines = content.trim().split("\n").filter(Boolean);
@@ -36,11 +26,11 @@ describe("AOF tool handlers", () => {
   };
 
   it("updates task body and transitions status", async () => {
-    const task = await store.create({ title: "Update me", createdBy: "main" });
-    await store.transition(task.frontmatter.id, "ready");
+    const task = await harness.store.create({ title: "Update me", createdBy: "main" });
+    await harness.store.transition(task.frontmatter.id, "ready");
 
     const result = await aofTaskUpdate(
-      { store, logger },
+      { store: harness.store, logger: harness.logger },
       {
         taskId: task.frontmatter.id,
         body: "New body",
@@ -52,7 +42,7 @@ describe("AOF tool handlers", () => {
 
     expect(result.status).toBe("in-progress");
 
-    const updated = await store.get(task.frontmatter.id);
+    const updated = await harness.store.get(task.frontmatter.id);
     expect(updated?.body).toBe("New body");
 
     const lastEvent = await readLastEvent();
@@ -61,13 +51,13 @@ describe("AOF tool handlers", () => {
   });
 
   it("marks task complete and logs completion", async () => {
-    const task = await store.create({ title: "Complete me", createdBy: "main" });
-    await store.transition(task.frontmatter.id, "ready");
-    await store.transition(task.frontmatter.id, "in-progress");
-    await store.transition(task.frontmatter.id, "review");
+    const task = await harness.store.create({ title: "Complete me", createdBy: "main" });
+    await harness.store.transition(task.frontmatter.id, "ready");
+    await harness.store.transition(task.frontmatter.id, "in-progress");
+    await harness.store.transition(task.frontmatter.id, "review");
 
     const result = await aofTaskComplete(
-      { store, logger },
+      { store: harness.store, logger: harness.logger },
       {
         taskId: task.frontmatter.id,
         actor: "swe-backend",
@@ -82,13 +72,13 @@ describe("AOF tool handlers", () => {
   });
 
   it("reports task status counts", async () => {
-    const taskA = await store.create({ title: "A", createdBy: "main" });
-    await store.transition(taskA.frontmatter.id, "ready");
-    const taskB = await store.create({ title: "B", createdBy: "main" });
-    await store.transition(taskB.frontmatter.id, "ready");
-    await store.transition(taskB.frontmatter.id, "in-progress");
+    const taskA = await harness.store.create({ title: "A", createdBy: "main" });
+    await harness.store.transition(taskA.frontmatter.id, "ready");
+    const taskB = await harness.store.create({ title: "B", createdBy: "main" });
+    await harness.store.transition(taskB.frontmatter.id, "ready");
+    await harness.store.transition(taskB.frontmatter.id, "in-progress");
 
-    const report = await aofStatusReport({ store, logger }, { actor: "main" });
+    const report = await aofStatusReport({ store: harness.store, logger: harness.logger }, { actor: "main" });
 
     expect(report.total).toBe(2);
     expect(report.byStatus.ready).toBe(1);
@@ -97,11 +87,11 @@ describe("AOF tool handlers", () => {
 
   describe("envelope format", () => {
     it("aofTaskUpdate returns envelope with summary", async () => {
-      const task = await store.create({ title: "Test task", createdBy: "main" });
-      await store.transition(task.frontmatter.id, "ready");
+      const task = await harness.store.create({ title: "Test task", createdBy: "main" });
+      await harness.store.transition(task.frontmatter.id, "ready");
 
       const result = await aofTaskUpdate(
-        { store, logger },
+        { store: harness.store, logger: harness.logger },
         {
           taskId: task.frontmatter.id,
           status: "in-progress",
@@ -118,13 +108,13 @@ describe("AOF tool handlers", () => {
     });
 
     it("aofTaskComplete returns envelope with summary", async () => {
-      const task = await store.create({ title: "Complete task", createdBy: "main" });
-      await store.transition(task.frontmatter.id, "ready");
-      await store.transition(task.frontmatter.id, "in-progress");
-      await store.transition(task.frontmatter.id, "review");
+      const task = await harness.store.create({ title: "Complete task", createdBy: "main" });
+      await harness.store.transition(task.frontmatter.id, "ready");
+      await harness.store.transition(task.frontmatter.id, "in-progress");
+      await harness.store.transition(task.frontmatter.id, "review");
 
       const result = await aofTaskComplete(
-        { store, logger },
+        { store: harness.store, logger: harness.logger },
         {
           taskId: task.frontmatter.id,
           actor: "swe-backend",
@@ -139,10 +129,10 @@ describe("AOF tool handlers", () => {
     });
 
     it("aofStatusReport returns envelope in full mode by default", async () => {
-      const task = await store.create({ title: "Task A", createdBy: "main" });
-      await store.transition(task.frontmatter.id, "ready");
+      const task = await harness.store.create({ title: "Task A", createdBy: "main" });
+      await harness.store.transition(task.frontmatter.id, "ready");
 
-      const result = await aofStatusReport({ store, logger }, { actor: "main" });
+      const result = await aofStatusReport({ store: harness.store, logger: harness.logger }, { actor: "main" });
 
       const envelope = result as unknown as ToolResponseEnvelope;
       expect(envelope.summary).toBeDefined();
@@ -151,14 +141,14 @@ describe("AOF tool handlers", () => {
     });
 
     it("aofStatusReport returns compact envelope when compact=true", async () => {
-      const taskA = await store.create({ title: "Task A", createdBy: "main" });
-      await store.transition(taskA.frontmatter.id, "ready");
-      const taskB = await store.create({ title: "Task B", createdBy: "main" });
-      await store.transition(taskB.frontmatter.id, "ready");
-      await store.transition(taskB.frontmatter.id, "in-progress");
+      const taskA = await harness.store.create({ title: "Task A", createdBy: "main" });
+      await harness.store.transition(taskA.frontmatter.id, "ready");
+      const taskB = await harness.store.create({ title: "Task B", createdBy: "main" });
+      await harness.store.transition(taskB.frontmatter.id, "ready");
+      await harness.store.transition(taskB.frontmatter.id, "in-progress");
 
       const result = await aofStatusReport(
-        { store, logger },
+        { store: harness.store, logger: harness.logger },
         { actor: "main", compact: true },
       );
 
@@ -173,12 +163,12 @@ describe("AOF tool handlers", () => {
     it("aofStatusReport respects limit parameter", async () => {
       // Create 5 tasks
       for (let i = 0; i < 5; i++) {
-        const task = await store.create({ title: `Task ${i}`, createdBy: "main" });
-        await store.transition(task.frontmatter.id, "ready");
+        const task = await harness.store.create({ title: `Task ${i}`, createdBy: "main" });
+        await harness.store.transition(task.frontmatter.id, "ready");
       }
 
       const result = await aofStatusReport(
-        { store, logger },
+        { store: harness.store, logger: harness.logger },
         { actor: "main", limit: 3 },
       );
 
@@ -193,12 +183,12 @@ describe("AOF tool handlers", () => {
     it("aofStatusReport compact mode with limit", async () => {
       // Create 5 tasks
       for (let i = 0; i < 5; i++) {
-        const task = await store.create({ title: `Task ${i}`, createdBy: "main" });
-        await store.transition(task.frontmatter.id, "ready");
+        const task = await harness.store.create({ title: `Task ${i}`, createdBy: "main" });
+        await harness.store.transition(task.frontmatter.id, "ready");
       }
 
       const result = await aofStatusReport(
-        { store, logger },
+        { store: harness.store, logger: harness.logger },
         { actor: "main", compact: true, limit: 2 },
       );
 
@@ -208,7 +198,7 @@ describe("AOF tool handlers", () => {
     });
 
     it("aofStatusReport handles empty task list", async () => {
-      const result = await aofStatusReport({ store, logger }, { actor: "main" });
+      const result = await aofStatusReport({ store: harness.store, logger: harness.logger }, { actor: "main" });
 
       const envelope = result as unknown as ToolResponseEnvelope;
       expect(envelope.summary).toContain("0 tasks");
@@ -217,7 +207,7 @@ describe("AOF tool handlers", () => {
 
     it("aofStatusReport compact mode with empty task list", async () => {
       const result = await aofStatusReport(
-        { store, logger },
+        { store: harness.store, logger: harness.logger },
         { actor: "main", compact: true },
       );
 

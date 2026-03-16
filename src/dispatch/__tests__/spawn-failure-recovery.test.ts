@@ -1,11 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import writeFileAtomic from "write-file-atomic";
-import { FilesystemTaskStore, serializeTask } from "../../store/task-store.js";
-import type { ITaskStore } from "../../store/interfaces.js";
-import { EventLogger } from "../../events/logger.js";
+import { serializeTask } from "../../store/task-store.js";
+import { createTestHarness, type TestHarness } from "../../testing/index.js";
 import { poll } from "../scheduler.js";
 import { MockAdapter } from "../executor.js";
 import {
@@ -17,21 +14,14 @@ import {
 } from "../scheduler-helpers.js";
 
 describe("Spawn failure recovery", () => {
-  let tmpDir: string;
-  let store: ITaskStore;
-  let logger: EventLogger;
+  let harness: TestHarness;
 
   beforeEach(async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), "aof-spawn-recovery-"));
-    store = new FilesystemTaskStore(tmpDir);
-    await store.init();
-    const eventsDir = join(tmpDir, "events");
-    await mkdir(eventsDir, { recursive: true });
-    logger = new EventLogger(eventsDir);
+    harness = await createTestHarness("aof-spawn-recovery");
   });
 
   afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true });
+    await harness.cleanup();
   });
 
   // --- Unit tests for classifySpawnError ---
@@ -293,7 +283,7 @@ describe("Spawn failure recovery", () => {
       executor.setShouldFail(true, "gateway timeout");
 
       const activeConfig = {
-        dataDir: tmpDir,
+        dataDir: harness.tmpDir,
         dryRun: false,
         defaultLeaseTtlMs: 600_000,
         executor,
@@ -301,29 +291,29 @@ describe("Spawn failure recovery", () => {
       };
 
       // Create a task and move to ready
-      const task = await store.create({
+      const task = await harness.store.create({
         title: "Retry test task",
         createdBy: "main",
         routing: { agent: "swe-backend" },
       });
-      await store.transition(task.frontmatter.id, "ready");
+      await harness.store.transition(task.frontmatter.id, "ready");
 
       // Helper to backdate lastBlockedAt so backoff is elapsed
       async function backdateBlocked(ms: number) {
-        const t = await store.get(task.frontmatter.id);
+        const t = await harness.store.get(task.frontmatter.id);
         if (t) {
           t.frontmatter.metadata = {
             ...t.frontmatter.metadata,
             lastBlockedAt: new Date(Date.now() - ms).toISOString(),
           };
-          const tp = t.path ?? join(store.tasksDir, "blocked", `${t.frontmatter.id}.md`);
+          const tp = t.path ?? join(harness.store.tasksDir, "blocked", `${t.frontmatter.id}.md`);
           await writeFileAtomic(tp, serializeTask(t));
         }
       }
 
       // Poll 1: dispatch → spawn fails → blocked (retryCount=1)
-      await poll(store, logger, activeConfig);
-      let current = await store.get(task.frontmatter.id);
+      await poll(harness.store, harness.logger, activeConfig);
+      let current = await harness.store.get(task.frontmatter.id);
       expect(current?.frontmatter.status).toBe("blocked");
       expect(current?.frontmatter.metadata?.retryCount).toBe(1);
 
@@ -331,13 +321,13 @@ describe("Spawn failure recovery", () => {
       await backdateBlocked(240_000);
 
       // Poll 2: recovery requeues → ready
-      await poll(store, logger, activeConfig);
-      current = await store.get(task.frontmatter.id);
+      await poll(harness.store, harness.logger, activeConfig);
+      current = await harness.store.get(task.frontmatter.id);
       expect(current?.frontmatter.status).toBe("ready");
 
       // Poll 3: dispatch → spawn fails → blocked (retryCount=2)
-      await poll(store, logger, activeConfig);
-      current = await store.get(task.frontmatter.id);
+      await poll(harness.store, harness.logger, activeConfig);
+      current = await harness.store.get(task.frontmatter.id);
       expect(current?.frontmatter.status).toBe("blocked");
       expect(current?.frontmatter.metadata?.retryCount).toBe(2);
 
@@ -345,19 +335,19 @@ describe("Spawn failure recovery", () => {
       await backdateBlocked(700_000);
 
       // Poll 4: recovery requeues → ready
-      await poll(store, logger, activeConfig);
-      current = await store.get(task.frontmatter.id);
+      await poll(harness.store, harness.logger, activeConfig);
+      current = await harness.store.get(task.frontmatter.id);
       expect(current?.frontmatter.status).toBe("ready");
 
       // Poll 5: dispatch → spawn fails → blocked (retryCount=3)
-      await poll(store, logger, activeConfig);
-      current = await store.get(task.frontmatter.id);
+      await poll(harness.store, harness.logger, activeConfig);
+      current = await harness.store.get(task.frontmatter.id);
       expect(current?.frontmatter.status).toBe("blocked");
       expect(current?.frontmatter.metadata?.retryCount).toBe(3);
 
       // Poll 6: recovery detects maxRetries (3 >= 3) → deadletter
-      await poll(store, logger, activeConfig);
-      current = await store.get(task.frontmatter.id);
+      await poll(harness.store, harness.logger, activeConfig);
+      current = await harness.store.get(task.frontmatter.id);
       expect(current?.frontmatter.status).toBe("deadletter");
     });
 
@@ -366,23 +356,23 @@ describe("Spawn failure recovery", () => {
       executor.setShouldFail(true, "Agent not found: nonexistent-agent");
 
       const activeConfig = {
-        dataDir: tmpDir,
+        dataDir: harness.tmpDir,
         dryRun: false,
         defaultLeaseTtlMs: 600_000,
         executor,
         maxDispatchRetries: 3,
       };
 
-      const task = await store.create({
+      const task = await harness.store.create({
         title: "Permanent failure task",
         createdBy: "main",
         routing: { agent: "nonexistent-agent" },
       });
-      await store.transition(task.frontmatter.id, "ready");
+      await harness.store.transition(task.frontmatter.id, "ready");
 
       // Single poll → permanent error → deadletter immediately
-      await poll(store, logger, activeConfig);
-      const current = await store.get(task.frontmatter.id);
+      await poll(harness.store, harness.logger, activeConfig);
+      const current = await harness.store.get(task.frontmatter.id);
       expect(current?.frontmatter.status).toBe("deadletter");
     });
   });

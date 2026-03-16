@@ -6,33 +6,25 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { FilesystemTaskStore } from "../../store/task-store.js";
-import type { ITaskStore } from "../../store/interfaces.js";
-import { EventLogger } from "../../events/logger.js";
+import { createTestHarness, type TestHarness } from "../../testing/index.js";
 import { aofDispatch, aofStatusReport, aofTaskUpdate, aofTaskComplete } from "../aof-tools.js";
 
 describe("BUG-003: AOF tool persistence", () => {
-  let tmpDir: string;
-  let store: ITaskStore;
-  let logger: EventLogger;
+  let harness: TestHarness;
 
   beforeEach(async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), "aof-bug003-"));
-    logger = new EventLogger(join(tmpDir, "events"));
-    store = new FilesystemTaskStore(tmpDir);
-    await store.init();
+    harness = await createTestHarness("aof-bug003");
   });
 
   afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true });
+    await harness.cleanup();
   });
 
   it("aofDispatch creates task file on disk", async () => {
     const result = await aofDispatch(
-      { store, logger },
+      { store: harness.store, logger: harness.logger },
       {
         title: "Persistence Test",
         brief: "Test task creation",
@@ -45,7 +37,7 @@ describe("BUG-003: AOF tool persistence", () => {
     expect(result.filePath).toBeDefined();
 
     // Verify file exists on disk
-    const filePath = join(tmpDir, "tasks", result.status, `${result.taskId}.md`);
+    const filePath = join(harness.tmpDir, "tasks", result.status, `${result.taskId}.md`);
     const fileStats = await stat(filePath);
     expect(fileStats.isFile()).toBe(true);
   });
@@ -53,7 +45,7 @@ describe("BUG-003: AOF tool persistence", () => {
   it("aofDispatch creates task visible in aof_status_report", async () => {
     // Create a task
     const createResult = await aofDispatch(
-      { store, logger },
+      { store: harness.store, logger: harness.logger },
       {
         title: "Status Report Test",
         brief: "Should appear in status report",
@@ -62,7 +54,7 @@ describe("BUG-003: AOF tool persistence", () => {
     );
 
     // Query status report
-    const statusResult = await aofStatusReport({ store, logger }, {});
+    const statusResult = await aofStatusReport({ store: harness.store, logger: harness.logger }, {});
 
     expect(statusResult.total).toBe(1);
     expect(statusResult.byStatus.ready).toBe(1);
@@ -74,7 +66,7 @@ describe("BUG-003: AOF tool persistence", () => {
   it("aofTaskUpdate modifies file and reflects in status report", async () => {
     // Create task
     const createResult = await aofDispatch(
-      { store, logger },
+      { store: harness.store, logger: harness.logger },
       {
         title: "Update Test",
         brief: "Original brief",
@@ -85,7 +77,7 @@ describe("BUG-003: AOF tool persistence", () => {
     // Update body
     const newBody = "## Updated Instructions\n\nNew content here.";
     await aofTaskUpdate(
-      { store, logger },
+      { store: harness.store, logger: harness.logger },
       {
         taskId: createResult.taskId,
         body: newBody,
@@ -94,7 +86,7 @@ describe("BUG-003: AOF tool persistence", () => {
     );
 
     // Verify update persisted
-    const task = await store.get(createResult.taskId);
+    const task = await harness.store.get(createResult.taskId);
     expect(task).toBeDefined();
     expect(task!.body).toContain("Updated Instructions");
     expect(task!.body).toContain("New content here");
@@ -103,7 +95,7 @@ describe("BUG-003: AOF tool persistence", () => {
   it("aofTaskUpdate transitions status and file moves to correct directory", async () => {
     // Create task (ends up in ready/)
     const createResult = await aofDispatch(
-      { store, logger },
+      { store: harness.store, logger: harness.logger },
       {
         title: "Transition Test",
         brief: "Test status transition",
@@ -113,7 +105,7 @@ describe("BUG-003: AOF tool persistence", () => {
 
     // Transition to in-progress
     await aofTaskUpdate(
-      { store, logger },
+      { store: harness.store, logger: harness.logger },
       {
         taskId: createResult.taskId,
         status: "in-progress",
@@ -122,12 +114,12 @@ describe("BUG-003: AOF tool persistence", () => {
     );
 
     // Verify file moved to in-progress/
-    const newFilePath = join(tmpDir, "tasks", "in-progress", `${createResult.taskId}.md`);
+    const newFilePath = join(harness.tmpDir, "tasks", "in-progress", `${createResult.taskId}.md`);
     const fileStats = await stat(newFilePath);
     expect(fileStats.isFile()).toBe(true);
 
     // Verify visible in status report with correct status
-    const statusResult = await aofStatusReport({ store, logger }, {});
+    const statusResult = await aofStatusReport({ store: harness.store, logger: harness.logger }, {});
     expect(statusResult.total).toBe(1);
     expect(statusResult.byStatus["in-progress"]).toBe(1);
     expect(statusResult.byStatus.ready).toBe(0);
@@ -136,7 +128,7 @@ describe("BUG-003: AOF tool persistence", () => {
   it("aofTaskComplete moves task to done/ and visible in status report", async () => {
     // Create and transition task to review (so it can go to done)
     const createResult = await aofDispatch(
-      { store, logger },
+      { store: harness.store, logger: harness.logger },
       {
         title: "Complete Test",
         brief: "Test completion",
@@ -144,12 +136,12 @@ describe("BUG-003: AOF tool persistence", () => {
       }
     );
 
-    await store.transition(createResult.taskId, "in-progress");
-    await store.transition(createResult.taskId, "review");
+    await harness.store.transition(createResult.taskId, "in-progress");
+    await harness.store.transition(createResult.taskId, "review");
 
     // Complete the task
     await aofTaskComplete(
-      { store, logger },
+      { store: harness.store, logger: harness.logger },
       {
         taskId: createResult.taskId,
         summary: "All done!",
@@ -158,12 +150,12 @@ describe("BUG-003: AOF tool persistence", () => {
     );
 
     // Verify file in done/
-    const doneFilePath = join(tmpDir, "tasks", "done", `${createResult.taskId}.md`);
+    const doneFilePath = join(harness.tmpDir, "tasks", "done", `${createResult.taskId}.md`);
     const fileStats = await stat(doneFilePath);
     expect(fileStats.isFile()).toBe(true);
 
     // Verify status report shows task as done
-    const statusResult = await aofStatusReport({ store, logger }, {});
+    const statusResult = await aofStatusReport({ store: harness.store, logger: harness.logger }, {});
     expect(statusResult.total).toBe(1);
     expect(statusResult.byStatus.done).toBe(1);
     
@@ -173,26 +165,26 @@ describe("BUG-003: AOF tool persistence", () => {
 
   it("multiple tool invocations accumulate in datastore", async () => {
     // Create 3 tasks
-    await aofDispatch({ store, logger }, {
+    await aofDispatch({ store: harness.store, logger: harness.logger }, {
       title: "Task 1",
       brief: "First task",
       actor: "test-actor",
     });
 
-    await aofDispatch({ store, logger }, {
+    await aofDispatch({ store: harness.store, logger: harness.logger }, {
       title: "Task 2",
       brief: "Second task",
       actor: "test-actor",
     });
 
-    await aofDispatch({ store, logger }, {
+    await aofDispatch({ store: harness.store, logger: harness.logger }, {
       title: "Task 3",
       brief: "Third task",
       actor: "test-actor",
     });
 
     // Status report should show all 3
-    const statusResult = await aofStatusReport({ store, logger }, {});
+    const statusResult = await aofStatusReport({ store: harness.store, logger: harness.logger }, {});
     expect(statusResult.total).toBe(3);
     expect(statusResult.byStatus.ready).toBe(3);
     expect(statusResult.tasks).toHaveLength(3);
@@ -200,31 +192,31 @@ describe("BUG-003: AOF tool persistence", () => {
 
   it("status report filters by status correctly", async () => {
     // Create tasks in different statuses
-    const task1 = await aofDispatch({ store, logger }, {
+    const task1 = await aofDispatch({ store: harness.store, logger: harness.logger }, {
       title: "Ready Task",
       brief: "Stays ready",
       actor: "test-actor",
     });
 
-    const task2 = await aofDispatch({ store, logger }, {
+    const task2 = await aofDispatch({ store: harness.store, logger: harness.logger }, {
       title: "In Progress Task",
       brief: "Will move",
       actor: "test-actor",
     });
 
-    await aofTaskUpdate({ store, logger }, {
+    await aofTaskUpdate({ store: harness.store, logger: harness.logger }, {
       taskId: task2.taskId,
       status: "in-progress",
       actor: "test-actor",
     });
 
     // Filter by ready
-    const readyReport = await aofStatusReport({ store, logger }, { status: "ready" });
+    const readyReport = await aofStatusReport({ store: harness.store, logger: harness.logger }, { status: "ready" });
     expect(readyReport.total).toBe(1);
     expect(readyReport.tasks[0]?.id).toBe(task1.taskId);
 
     // Filter by in-progress
-    const inProgressReport = await aofStatusReport({ store, logger }, { status: "in-progress" });
+    const inProgressReport = await aofStatusReport({ store: harness.store, logger: harness.logger }, { status: "in-progress" });
     expect(inProgressReport.total).toBe(1);
     expect(inProgressReport.tasks[0]?.id).toBe(task2.taskId);
   });

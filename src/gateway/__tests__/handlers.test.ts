@@ -1,37 +1,25 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, mkdir } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { FilesystemTaskStore } from "../../store/task-store.js";
-import type { ITaskStore } from "../../store/interfaces.js";
-import { EventLogger } from "../../events/logger.js";
+import { createTestHarness, type TestHarness } from "../../testing/index.js";
 import { AOFMetrics } from "../../metrics/exporter.js";
 import { AOFService } from "../../service/aof-service.js";
 import { createMetricsHandler, createStatusHandler } from "../handlers.js";
 
 describe("Gateway handlers", () => {
-  let tmpDir: string;
-  let store: ITaskStore;
-  let logger: EventLogger;
+  let harness: TestHarness;
 
   beforeEach(async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), "aof-gateway-test-"));
-    store = new FilesystemTaskStore(tmpDir);
-    await store.init();
-    const eventsDir = join(tmpDir, "events");
-    await mkdir(eventsDir, { recursive: true });
-    logger = new EventLogger(eventsDir);
+    harness = await createTestHarness("aof-gateway-test");
   });
 
   afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true });
+    await harness.cleanup();
   });
 
   it("serves /metrics with scheduler status", async () => {
     const metrics = new AOFMetrics();
-    const service = new AOFService({ store, logger }, { dataDir: tmpDir, dryRun: true });
+    const service = new AOFService({ store: harness.store, logger: harness.logger }, { dataDir: harness.tmpDir, dryRun: true });
 
-    const handler = createMetricsHandler({ store, metrics, service });
+    const handler = createMetricsHandler({ store: harness.store, metrics, service });
     const response = await handler({ method: "GET", path: "/metrics" });
 
     expect(response.status).toBe(200);
@@ -40,7 +28,7 @@ describe("Gateway handlers", () => {
   });
 
   it("serves /aof/status with service status", async () => {
-    const service = new AOFService({ store, logger }, { dataDir: tmpDir, dryRun: true });
+    const service = new AOFService({ store: harness.store, logger: harness.logger }, { dataDir: harness.tmpDir, dryRun: true });
     const handler = createStatusHandler(service);
 
     const response = await handler({ method: "GET", path: "/aof/status" });
@@ -51,7 +39,7 @@ describe("Gateway handlers", () => {
   });
 
   it("ODD: /aof/status running=true after service start", async () => {
-    const service = new AOFService({ store, logger }, { dataDir: tmpDir, dryRun: true });
+    const service = new AOFService({ store: harness.store, logger: harness.logger }, { dataDir: harness.tmpDir, dryRun: true });
     const handler = createStatusHandler(service);
 
     await service.start();
@@ -68,7 +56,7 @@ describe("Gateway handlers", () => {
   });
 
   it("ODD: /aof/status Content-Type is application/json", async () => {
-    const service = new AOFService({ store, logger }, { dataDir: tmpDir, dryRun: true });
+    const service = new AOFService({ store: harness.store, logger: harness.logger }, { dataDir: harness.tmpDir, dryRun: true });
     const handler = createStatusHandler(service);
 
     const response = await handler({ method: "GET", path: "/aof/status" });
@@ -78,16 +66,16 @@ describe("Gateway handlers", () => {
 
   it("ODD: /metrics reflects task state (aof_tasks_total)", async () => {
     const metrics = new AOFMetrics();
-    const service = new AOFService({ store, logger }, { dataDir: tmpDir, dryRun: true });
-    const handler = createMetricsHandler({ store, metrics, service });
+    const service = new AOFService({ store: harness.store, logger: harness.logger }, { dataDir: harness.tmpDir, dryRun: true });
+    const handler = createMetricsHandler({ store: harness.store, metrics, service });
 
     // Create and transition tasks
-    const task = await store.create({
+    const task = await harness.store.create({
       title: "Handler metrics task",
       createdBy: "test",
       routing: { agent: "swe-backend" },
     });
-    await store.transition(task.frontmatter.id, "ready");
+    await harness.store.transition(task.frontmatter.id, "ready");
 
     const response = await handler({ method: "GET", path: "/metrics" });
 
@@ -98,13 +86,13 @@ describe("Gateway handlers", () => {
 
   it("ODD: /metrics returns 500 on metrics collection error", async () => {
     const metrics = new AOFMetrics();
-    const service = new AOFService({ store, logger }, { dataDir: tmpDir, dryRun: true });
+    const service = new AOFService({ store: harness.store, logger: harness.logger }, { dataDir: harness.tmpDir, dryRun: true });
 
     // Use a store stub that throws to simulate a collection error
     const brokenStore = {
-      ...store,
+      ...harness.store,
       list: async () => { throw new Error("Store unavailable"); },
-    } as unknown as typeof store;
+    } as unknown as typeof harness.store;
 
     const handler = createMetricsHandler({ store: brokenStore, metrics, service });
     const response = await handler({ method: "GET", path: "/metrics" });

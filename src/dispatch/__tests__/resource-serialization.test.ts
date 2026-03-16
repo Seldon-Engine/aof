@@ -6,14 +6,11 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { FilesystemTaskStore, serializeTask } from "../../store/task-store.js";
-import type { ITaskStore } from "../../store/interfaces.js";
-import { EventLogger } from "../../events/logger.js";
+import { serializeTask } from "../../store/task-store.js";
+import { createTestHarness, type TestHarness } from "../../testing/index.js";
 import { poll } from "../scheduler.js";
 import type { SchedulerConfig } from "../scheduler.js";
 import type { Task } from "../../schemas/task.js";
-import { mkdtemp, rm, mkdir } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import writeFileAtomic from "write-file-atomic";
 
@@ -28,25 +25,15 @@ vi.mock("../../logging/index.js", () => ({
 }));
 
 describe("Resource Serialization (TASK-054)", () => {
-  let testDataDir: string;
-  let store: ITaskStore;
-  let logger: EventLogger;
+  let harness: TestHarness;
   let config: SchedulerConfig;
   let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
-    // Create temp test directory
-    testDataDir = await mkdtemp(join(tmpdir(), "aof-resource-test-"));
-    
-    store = new FilesystemTaskStore(testDataDir);
-    await store.init();
-    
-    const eventsDir = join(testDataDir, "events");
-    await mkdir(eventsDir, { recursive: true });
-    logger = new EventLogger(eventsDir);
-    
+    harness = await createTestHarness("aof-resource-test");
+
     config = {
-      dataDir: testDataDir,
+      dataDir: harness.tmpDir,
       dryRun: false,
       defaultLeaseTtlMs: 300_000, // 5min
       executor: {
@@ -60,14 +47,14 @@ describe("Resource Serialization (TASK-054)", () => {
 
   afterEach(async () => {
     consoleWarnSpy.mockRestore();
-    await rm(testDataDir, { recursive: true, force: true });
+    await harness.cleanup();
   });
 
   /**
    * Helper: Create a task with resource field (store.create doesn't support resource yet)
    */
   async function createTaskWithResource(task: Task): Promise<void> {
-    const taskPath = join(testDataDir, "tasks", task.frontmatter.status, `${task.frontmatter.id}.md`);
+    const taskPath = join(harness.tmpDir, "tasks", task.frontmatter.status, `${task.frontmatter.id}.md`);
     await writeFileAtomic(taskPath, serializeTask(task));
   }
 
@@ -120,7 +107,7 @@ describe("Resource Serialization (TASK-054)", () => {
     await createTaskWithResource(task2);
 
     // Run poll
-    const result = await poll(store, logger, config);
+    const result = await poll(harness.store, harness.logger, config);
 
     // Both tasks should be dispatched (different resources)
     expect(result.actions.filter(a => a.type === "assign")).toHaveLength(2);
@@ -128,8 +115,8 @@ describe("Resource Serialization (TASK-054)", () => {
     expect(result.actions.some(a => a.taskId === "TASK-2026-02-09-002")).toBe(true);
 
     // Verify both are now in-progress
-    const updatedTask1 = await store.get("TASK-2026-02-09-001");
-    const updatedTask2 = await store.get("TASK-2026-02-09-002");
+    const updatedTask1 = await harness.store.get("TASK-2026-02-09-001");
+    const updatedTask2 = await harness.store.get("TASK-2026-02-09-002");
     expect(updatedTask1?.frontmatter.status).toBe("in-progress");
     expect(updatedTask2?.frontmatter.status).toBe("in-progress");
   });
@@ -190,14 +177,14 @@ describe("Resource Serialization (TASK-054)", () => {
     await createTaskWithResource(task2);
 
     // Run poll
-    const result = await poll(store, logger, config);
+    const result = await poll(harness.store, harness.logger, config);
 
     // Only task2 should NOT be dispatched (resource occupied)
     const assignActions = result.actions.filter(a => a.type === "assign");
     expect(assignActions.some(a => a.taskId === "TASK-2026-02-09-004")).toBe(false);
 
     // Task2 should still be ready (not dispatched)
-    const updatedTask2 = await store.get("TASK-2026-02-09-004");
+    const updatedTask2 = await harness.store.get("TASK-2026-02-09-004");
     expect(updatedTask2?.frontmatter.status).toBe("ready");
   });
 
@@ -257,7 +244,7 @@ describe("Resource Serialization (TASK-054)", () => {
     await createTaskWithResource(task2);
 
     // Run poll
-    await poll(store, logger, config);
+    await poll(harness.store, harness.logger, config);
 
     // Verify warning was logged via structured logger
     expect(mockLogWarn).toHaveBeenCalledWith(
@@ -326,14 +313,14 @@ describe("Resource Serialization (TASK-054)", () => {
     await createTaskWithResource(task2);
 
     // Run poll
-    const result = await poll(store, logger, config);
+    const result = await poll(harness.store, harness.logger, config);
 
     // Task2 should be dispatched (no resource constraint)
     const assignActions = result.actions.filter(a => a.type === "assign");
     expect(assignActions.some(a => a.taskId === "TASK-2026-02-09-008")).toBe(true);
 
     // Verify it's now in-progress
-    const updatedTask2 = await store.get("TASK-2026-02-09-008");
+    const updatedTask2 = await harness.store.get("TASK-2026-02-09-008");
     expect(updatedTask2?.frontmatter.status).toBe("in-progress");
   });
 
@@ -393,21 +380,21 @@ describe("Resource Serialization (TASK-054)", () => {
     await createTaskWithResource(task2);
 
     // First poll - task2 should be blocked by resource
-    let result = await poll(store, logger, config);
+    let result = await poll(harness.store, harness.logger, config);
     let assignActions = result.actions.filter(a => a.type === "assign");
     expect(assignActions.some(a => a.taskId === "TASK-2026-02-09-010")).toBe(false);
 
     // Complete task1 (transition to review then done)
-    await store.transition("TASK-2026-02-09-009", "review");
-    await store.transition("TASK-2026-02-09-009", "done");
+    await harness.store.transition("TASK-2026-02-09-009", "review");
+    await harness.store.transition("TASK-2026-02-09-009", "done");
 
     // Second poll - task2 should now be dispatched (resource freed)
-    result = await poll(store, logger, config);
+    result = await poll(harness.store, harness.logger, config);
     assignActions = result.actions.filter(a => a.type === "assign");
     expect(assignActions.some(a => a.taskId === "TASK-2026-02-09-010")).toBe(true);
 
     // Verify task2 is now in-progress
-    const updatedTask2 = await store.get("TASK-2026-02-09-010");
+    const updatedTask2 = await harness.store.get("TASK-2026-02-09-010");
     expect(updatedTask2?.frontmatter.status).toBe("in-progress");
   });
 
@@ -489,7 +476,7 @@ describe("Resource Serialization (TASK-054)", () => {
     await createTaskWithResource(task3);
 
     // Run poll
-    const result = await poll(store, logger, config);
+    const result = await poll(harness.store, harness.logger, config);
     const assignActions = result.actions.filter(a => a.type === "assign");
 
     // Task2 should NOT be dispatched (resource conflict)
@@ -499,8 +486,8 @@ describe("Resource Serialization (TASK-054)", () => {
     expect(assignActions.some(a => a.taskId === "TASK-2026-02-09-013")).toBe(true);
 
     // Verify states
-    const updatedTask2 = await store.get("TASK-2026-02-09-012");
-    const updatedTask3 = await store.get("TASK-2026-02-09-013");
+    const updatedTask2 = await harness.store.get("TASK-2026-02-09-012");
+    const updatedTask3 = await harness.store.get("TASK-2026-02-09-013");
     expect(updatedTask2?.frontmatter.status).toBe("ready");
     expect(updatedTask3?.frontmatter.status).toBe("in-progress");
   });

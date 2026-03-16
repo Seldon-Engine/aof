@@ -15,13 +15,10 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { stringify as stringifyYaml } from "yaml";
-import { FilesystemTaskStore } from "../../store/task-store.js";
-import type { ITaskStore } from "../../store/interfaces.js";
-import { EventLogger } from "../../events/logger.js";
+import { createTestHarness, type TestHarness } from "../../testing/index.js";
 import { poll, resetThrottleState } from "../scheduler.js";
 import { MockAdapter } from "../executor.js";
 
@@ -36,27 +33,20 @@ vi.mock("../../logging/index.js", () => ({
 }));
 
 describe("Scheduler Throttling (AOF-adf)", () => {
-  let tmpDir: string;
-  let store: ITaskStore;
-  let logger: EventLogger;
+  let harness: TestHarness;
   let executor: MockAdapter;
 
   beforeEach(async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), "aof-throttle-test-"));
-    store = new FilesystemTaskStore(tmpDir);
-    await store.init();
-    const eventsDir = join(tmpDir, "events");
-    await mkdir(eventsDir, { recursive: true });
-    await mkdir(join(tmpDir, "org"), { recursive: true });
-    logger = new EventLogger(eventsDir);
+    harness = await createTestHarness("aof-throttle-test");
+    await mkdir(join(harness.tmpDir, "org"), { recursive: true });
     executor = new MockAdapter();
-    
+
     // Reset global throttle state between tests
     resetThrottleState();
   });
 
   afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true });
+    await harness.cleanup();
   });
 
   /**
@@ -66,7 +56,7 @@ describe("Scheduler Throttling (AOF-adf)", () => {
    */
   it("enforces global concurrency limit", async () => {
     const config = {
-      dataDir: tmpDir,
+      dataDir: harness.tmpDir,
       dryRun: false,
       defaultLeaseTtlMs: 600_000,
       maxConcurrentDispatches: 2,
@@ -77,26 +67,26 @@ describe("Scheduler Throttling (AOF-adf)", () => {
 
     // Create 2 in-progress tasks (at capacity)
     for (let i = 0; i < 2; i++) {
-      const task = await store.create({
+      const task = await harness.store.create({
         title: `In-progress ${i}`,
         createdBy: "main",
         routing: { agent: "swe-backend" },
       });
-      await store.transition(task.frontmatter.id, "ready");
-      await store.transition(task.frontmatter.id, "in-progress");
+      await harness.store.transition(task.frontmatter.id, "ready");
+      await harness.store.transition(task.frontmatter.id, "in-progress");
     }
 
     // Create 2 ready tasks
     for (let i = 0; i < 2; i++) {
-      const task = await store.create({
+      const task = await harness.store.create({
         title: `Ready ${i}`,
         createdBy: "main",
         routing: { agent: "swe-backend" },
       });
-      await store.transition(task.frontmatter.id, "ready");
+      await harness.store.transition(task.frontmatter.id, "ready");
     }
 
-    const result = await poll(store, logger, config);
+    const result = await poll(harness.store, harness.logger, config);
 
     // Should detect ready tasks but not dispatch due to concurrency limit
     expect(result.stats.ready).toBe(2);
@@ -112,7 +102,7 @@ describe("Scheduler Throttling (AOF-adf)", () => {
    */
   it("enforces global minimum dispatch interval", async () => {
     const config = {
-      dataDir: tmpDir,
+      dataDir: harness.tmpDir,
       dryRun: false,
       defaultLeaseTtlMs: 600_000,
       maxConcurrentDispatches: 10, // High limit
@@ -123,31 +113,31 @@ describe("Scheduler Throttling (AOF-adf)", () => {
 
     // Create 3 ready tasks
     for (let i = 0; i < 3; i++) {
-      const task = await store.create({
+      const task = await harness.store.create({
         title: `Ready ${i}`,
         createdBy: "main",
         routing: { agent: "swe-backend" },
       });
-      await store.transition(task.frontmatter.id, "ready");
+      await harness.store.transition(task.frontmatter.id, "ready");
     }
 
     // First poll - dispatches all 3 (interval only throttles between polls)
-    const result1 = await poll(store, logger, config);
+    const result1 = await poll(harness.store, harness.logger, config);
     const assignActions1 = result1.actions.filter(a => a.type === "assign");
     expect(assignActions1).toHaveLength(3);
 
     // Create more ready tasks for second poll
     for (let i = 0; i < 2; i++) {
-      const task = await store.create({
+      const task = await harness.store.create({
         title: `Ready extra ${i}`,
         createdBy: "main",
         routing: { agent: "swe-backend" },
       });
-      await store.transition(task.frontmatter.id, "ready");
+      await harness.store.transition(task.frontmatter.id, "ready");
     }
 
     // Immediate second poll - should NOT dispatch (interval not elapsed)
-    const result2 = await poll(store, logger, config);
+    const result2 = await poll(harness.store, harness.logger, config);
     const assignActions2 = result2.actions.filter(a => a.type === "assign");
     expect(assignActions2).toHaveLength(0);
   });
@@ -159,7 +149,7 @@ describe("Scheduler Throttling (AOF-adf)", () => {
    */
   it("enforces per-poll dispatch limit", async () => {
     const config = {
-      dataDir: tmpDir,
+      dataDir: harness.tmpDir,
       dryRun: false,
       defaultLeaseTtlMs: 600_000,
       maxConcurrentDispatches: 10, // High limit
@@ -170,15 +160,15 @@ describe("Scheduler Throttling (AOF-adf)", () => {
 
     // Create 5 ready tasks
     for (let i = 0; i < 5; i++) {
-      const task = await store.create({
+      const task = await harness.store.create({
         title: `Ready ${i}`,
         createdBy: "main",
         routing: { agent: "swe-backend" },
       });
-      await store.transition(task.frontmatter.id, "ready");
+      await harness.store.transition(task.frontmatter.id, "ready");
     }
 
-    const result = await poll(store, logger, config);
+    const result = await poll(harness.store, harness.logger, config);
 
     // Should dispatch exactly 2 tasks (per-poll limit)
     const assignActions = result.actions.filter(a => a.type === "assign");
@@ -206,10 +196,10 @@ describe("Scheduler Throttling (AOF-adf)", () => {
         },
       ],
     };
-    await writeFile(join(tmpDir, "org", "org-chart.yaml"), stringifyYaml(orgChart));
+    await writeFile(join(harness.tmpDir, "org", "org-chart.yaml"), stringifyYaml(orgChart));
 
     const config = {
-      dataDir: tmpDir,
+      dataDir: harness.tmpDir,
       dryRun: false,
       defaultLeaseTtlMs: 600_000,
       maxConcurrentDispatches: 10, // High global limit
@@ -219,25 +209,25 @@ describe("Scheduler Throttling (AOF-adf)", () => {
     };
 
     // Create 1 in-progress task for backend-team
-    const task1 = await store.create({
+    const task1 = await harness.store.create({
       title: "In-progress backend",
       createdBy: "main",
       routing: { team: "backend-team", agent: "swe-backend" },
     });
-    await store.transition(task1.frontmatter.id, "ready");
-    await store.transition(task1.frontmatter.id, "in-progress");
+    await harness.store.transition(task1.frontmatter.id, "ready");
+    await harness.store.transition(task1.frontmatter.id, "in-progress");
 
     // Create 2 ready tasks for backend-team
     for (let i = 0; i < 2; i++) {
-      const task = await store.create({
+      const task = await harness.store.create({
         title: `Ready backend ${i}`,
         createdBy: "main",
         routing: { team: "backend-team", agent: "swe-backend" },
       });
-      await store.transition(task.frontmatter.id, "ready");
+      await harness.store.transition(task.frontmatter.id, "ready");
     }
 
-    const result = await poll(store, logger, config);
+    const result = await poll(harness.store, harness.logger, config);
 
     // Should NOT dispatch (team at capacity)
     const assignActions = result.actions.filter(a => a.type === "assign");
@@ -265,10 +255,10 @@ describe("Scheduler Throttling (AOF-adf)", () => {
         },
       ],
     };
-    await writeFile(join(tmpDir, "org", "org-chart.yaml"), stringifyYaml(orgChart));
+    await writeFile(join(harness.tmpDir, "org", "org-chart.yaml"), stringifyYaml(orgChart));
 
     const config = {
-      dataDir: tmpDir,
+      dataDir: harness.tmpDir,
       dryRun: false,
       defaultLeaseTtlMs: 600_000,
       maxConcurrentDispatches: 10,
@@ -279,31 +269,31 @@ describe("Scheduler Throttling (AOF-adf)", () => {
 
     // Create 3 ready tasks for backend-team
     for (let i = 0; i < 3; i++) {
-      const task = await store.create({
+      const task = await harness.store.create({
         title: `Ready backend ${i}`,
         createdBy: "main",
         routing: { team: "backend-team", agent: "swe-backend" },
       });
-      await store.transition(task.frontmatter.id, "ready");
+      await harness.store.transition(task.frontmatter.id, "ready");
     }
 
     // First poll - dispatches all 3 (per-team interval only throttles between polls)
-    const result1 = await poll(store, logger, config);
+    const result1 = await poll(harness.store, harness.logger, config);
     const assignActions1 = result1.actions.filter(a => a.type === "assign");
     expect(assignActions1).toHaveLength(3);
 
     // Create more ready tasks for second poll
     for (let i = 0; i < 2; i++) {
-      const task = await store.create({
+      const task = await harness.store.create({
         title: `Ready backend extra ${i}`,
         createdBy: "main",
         routing: { team: "backend-team", agent: "swe-backend" },
       });
-      await store.transition(task.frontmatter.id, "ready");
+      await harness.store.transition(task.frontmatter.id, "ready");
     }
 
     // Immediate second poll - should NOT dispatch (team interval not elapsed)
-    const result2 = await poll(store, logger, config);
+    const result2 = await poll(harness.store, harness.logger, config);
     const assignActions2 = result2.actions.filter(a => a.type === "assign");
     expect(assignActions2).toHaveLength(0);
   });
@@ -314,7 +304,7 @@ describe("Scheduler Throttling (AOF-adf)", () => {
    */
   it("default config allows reasonable throughput", async () => {
     const config = {
-      dataDir: tmpDir,
+      dataDir: harness.tmpDir,
       dryRun: false,
       defaultLeaseTtlMs: 600_000,
       maxConcurrentDispatches: 3, // Default
@@ -325,15 +315,15 @@ describe("Scheduler Throttling (AOF-adf)", () => {
 
     // Create 2 ready tasks
     for (let i = 0; i < 2; i++) {
-      const task = await store.create({
+      const task = await harness.store.create({
         title: `Ready ${i}`,
         createdBy: "main",
         routing: { agent: "swe-backend" },
       });
-      await store.transition(task.frontmatter.id, "ready");
+      await harness.store.transition(task.frontmatter.id, "ready");
     }
 
-    const result = await poll(store, logger, config);
+    const result = await poll(harness.store, harness.logger, config);
 
     // Should dispatch both tasks (under all limits, no throttling)
     const assignActions = result.actions.filter(a => a.type === "assign");
@@ -348,7 +338,7 @@ describe("Scheduler Throttling (AOF-adf)", () => {
     mockLogInfo.mockClear();
 
     const config = {
-      dataDir: tmpDir,
+      dataDir: harness.tmpDir,
       dryRun: false,
       defaultLeaseTtlMs: 600_000,
       maxConcurrentDispatches: 1, // Low limit to trigger throttle
@@ -358,22 +348,22 @@ describe("Scheduler Throttling (AOF-adf)", () => {
     };
 
     // Create 1 in-progress + 1 ready task
-    const task1 = await store.create({
+    const task1 = await harness.store.create({
       title: "In-progress",
       createdBy: "main",
       routing: { agent: "swe-backend" },
     });
-    await store.transition(task1.frontmatter.id, "ready");
-    await store.transition(task1.frontmatter.id, "in-progress");
+    await harness.store.transition(task1.frontmatter.id, "ready");
+    await harness.store.transition(task1.frontmatter.id, "in-progress");
 
-    const task2 = await store.create({
+    const task2 = await harness.store.create({
       title: "Ready",
       createdBy: "main",
       routing: { agent: "swe-backend" },
     });
-    await store.transition(task2.frontmatter.id, "ready");
+    await harness.store.transition(task2.frontmatter.id, "ready");
 
-    await poll(store, logger, config);
+    await poll(harness.store, harness.logger, config);
 
     // Should log structured throttle reason with "dispatch throttled" message
     expect(mockLogInfo).toHaveBeenCalledWith(
@@ -388,7 +378,7 @@ describe("Scheduler Throttling (AOF-adf)", () => {
    */
   it("dry-run mode does not update throttle state", async () => {
     const config = {
-      dataDir: tmpDir,
+      dataDir: harness.tmpDir,
       dryRun: true, // Dry-run mode
       defaultLeaseTtlMs: 600_000,
       maxConcurrentDispatches: 10,
@@ -399,21 +389,21 @@ describe("Scheduler Throttling (AOF-adf)", () => {
 
     // Create 2 ready tasks
     for (let i = 0; i < 2; i++) {
-      const task = await store.create({
+      const task = await harness.store.create({
         title: `Ready ${i}`,
         createdBy: "main",
         routing: { agent: "swe-backend" },
       });
-      await store.transition(task.frontmatter.id, "ready");
+      await harness.store.transition(task.frontmatter.id, "ready");
     }
 
     // First dry-run poll
-    const result1 = await poll(store, logger, config);
+    const result1 = await poll(harness.store, harness.logger, config);
     const assignActions1 = result1.actions.filter(a => a.type === "assign");
     expect(assignActions1).toHaveLength(2);
 
     // Second dry-run poll - should still show 2 assign actions (state not updated)
-    const result2 = await poll(store, logger, config);
+    const result2 = await poll(harness.store, harness.logger, config);
     const assignActions2 = result2.actions.filter(a => a.type === "assign");
     expect(assignActions2).toHaveLength(2);
   });
@@ -443,10 +433,10 @@ describe("Scheduler Throttling (AOF-adf)", () => {
         },
       ],
     };
-    await writeFile(join(tmpDir, "org", "org-chart.yaml"), stringifyYaml(orgChart));
+    await writeFile(join(harness.tmpDir, "org", "org-chart.yaml"), stringifyYaml(orgChart));
 
     const config = {
-      dataDir: tmpDir,
+      dataDir: harness.tmpDir,
       dryRun: false,
       defaultLeaseTtlMs: 600_000,
       maxConcurrentDispatches: 10, // High global limit
@@ -456,39 +446,39 @@ describe("Scheduler Throttling (AOF-adf)", () => {
     };
 
     // Backend team: 1 in-progress (at capacity)
-    const backend1 = await store.create({
+    const backend1 = await harness.store.create({
       title: "Backend in-progress",
       createdBy: "main",
       routing: { team: "backend-team", agent: "swe-backend" },
     });
-    await store.transition(backend1.frontmatter.id, "ready");
-    await store.transition(backend1.frontmatter.id, "in-progress");
+    await harness.store.transition(backend1.frontmatter.id, "ready");
+    await harness.store.transition(backend1.frontmatter.id, "in-progress");
 
     // Frontend team: 1 in-progress (under capacity)
-    const frontend1 = await store.create({
+    const frontend1 = await harness.store.create({
       title: "Frontend in-progress",
       createdBy: "main",
       routing: { team: "frontend-team", agent: "swe-frontend" },
     });
-    await store.transition(frontend1.frontmatter.id, "ready");
-    await store.transition(frontend1.frontmatter.id, "in-progress");
+    await harness.store.transition(frontend1.frontmatter.id, "ready");
+    await harness.store.transition(frontend1.frontmatter.id, "in-progress");
 
     // Ready tasks: 1 backend, 1 frontend
-    const backend2 = await store.create({
+    const backend2 = await harness.store.create({
       title: "Backend ready",
       createdBy: "main",
       routing: { team: "backend-team", agent: "swe-backend" },
     });
-    await store.transition(backend2.frontmatter.id, "ready");
+    await harness.store.transition(backend2.frontmatter.id, "ready");
 
-    const frontend2 = await store.create({
+    const frontend2 = await harness.store.create({
       title: "Frontend ready",
       createdBy: "main",
       routing: { team: "frontend-team", agent: "swe-frontend" },
     });
-    await store.transition(frontend2.frontmatter.id, "ready");
+    await harness.store.transition(frontend2.frontmatter.id, "ready");
 
-    const result = await poll(store, logger, config);
+    const result = await poll(harness.store, harness.logger, config);
 
     // Backend should be throttled (at capacity), frontend should dispatch
     const assignActions = result.actions.filter(a => a.type === "assign");
@@ -502,7 +492,7 @@ describe("Scheduler Throttling (AOF-adf)", () => {
    */
   it("throttle state persists across poll cycles", async () => {
     const config = {
-      dataDir: tmpDir,
+      dataDir: harness.tmpDir,
       dryRun: false,
       defaultLeaseTtlMs: 600_000,
       maxConcurrentDispatches: 10,
@@ -513,26 +503,26 @@ describe("Scheduler Throttling (AOF-adf)", () => {
 
     // Create 3 ready tasks
     for (let i = 0; i < 3; i++) {
-      const task = await store.create({
+      const task = await harness.store.create({
         title: `Ready ${i}`,
         createdBy: "main",
         routing: { agent: "swe-backend" },
       });
-      await store.transition(task.frontmatter.id, "ready");
+      await harness.store.transition(task.frontmatter.id, "ready");
     }
 
     // Poll 1 - dispatch 1 task
-    const result1 = await poll(store, logger, config);
+    const result1 = await poll(harness.store, harness.logger, config);
     const assignActions1 = result1.actions.filter(a => a.type === "assign");
     expect(assignActions1).toHaveLength(1);
 
     // Poll 2 (immediate) - should NOT dispatch (interval not elapsed)
-    const result2 = await poll(store, logger, config);
+    const result2 = await poll(harness.store, harness.logger, config);
     const assignActions2 = result2.actions.filter(a => a.type === "assign");
     expect(assignActions2).toHaveLength(0);
 
     // Poll 3 (immediate) - still should NOT dispatch
-    const result3 = await poll(store, logger, config);
+    const result3 = await poll(harness.store, harness.logger, config);
     const assignActions3 = result3.actions.filter(a => a.type === "assign");
     expect(assignActions3).toHaveLength(0);
   });
@@ -543,7 +533,7 @@ describe("Scheduler Throttling (AOF-adf)", () => {
    */
   it("throttle does not block promotion", async () => {
     const config = {
-      dataDir: tmpDir,
+      dataDir: harness.tmpDir,
       dryRun: false,
       defaultLeaseTtlMs: 600_000,
       maxConcurrentDispatches: 0, // Block all dispatches
@@ -553,14 +543,14 @@ describe("Scheduler Throttling (AOF-adf)", () => {
     };
 
     // Create backlog task (eligible for promotion)
-    const task = await store.create({
+    const task = await harness.store.create({
       title: "Backlog task",
       createdBy: "main",
       routing: { agent: "swe-backend" },
     });
     // Task starts in backlog by default
 
-    const result = await poll(store, logger, config);
+    const result = await poll(harness.store, harness.logger, config);
 
     // Should promote even when dispatches are throttled
     const promoteActions = result.actions.filter(a => a.type === "promote");
@@ -573,7 +563,7 @@ describe("Scheduler Throttling (AOF-adf)", () => {
    */
   it("zero minDispatchIntervalMs disables interval check", async () => {
     const config = {
-      dataDir: tmpDir,
+      dataDir: harness.tmpDir,
       dryRun: false,
       defaultLeaseTtlMs: 600_000,
       maxConcurrentDispatches: 10,
@@ -584,16 +574,16 @@ describe("Scheduler Throttling (AOF-adf)", () => {
 
     // Create 2 ready tasks
     for (let i = 0; i < 2; i++) {
-      const task = await store.create({
+      const task = await harness.store.create({
         title: `Ready ${i}`,
         createdBy: "main",
         routing: { agent: "swe-backend" },
       });
-      await store.transition(task.frontmatter.id, "ready");
+      await harness.store.transition(task.frontmatter.id, "ready");
     }
 
     // First poll - should dispatch 2 tasks
-    const result1 = await poll(store, logger, config);
+    const result1 = await poll(harness.store, harness.logger, config);
     const assignActions1 = result1.actions.filter(a => a.type === "assign");
     expect(assignActions1).toHaveLength(2);
   });

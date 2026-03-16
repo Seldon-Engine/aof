@@ -1,10 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtemp, rm, mkdir } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { FilesystemTaskStore } from "../../store/task-store.js";
-import type { ITaskStore } from "../../store/interfaces.js";
-import { EventLogger } from "../../events/logger.js";
+import { createTestHarness, type TestHarness } from "../../testing/index.js";
 import { MockNotificationAdapter, NotificationService } from "../../events/notifier.js";
 import { ProtocolRouter } from "../router.js";
 import { readRunResult } from "../../recovery/run-artifacts.js";
@@ -58,39 +53,31 @@ const makeStatusEnvelope = (taskId: string, notes: string): ProtocolEnvelope => 
 });
 
 describe("Concurrent protocol message handling", () => {
-  let tmpDir: string;
-  let store: ITaskStore;
-  let logger: EventLogger;
+  let harness: TestHarness;
   let adapter: MockNotificationAdapter;
   let notifier: NotificationService;
   let router: ProtocolRouter;
 
   const createInProgressTask = async () => {
-    const task = await store.create({
+    const task = await harness.store.create({
       title: "Concurrent test task",
       createdBy: "main",
     });
-    await store.transition(task.frontmatter.id, "ready");
-    const taskWithLease = await acquireLease(store, task.frontmatter.id, "swe-backend", { writeRunArtifacts: false });
+    await harness.store.transition(task.frontmatter.id, "ready");
+    const taskWithLease = await acquireLease(harness.store, task.frontmatter.id, "swe-backend", { writeRunArtifacts: false });
     return taskWithLease!;
   };
 
   beforeEach(async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), "aof-concurrent-test-"));
-    store = new FilesystemTaskStore(tmpDir);
-    await store.init();
-
-    const eventsDir = join(tmpDir, "events");
-    await mkdir(eventsDir, { recursive: true });
-    logger = new EventLogger(eventsDir);
+    harness = await createTestHarness("aof-concurrent-test");
 
     adapter = new MockNotificationAdapter();
     notifier = new NotificationService(adapter, { enabled: true });
-    router = new ProtocolRouter({ store, logger, notifier });
+    router = new ProtocolRouter({ store: harness.store, logger: harness.logger, notifier });
   });
 
   afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true });
+    await harness.cleanup();
   });
 
   it("serializes concurrent completion reports for the same task", async () => {
@@ -127,13 +114,13 @@ describe("Concurrent protocol message handling", () => {
     ]);
 
     // Verify final state is stable (last write wins based on serial execution)
-    const runResult = await readRunResult(store, taskId);
+    const runResult = await readRunResult(harness.store, taskId);
     expect(runResult).toBeDefined();
     expect(runResult?.outcome).toBeDefined();
     expect(runResult?.notes).toBeDefined();
     
     // Verify task transitioned properly
-    const finalTask = await store.get(taskId);
+    const finalTask = await harness.store.get(taskId);
     expect(finalTask?.frontmatter.status).toMatch(/^(review|done)$/);
   });
 
@@ -152,8 +139,8 @@ describe("Concurrent protocol message handling", () => {
     const elapsed = Date.now() - startTime;
 
     // Both should complete
-    const result1 = await readRunResult(store, task1.frontmatter.id);
-    const result2 = await readRunResult(store, task2.frontmatter.id);
+    const result1 = await readRunResult(harness.store, task1.frontmatter.id);
+    const result2 = await readRunResult(harness.store, task2.frontmatter.id);
     
     expect(result1?.outcome).toBe("done");
     expect(result2?.outcome).toBe("done");
@@ -183,7 +170,7 @@ describe("Concurrent protocol message handling", () => {
     expect(updates).toHaveLength(5);
     
     // Task should still be in valid state
-    const finalTask = await store.get(taskId);
+    const finalTask = await harness.store.get(taskId);
     expect(finalTask?.frontmatter.status).toBe("in-progress");
   });
 
@@ -204,7 +191,7 @@ describe("Concurrent protocol message handling", () => {
     ]);
 
     // First should succeed
-    const result = await readRunResult(store, taskId);
+    const result = await readRunResult(harness.store, taskId);
     expect(result?.outcome).toBe("done");
   });
 
@@ -229,7 +216,7 @@ describe("Concurrent protocol message handling", () => {
     await Promise.all(envelopes.map((env) => router.route(env)));
 
     // Verify run_result is consistent (one complete report, not corrupted)
-    const runResult = await readRunResult(store, taskId);
+    const runResult = await readRunResult(harness.store, taskId);
     expect(runResult).toBeDefined();
     expect(runResult?.outcome).toBe("done");
     expect(runResult?.deliverables).toHaveLength(1);

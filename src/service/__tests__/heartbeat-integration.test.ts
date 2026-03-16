@@ -1,10 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtemp, rm, mkdir } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { FilesystemTaskStore } from "../../store/task-store.js";
-import type { ITaskStore } from "../../store/interfaces.js";
-import { EventLogger } from "../../events/logger.js";
+import { createTestHarness, type TestHarness } from "../../testing/index.js";
 import { acquireLease } from "../../store/lease.js";
 import { AOFService } from "../aof-service.js";
 import { poll } from "../../dispatch/scheduler.js";
@@ -17,33 +12,26 @@ vi.mock("../../logging/index.js", () => ({
 }));
 
 describe("heartbeat integration", () => {
-  let tmpDir: string;
-  let store: ITaskStore;
-  let logger: EventLogger;
+  let harness: TestHarness;
 
   beforeEach(async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), "aof-heartbeat-test-"));
-    store = new FilesystemTaskStore(tmpDir);
-    await store.init();
-    const eventsDir = join(tmpDir, "events");
-    await mkdir(eventsDir, { recursive: true });
-    logger = new EventLogger(eventsDir);
+    harness = await createTestHarness("aof-heartbeat-test");
   });
 
   afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true });
+    await harness.cleanup();
   });
 
   it("stale heartbeat with no run_result requeues to ready and marks artifact expired", async () => {
-    const task = await store.create({
+    const task = await harness.store.create({
       title: "Stale task without result",
       createdBy: "main",
       routing: { agent: "test-agent" },
     });
-    await store.transition(task.frontmatter.id, "ready");
+    await harness.store.transition(task.frontmatter.id, "ready");
 
     // Acquire lease with 1ms heartbeat TTL
-    await acquireLease(store, task.frontmatter.id, "test-agent", {
+    await acquireLease(harness.store, task.frontmatter.id, "test-agent", {
       heartbeatTtlMs: 1,
     });
 
@@ -51,8 +39,8 @@ describe("heartbeat integration", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     // Run scheduler poll (active mode)
-    const result = await poll(store, logger, {
-      dataDir: tmpDir,
+    const result = await poll(harness.store, harness.logger, {
+      dataDir: harness.tmpDir,
       dryRun: false,
       defaultLeaseTtlMs: 600_000,
       heartbeatTtlMs: 1,
@@ -63,25 +51,25 @@ describe("heartbeat integration", () => {
     expect(result.actions[0]?.type).toBe("stale_heartbeat");
 
     // Task should be requeued to ready (no run_result)
-    const updated = await store.get(task.frontmatter.id);
+    const updated = await harness.store.get(task.frontmatter.id);
     expect(updated?.frontmatter.status).toBe("ready");
 
     // Run artifact should be marked expired
-    const runArtifact = await readRunArtifact(store, task.frontmatter.id);
+    const runArtifact = await readRunArtifact(harness.store, task.frontmatter.id);
     expect(runArtifact?.status).toBe("failed");
     expect(runArtifact?.metadata?.expiredAt).toBeDefined();
   });
 
   it("stale heartbeat with partial outcome moves to review", async () => {
-    const task = await store.create({
+    const task = await harness.store.create({
       title: "Stale task with partial",
       createdBy: "main",
       routing: { agent: "test-agent" },
     });
-    await store.transition(task.frontmatter.id, "ready");
+    await harness.store.transition(task.frontmatter.id, "ready");
 
     // Acquire lease with 1ms heartbeat TTL
-    await acquireLease(store, task.frontmatter.id, "test-agent", {
+    await acquireLease(harness.store, task.frontmatter.id, "test-agent", {
       heartbeatTtlMs: 1,
     });
 
@@ -96,14 +84,14 @@ describe("heartbeat integration", () => {
       tests: { total: 3, passed: 2, failed: 1 },
       notes: "Partial completion",
     };
-    await writeRunResult(store, task.frontmatter.id, runResult);
+    await writeRunResult(harness.store, task.frontmatter.id, runResult);
 
     // Wait for heartbeat to expire
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     // Run scheduler poll
-    const result = await poll(store, logger, {
-      dataDir: tmpDir,
+    const result = await poll(harness.store, harness.logger, {
+      dataDir: harness.tmpDir,
       dryRun: false,
       defaultLeaseTtlMs: 600_000,
       heartbeatTtlMs: 1,
@@ -114,20 +102,20 @@ describe("heartbeat integration", () => {
     expect(result.actions[0]?.type).toBe("stale_heartbeat");
 
     // Task should be moved to review
-    const updated = await store.get(task.frontmatter.id);
+    const updated = await harness.store.get(task.frontmatter.id);
     expect(updated?.frontmatter.status).toBe("review");
   });
 
   it("stale heartbeat with needs_review outcome moves to review", async () => {
-    const task = await store.create({
+    const task = await harness.store.create({
       title: "Stale task with needs_review",
       createdBy: "main",
       routing: { agent: "test-agent" },
     });
-    await store.transition(task.frontmatter.id, "ready");
+    await harness.store.transition(task.frontmatter.id, "ready");
 
     // Acquire lease with 1ms heartbeat TTL
-    await acquireLease(store, task.frontmatter.id, "test-agent", {
+    await acquireLease(harness.store, task.frontmatter.id, "test-agent", {
       heartbeatTtlMs: 1,
     });
 
@@ -142,14 +130,14 @@ describe("heartbeat integration", () => {
       tests: { total: 5, passed: 5, failed: 0 },
       notes: "Needs review",
     };
-    await writeRunResult(store, task.frontmatter.id, runResult);
+    await writeRunResult(harness.store, task.frontmatter.id, runResult);
 
     // Wait for heartbeat to expire
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     // Run scheduler poll
-    const result = await poll(store, logger, {
-      dataDir: tmpDir,
+    const result = await poll(harness.store, harness.logger, {
+      dataDir: harness.tmpDir,
       dryRun: false,
       defaultLeaseTtlMs: 600_000,
       heartbeatTtlMs: 1,
@@ -160,20 +148,20 @@ describe("heartbeat integration", () => {
     expect(result.actions[0]?.type).toBe("stale_heartbeat");
 
     // Task should be moved to review
-    const updated = await store.get(task.frontmatter.id);
+    const updated = await harness.store.get(task.frontmatter.id);
     expect(updated?.frontmatter.status).toBe("review");
   });
 
   it("stale heartbeat with blocked outcome moves to blocked", async () => {
-    const task = await store.create({
+    const task = await harness.store.create({
       title: "Stale task with blocked",
       createdBy: "main",
       routing: { agent: "test-agent" },
     });
-    await store.transition(task.frontmatter.id, "ready");
+    await harness.store.transition(task.frontmatter.id, "ready");
 
     // Acquire lease with 1ms heartbeat TTL
-    await acquireLease(store, task.frontmatter.id, "test-agent", {
+    await acquireLease(harness.store, task.frontmatter.id, "test-agent", {
       heartbeatTtlMs: 1,
     });
 
@@ -189,14 +177,14 @@ describe("heartbeat integration", () => {
       blockers: ["Dependency not ready"],
       notes: "Blocked on dependency",
     };
-    await writeRunResult(store, task.frontmatter.id, runResult);
+    await writeRunResult(harness.store, task.frontmatter.id, runResult);
 
     // Wait for heartbeat to expire
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     // Run scheduler poll
-    const result = await poll(store, logger, {
-      dataDir: tmpDir,
+    const result = await poll(harness.store, harness.logger, {
+      dataDir: harness.tmpDir,
       dryRun: false,
       defaultLeaseTtlMs: 600_000,
       heartbeatTtlMs: 1,
@@ -207,21 +195,21 @@ describe("heartbeat integration", () => {
     expect(result.actions[0]?.type).toBe("stale_heartbeat");
 
     // Task should be moved to blocked
-    const updated = await store.get(task.frontmatter.id);
+    const updated = await harness.store.get(task.frontmatter.id);
     expect(updated?.frontmatter.status).toBe("blocked");
   });
 
   it("stale heartbeat with done outcome moves to review then done", async () => {
-    const task = await store.create({
+    const task = await harness.store.create({
       title: "Stale task with done",
       createdBy: "main",
       routing: { agent: "test-agent" },
       metadata: { reviewRequired: false }, // Skip review step
     });
-    await store.transition(task.frontmatter.id, "ready");
+    await harness.store.transition(task.frontmatter.id, "ready");
 
     // Acquire lease with 1ms heartbeat TTL
-    await acquireLease(store, task.frontmatter.id, "test-agent", {
+    await acquireLease(harness.store, task.frontmatter.id, "test-agent", {
       heartbeatTtlMs: 1,
     });
 
@@ -236,14 +224,14 @@ describe("heartbeat integration", () => {
       tests: { total: 5, passed: 5, failed: 0 },
       notes: "Task completed successfully",
     };
-    await writeRunResult(store, task.frontmatter.id, runResult);
+    await writeRunResult(harness.store, task.frontmatter.id, runResult);
 
     // Wait for heartbeat to expire
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     // Run scheduler poll
-    const result = await poll(store, logger, {
-      dataDir: tmpDir,
+    const result = await poll(harness.store, harness.logger, {
+      dataDir: harness.tmpDir,
       dryRun: false,
       defaultLeaseTtlMs: 600_000,
       heartbeatTtlMs: 1,
@@ -254,7 +242,7 @@ describe("heartbeat integration", () => {
     expect(result.actions[0]?.type).toBe("stale_heartbeat");
 
     // Task should be moved to done (two transitions: review -> done)
-    const updated = await store.get(task.frontmatter.id);
+    const updated = await harness.store.get(task.frontmatter.id);
     expect(updated?.frontmatter.status).toBe("done");
   });
 
@@ -276,8 +264,8 @@ describe("heartbeat integration", () => {
     }));
 
     const service = new AOFService(
-      { store, logger, poller },
-      { dataDir: tmpDir, pollIntervalMs: 60_000, dryRun: true },
+      { store: harness.store, logger: harness.logger, poller },
+      { dataDir: harness.tmpDir, pollIntervalMs: 60_000, dryRun: true },
     );
 
     await service.start();
@@ -293,21 +281,21 @@ describe("heartbeat integration", () => {
   });
 
   it("does not flag tasks with fresh heartbeats", async () => {
-    const task = await store.create({
+    const task = await harness.store.create({
       title: "Fresh task",
       createdBy: "main",
       routing: { agent: "test-agent" },
     });
-    await store.transition(task.frontmatter.id, "ready");
+    await harness.store.transition(task.frontmatter.id, "ready");
 
     // Acquire lease with 5min heartbeat TTL
-    await acquireLease(store, task.frontmatter.id, "test-agent", {
+    await acquireLease(harness.store, task.frontmatter.id, "test-agent", {
       heartbeatTtlMs: 300_000,
     });
 
     // Run scheduler poll
-    const result = await poll(store, logger, {
-      dataDir: tmpDir,
+    const result = await poll(harness.store, harness.logger, {
+      dataDir: harness.tmpDir,
       dryRun: false,
       defaultLeaseTtlMs: 600_000,
       heartbeatTtlMs: 300_000,
@@ -318,7 +306,7 @@ describe("heartbeat integration", () => {
     expect(staleActions).toHaveLength(0);
 
     // Task should remain in-progress
-    const updated = await store.get(task.frontmatter.id);
+    const updated = await harness.store.get(task.frontmatter.id);
     expect(updated?.frontmatter.status).toBe("in-progress");
   });
 });

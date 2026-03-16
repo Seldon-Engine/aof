@@ -7,12 +7,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { FilesystemTaskStore } from "../../store/task-store.js";
-import type { ITaskStore } from "../../store/interfaces.js";
-import { EventLogger } from "../../events/logger.js";
+import { createTestHarness, type TestHarness } from "../../testing/index.js";
 
 
 // Mock callback-delivery module so we can spy on calls
@@ -66,35 +63,30 @@ class CaptureAdapter implements GatewayAdapter {
 }
 
 describe("callback integration: onRunComplete", () => {
-  let dataDir: string;
-  let store: ITaskStore;
-  let logger: EventLogger;
+  let harness: TestHarness;
   let adapter: CaptureAdapter;
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    dataDir = await mkdtemp(join(tmpdir(), "aof-cb-integration-"));
-    store = new FilesystemTaskStore(dataDir);
-    await store.init();
-    logger = new EventLogger(join(dataDir, "events"));
+    harness = await createTestHarness("aof-cb-integration");
     adapter = new CaptureAdapter();
-    await mkdir(join(dataDir, "org"), { recursive: true });
-    await writeFile(join(dataDir, "org", "org-chart.yaml"), ORG_CHART);
+    await mkdir(join(harness.tmpDir, "org"), { recursive: true });
+    await writeFile(join(harness.tmpDir, "org", "org-chart.yaml"), ORG_CHART);
   });
 
   afterEach(async () => {
-    await rm(dataDir, { recursive: true, force: true });
+    await harness.cleanup();
   });
 
   it("calls deliverCallbacks after agent completes task (already transitioned)", async () => {
     // Create and ready a task
-    const task = await store.create({
+    const task = await harness.store.create({
       title: "Deliver test",
       body: "Body",
       routing: { agent: "swe-backend" },
       createdBy: "test",
     });
-    await store.transition(task.frontmatter.id, "ready");
+    await harness.store.transition(task.frontmatter.id, "ready");
 
     // Dispatch via assign-executor
     const action = {
@@ -105,15 +97,15 @@ describe("callback integration: onRunComplete", () => {
       reason: "test",
     };
 
-    await executeAssignAction(action, store, logger, {
+    await executeAssignAction(action, harness.store, harness.logger, {
       dryRun: false,
       defaultLeaseTtlMs: 60_000,
       executor: adapter,
     }, [task], { value: null });
 
     // The task is now in-progress. Simulate agent completing (transitioning to done)
-    await store.transition(task.frontmatter.id, "review");
-    await store.transition(task.frontmatter.id, "done");
+    await harness.store.transition(task.frontmatter.id, "review");
+    await harness.store.transition(task.frontmatter.id, "done");
 
     // Fire onRunComplete (simulates agent session ending)
     expect(adapter.onRunCompleteCallback).toBeDefined();
@@ -130,7 +122,7 @@ describe("callback integration: onRunComplete", () => {
     expect(deliverCallbacks).toHaveBeenCalledWith(
       expect.objectContaining({
         taskId: task.frontmatter.id,
-        store,
+        store: harness.store,
       }),
     );
   });
@@ -145,24 +137,24 @@ describe("callback integration: onRunComplete", () => {
 
     // We can verify ordering by checking that deliverCallbacks is called
     // (trace capture runs before it in the code path)
-    const task = await store.create({
+    const task = await harness.store.create({
       title: "Order test",
       body: "Body",
       routing: { agent: "swe-backend" },
       createdBy: "test",
     });
-    await store.transition(task.frontmatter.id, "ready");
+    await harness.store.transition(task.frontmatter.id, "ready");
 
     await executeAssignAction(
       { type: "assign", taskId: task.frontmatter.id, taskTitle: "Order test", agent: "swe-backend", reason: "test" },
-      store, logger,
+      harness.store, harness.logger,
       { dryRun: false, defaultLeaseTtlMs: 60_000, executor: adapter },
       [task], { value: null },
     );
 
     // Transition to done (agent completed)
-    await store.transition(task.frontmatter.id, "review");
-    await store.transition(task.frontmatter.id, "done");
+    await harness.store.transition(task.frontmatter.id, "review");
+    await harness.store.transition(task.frontmatter.id, "done");
 
     await adapter.onRunCompleteCallback!({
       taskId: task.frontmatter.id,
@@ -179,23 +171,23 @@ describe("callback integration: onRunComplete", () => {
   it("delivery error in onRunComplete does not crash or affect task state", async () => {
     (deliverCallbacks as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("Delivery boom"));
 
-    const task = await store.create({
+    const task = await harness.store.create({
       title: "Error test",
       body: "Body",
       routing: { agent: "swe-backend" },
       createdBy: "test",
     });
-    await store.transition(task.frontmatter.id, "ready");
+    await harness.store.transition(task.frontmatter.id, "ready");
 
     await executeAssignAction(
       { type: "assign", taskId: task.frontmatter.id, taskTitle: "Error test", agent: "swe-backend", reason: "test" },
-      store, logger,
+      harness.store, harness.logger,
       { dryRun: false, defaultLeaseTtlMs: 60_000, executor: adapter },
       [task], { value: null },
     );
 
-    await store.transition(task.frontmatter.id, "review");
-    await store.transition(task.frontmatter.id, "done");
+    await harness.store.transition(task.frontmatter.id, "review");
+    await harness.store.transition(task.frontmatter.id, "done");
 
     // Should not throw even though deliverCallbacks errors
     await expect(
@@ -209,42 +201,37 @@ describe("callback integration: onRunComplete", () => {
     ).resolves.toBeUndefined();
 
     // Task state should still be done
-    const final = await store.get(task.frontmatter.id);
+    const final = await harness.store.get(task.frontmatter.id);
     expect(final?.frontmatter.status).toBe("done");
   });
 });
 
 describe("callback integration: scheduler poll", () => {
-  let dataDir: string;
-  let store: ITaskStore;
-  let logger: EventLogger;
+  let harness: TestHarness;
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    dataDir = await mkdtemp(join(tmpdir(), "aof-cb-sched-"));
-    store = new FilesystemTaskStore(dataDir);
-    await store.init();
-    logger = new EventLogger(join(dataDir, "events"));
-    await mkdir(join(dataDir, "org"), { recursive: true });
-    await writeFile(join(dataDir, "org", "org-chart.yaml"), ORG_CHART);
+    harness = await createTestHarness("aof-cb-sched");
+    await mkdir(join(harness.tmpDir, "org"), { recursive: true });
+    await writeFile(join(harness.tmpDir, "org", "org-chart.yaml"), ORG_CHART);
   });
 
   afterEach(async () => {
-    await rm(dataDir, { recursive: true, force: true });
+    await harness.cleanup();
   });
 
   it("scheduler poll calls retryPendingDeliveries for terminal tasks", async () => {
     // Create a done task
-    const task = await store.create({
+    const task = await harness.store.create({
       title: "Done task for retry",
       body: "Body",
       routing: { agent: "swe-backend" },
       createdBy: "test",
     });
-    await store.transition(task.frontmatter.id, "ready");
-    await store.transition(task.frontmatter.id, "in-progress");
-    await store.transition(task.frontmatter.id, "review");
-    await store.transition(task.frontmatter.id, "done");
+    await harness.store.transition(task.frontmatter.id, "ready");
+    await harness.store.transition(task.frontmatter.id, "in-progress");
+    await harness.store.transition(task.frontmatter.id, "review");
+    await harness.store.transition(task.frontmatter.id, "done");
 
     const executor: GatewayAdapter = {
       async spawnSession() { return { success: true, sessionId: "mock" }; },
@@ -252,8 +239,8 @@ describe("callback integration: scheduler poll", () => {
       async forceCompleteSession() {},
     };
 
-    await poll(store, logger, {
-      dataDir,
+    await poll(harness.store, harness.logger, {
+      dataDir: harness.tmpDir,
       dryRun: false,
       defaultLeaseTtlMs: 60_000,
       executor,
@@ -267,19 +254,19 @@ describe("callback integration: scheduler poll", () => {
   });
 
   it("scheduler retry scan is skipped in dryRun mode", async () => {
-    const task = await store.create({
+    const task = await harness.store.create({
       title: "Dry run skip",
       body: "Body",
       routing: { agent: "swe-backend" },
       createdBy: "test",
     });
-    await store.transition(task.frontmatter.id, "ready");
-    await store.transition(task.frontmatter.id, "in-progress");
-    await store.transition(task.frontmatter.id, "review");
-    await store.transition(task.frontmatter.id, "done");
+    await harness.store.transition(task.frontmatter.id, "ready");
+    await harness.store.transition(task.frontmatter.id, "in-progress");
+    await harness.store.transition(task.frontmatter.id, "review");
+    await harness.store.transition(task.frontmatter.id, "done");
 
-    await poll(store, logger, {
-      dataDir,
+    await poll(harness.store, harness.logger, {
+      dataDir: harness.tmpDir,
       dryRun: true,
       defaultLeaseTtlMs: 60_000,
     });
@@ -290,16 +277,16 @@ describe("callback integration: scheduler poll", () => {
   it("scheduler retry scan error does not crash the poll cycle", async () => {
     (retryPendingDeliveries as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("Retry boom"));
 
-    const task = await store.create({
+    const task = await harness.store.create({
       title: "Retry error task",
       body: "Body",
       routing: { agent: "swe-backend" },
       createdBy: "test",
     });
-    await store.transition(task.frontmatter.id, "ready");
-    await store.transition(task.frontmatter.id, "in-progress");
-    await store.transition(task.frontmatter.id, "review");
-    await store.transition(task.frontmatter.id, "done");
+    await harness.store.transition(task.frontmatter.id, "ready");
+    await harness.store.transition(task.frontmatter.id, "in-progress");
+    await harness.store.transition(task.frontmatter.id, "review");
+    await harness.store.transition(task.frontmatter.id, "done");
 
     const executor: GatewayAdapter = {
       async spawnSession() { return { success: true, sessionId: "mock" }; },
@@ -308,8 +295,8 @@ describe("callback integration: scheduler poll", () => {
     };
 
     // Should not throw
-    const result = await poll(store, logger, {
-      dataDir,
+    const result = await poll(harness.store, harness.logger, {
+      dataDir: harness.tmpDir,
       dryRun: false,
       defaultLeaseTtlMs: 60_000,
       executor,

@@ -3,12 +3,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, writeFile, readdir, readFile } from "node:fs/promises";
+import { writeFile, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { FilesystemTaskStore } from "../../store/task-store.js";
-import type { ITaskStore } from "../../store/interfaces.js";
-import { EventLogger } from "../../events/logger.js";
+import { createTestHarness, type TestHarness } from "../../testing/index.js";
 import {
   seedTasks,
   seedTasksFromFile,
@@ -17,19 +14,14 @@ import {
 } from "../task-seeder.js";
 
 describe("Task Seeder", () => {
-  let tmpDir: string;
-  let store: ITaskStore;
-  let logger: EventLogger;
+  let harness: TestHarness;
 
   beforeEach(async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), "seeder-test-"));
-    store = new FilesystemTaskStore(tmpDir);
-    await store.init();
-    logger = new EventLogger(join(tmpDir, "events"));
+    harness = await createTestHarness("seeder-test");
   });
 
   afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true });
+    await harness.cleanup();
   });
 
   describe("seedTasks (programmatic)", () => {
@@ -47,7 +39,7 @@ describe("Task Seeder", () => {
         },
       ];
 
-      const result = await seedTasks(seeds, store, logger, {
+      const result = await seedTasks(seeds, harness.store, harness.logger, {
         actor: "test-seeder",
       });
 
@@ -56,7 +48,7 @@ describe("Task Seeder", () => {
       expect(result.taskIds).toHaveLength(2);
 
       // Verify tasks exist on disk
-      const tasks = await store.list();
+      const tasks = await harness.store.list();
       expect(tasks).toHaveLength(2);
     });
 
@@ -76,7 +68,7 @@ describe("Task Seeder", () => {
         },
       ];
 
-      const result = await seedTasks(seeds, store, logger);
+      const result = await seedTasks(seeds, harness.store, harness.logger);
 
       expect(result.total).toBe(3);
       expect(result.succeeded).toBe(2);
@@ -91,7 +83,7 @@ describe("Task Seeder", () => {
         { title: "Task 2", brief: "Test" },
       ];
 
-      const result = await seedTasks(seeds, store, logger, {
+      const result = await seedTasks(seeds, harness.store, harness.logger, {
         dryRun: true,
       });
 
@@ -99,7 +91,7 @@ describe("Task Seeder", () => {
       expect(result.taskIds).toHaveLength(0);
 
       // Verify no tasks created
-      const tasks = await store.list();
+      const tasks = await harness.store.list();
       expect(tasks).toHaveLength(0);
     });
 
@@ -118,11 +110,11 @@ describe("Task Seeder", () => {
         },
       ];
 
-      const result = await seedTasks(seeds, store, logger);
+      const result = await seedTasks(seeds, harness.store, harness.logger);
 
       expect(result.succeeded).toBe(1);
 
-      const task = await store.get(result.taskIds[0]!);
+      const task = await harness.store.get(result.taskIds[0]!);
       expect(task).toBeDefined();
       expect(task!.frontmatter.priority).toBe("high");
       expect(task!.frontmatter.routing.agent).toBe("swe-backend");
@@ -133,7 +125,7 @@ describe("Task Seeder", () => {
 
   describe("seedTasksFromFile", () => {
     it("seeds tasks from YAML file", async () => {
-      const seedFile = join(tmpDir, "seeds.yaml");
+      const seedFile = join(harness.tmpDir, "seeds.yaml");
       const yamlContent = `
 version: 1
 seeds:
@@ -146,18 +138,18 @@ seeds:
 `;
       await writeFile(seedFile, yamlContent, "utf-8");
 
-      const result = await seedTasksFromFile(seedFile, store, logger);
+      const result = await seedTasksFromFile(seedFile, harness.store, harness.logger);
 
       expect(result.succeeded).toBe(2);
       expect(result.failed).toBe(0);
 
-      const tasks = await store.list();
+      const tasks = await harness.store.list();
       expect(tasks).toHaveLength(2);
       expect(tasks.map(t => t.frontmatter.title)).toContain("YAML Task 1");
     });
 
     it("seeds tasks from JSON file", async () => {
-      const seedFile = join(tmpDir, "seeds.json");
+      const seedFile = join(harness.tmpDir, "seeds.json");
       const jsonContent = {
         version: 1,
         seeds: [
@@ -174,31 +166,31 @@ seeds:
       };
       await writeFile(seedFile, JSON.stringify(jsonContent, null, 2), "utf-8");
 
-      const result = await seedTasksFromFile(seedFile, store, logger);
+      const result = await seedTasksFromFile(seedFile, harness.store, harness.logger);
 
       expect(result.succeeded).toBe(2);
 
-      const tasks = await store.list();
+      const tasks = await harness.store.list();
       expect(tasks.map(t => t.frontmatter.title)).toContain("JSON Task 1");
     });
 
     it("throws error on invalid seed file structure", async () => {
-      const seedFile = join(tmpDir, "invalid.yaml");
+      const seedFile = join(harness.tmpDir, "invalid.yaml");
       await writeFile(seedFile, "invalid: structure", "utf-8");
 
       await expect(
-        seedTasksFromFile(seedFile, store, logger)
+        seedTasksFromFile(seedFile, harness.store, harness.logger)
       ).rejects.toThrow(/missing 'seeds' array/i);
     });
 
     it("handles file read errors", async () => {
       await expect(
-        seedTasksFromFile("/nonexistent/file.yaml", store, logger)
+        seedTasksFromFile("/nonexistent/file.yaml", harness.store, harness.logger)
       ).rejects.toThrow();
     });
 
     it("supports dry run from file", async () => {
-      const seedFile = join(tmpDir, "seeds.yaml");
+      const seedFile = join(harness.tmpDir, "seeds.yaml");
       const yamlContent = `
 version: 1
 seeds:
@@ -207,13 +199,13 @@ seeds:
 `;
       await writeFile(seedFile, yamlContent, "utf-8");
 
-      const result = await seedTasksFromFile(seedFile, store, logger, {
+      const result = await seedTasksFromFile(seedFile, harness.store, harness.logger, {
         dryRun: true,
       });
 
       expect(result.succeeded).toBe(1);
 
-      const tasks = await store.list();
+      const tasks = await harness.store.list();
       expect(tasks).toHaveLength(0);
     });
   });
@@ -231,12 +223,12 @@ seeds:
 
     it("creates seeded tasks successfully", async () => {
       const seedPack = createMinimalSeedPack();
-      const result = await seedTasks(seedPack.seeds, store, logger);
+      const result = await seedTasks(seedPack.seeds, harness.store, harness.logger);
 
       expect(result.succeeded).toBe(seedPack.seeds.length);
       expect(result.failed).toBe(0);
 
-      const tasks = await store.list();
+      const tasks = await harness.store.list();
       expect(tasks).toHaveLength(seedPack.seeds.length);
     });
 
@@ -258,10 +250,10 @@ seeds:
         { title: "Test 2", brief: "Brief 2" },
       ];
 
-      const result = await seedTasks(seeds, store, logger);
+      const result = await seedTasks(seeds, harness.store, harness.logger);
 
       // All seeded tasks should be in 'ready' status
-      const readyDir = join(tmpDir, "tasks", "ready");
+      const readyDir = join(harness.tmpDir, "tasks", "ready");
       const entries = await readdir(readyDir);
       
       // Filter for .md files only (each task has both .md file and directory)
@@ -277,21 +269,21 @@ seeds:
 
     it("aof_status_report returns total > 0 after seeding", async () => {
       const seeds = createMinimalSeedPack().seeds;
-      await seedTasks(seeds, store, logger);
+      await seedTasks(seeds, harness.store, harness.logger);
 
-      const tasks = await store.list();
+      const tasks = await harness.store.list();
       expect(tasks.length).toBeGreaterThan(0);
     });
 
     it("find command returns seeded task files", async () => {
       await seedTasks(
         [{ title: "Findable task", brief: "Should be found" }],
-        store,
-        logger
+        harness.store,
+        harness.logger
       );
 
       // Simulate: find ~/.openclaw/aof/tasks -name '*.md'
-      const allTasks = await store.list();
+      const allTasks = await harness.store.list();
       const taskFiles = allTasks.map(t => t.path).filter(p => p?.endsWith(".md"));
 
       expect(taskFiles.length).toBeGreaterThan(0);
@@ -300,7 +292,7 @@ seeds:
 
   describe("Edge cases", () => {
     it("handles empty seeds array", async () => {
-      const result = await seedTasks([], store, logger);
+      const result = await seedTasks([], harness.store, harness.logger);
 
       expect(result.total).toBe(0);
       expect(result.succeeded).toBe(0);
@@ -313,12 +305,12 @@ seeds:
         brief: `Brief for task ${i + 1}`,
       }));
 
-      const result = await seedTasks(seeds, store, logger);
+      const result = await seedTasks(seeds, harness.store, harness.logger);
 
       expect(result.succeeded).toBe(50);
       expect(result.failed).toBe(0);
 
-      const tasks = await store.list();
+      const tasks = await harness.store.list();
       expect(tasks).toHaveLength(50);
     });
 
@@ -329,10 +321,10 @@ seeds:
         { title: "Gamma", brief: "Third" },
       ];
 
-      const result = await seedTasks(seeds, store, logger);
+      const result = await seedTasks(seeds, harness.store, harness.logger);
 
       const tasks = await Promise.all(
-        result.taskIds.map(id => store.get(id))
+        result.taskIds.map(id => harness.store.get(id))
       );
       const titles = tasks.map(t => t?.frontmatter.title);
 
