@@ -1,5 +1,24 @@
 # Milestones
 
+## v1.10 Codebase Cleanups (Shipped: 2026-03-16)
+
+**Phases completed:** 7 phases (34-40), 18 plans
+**Timeline:** 2026-03-12 → 2026-03-16 (5 days)
+**Code:** +17,351 / -8,623 lines across 242 files (~107k LOC TypeScript, 3,017 tests)
+
+**Key accomplishments:**
+- Removed ~2,900 lines dead code — legacy gate system, 15 unused MCP schemas, deprecated type aliases, stale JSDoc
+- Fixed 4 correctness bugs — buildTaskStats cancelled/deadletter counts, daemon startTime scope, UpdatePatch type, TOCTOU race via shared lock manager
+- Centralized config registry — Zod-validated singleton with resetConfig() for test isolation, replacing 11 scattered process.env reads
+- Structured logging with Pino — child loggers per module, 120+ console.* calls replaced, 36 silent catch blocks remediated
+- God functions decomposed — executeAssignAction/executeActions extracted to handler modules, tool registration unified across MCP and OpenClaw
+- Architecture cleaned — circular deps broken (0 cycles via madge), store abstraction enforced (save/saveToPath on ITaskStore), config→org layering fixed
+- Test infrastructure standardized — createTestHarness adopted by 13 test files, typed mock factories (createMockStore/createMockLogger), coverage expanded to all src/ modules
+
+**Git range:** 69a2b2d → 6e19760 (107 commits)
+
+---
+
 ## v1.8 Task Notifications (Shipped: 2026-03-12)
 
 **Phases completed:** 6 phases (28-33), 9 plans

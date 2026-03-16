@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.10
-milestone_name: Codebase Cleanups
-status: completed
-stopped_at: Completed 40-03-PLAN.md
-last_updated: "2026-03-16T03:23:50.296Z"
-last_activity: "2026-03-15 — Completed 40-03 (Gap closure: getMetric + test migration)"
+milestone: null
+milestone_name: null
+status: between_milestones
+stopped_at: v1.10 milestone completed and archived
+last_updated: "2026-03-16"
+last_activity: "2026-03-16 — v1.10 Codebase Cleanups milestone completed"
 progress:
-  total_phases: 7
-  completed_phases: 7
-  total_plans: 18
-  completed_plans: 18
+  total_phases: 40
+  completed_phases: 40
+  total_plans: 85
+  completed_plans: 85
   percent: 100
 ---
 
@@ -18,71 +18,25 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-12)
+See: .planning/PROJECT.md (updated 2026-03-16)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** Phase 40 - Test Infrastructure (v1.10 Codebase Cleanups)
+**Current focus:** Planning next milestone
 
 ## Current Position
 
-Phase: 40 of 40 (Test Infrastructure) — seventh of 7 phases in v1.10
-Plan: 3 of 3 (40-03 complete)
-Status: Complete
-Last activity: 2026-03-15 — Completed 40-03 (Gap closure: getMetric + test migration)
-
-Progress: [██████████] 100%
+No active milestone. v1.10 Codebase Cleanups shipped 2026-03-16.
+Next step: `/gsd:new-milestone` to define next milestone.
 
 ## Performance Metrics
 
-**All milestones:** v1.0 (7 plans), v1.1 (16 plans), v1.2 (16 plans), v1.3 (7 plans), v1.4 (6 plans), v1.5 (6 plans), v1.8 (9 plans), v1.10 (17 of 18 plans) -- 84 plans total across 40 phases
+**All milestones:** v1.0 (7 plans), v1.1 (16 plans), v1.2 (16 plans), v1.3 (7 plans), v1.4 (6 plans), v1.5 (6 plans), v1.8 (9 plans), v1.10 (18 plans) -- 85 plans total across 40 phases
 
 ## Accumulated Context
 
 ### Decisions
 
-All decisions logged in PROJECT.md Key Decisions table.
-
-- [34-01] Inlined gate schemas into consuming files rather than deleting types outright, preserving backward compat for persisted data
-- [34-01] Removed migration002 from migration chain since gate-to-DAG batch migration is no longer needed
-- [34-02] Removed 15 unused MCP output schemas (not 13 as estimated) -- all defined but never referenced
-- [34-02] Kept notifier field in AOFServiceDependencies (removed only @deprecated tag) because ProtocolRouter still actively uses it
-- [Phase 34]: Removed 15 unused MCP output schemas (not 13 as estimated)
-- [Phase 34]: Kept notifier field in AOFServiceDependencies because ProtocolRouter still uses it
-- [35-02] Wrapped entire executeAssignAction body in withLock rather than individual call sites for complete mutation coverage
-- [35-02] Added lockManager to DispatchConfig in addition to SchedulerConfig since assign-executor uses DispatchConfig type
-- [Phase 35]: Used TDD for buildTaskStats fix to ensure regression coverage before implementation
-- [36-01] Used z.coerce.number() for numeric env vars since process.env values are always strings
-- [36-01] resetConfig(overrides) deep-merges with Zod defaults without reading process.env for test isolation
-- [36-02] Lazy default for --root CLI option via preAction hook instead of module-level const
-- [36-02] configPath fallback uses cfg.openclaw.stateDir + openclaw.json instead of hardcoded homedir path
-- [37-01] Used pino.destination DestinationStream type for proper flushSync access in resetLogger
-- [37-01] Tests use PassThrough streams with direct pino instances for output verification rather than capturing stderr
-- [37-02] Used vi.hoisted() for test logger mocks to avoid vi.mock hoisting issues with const declarations
-- [37-02] Kept file-existence catch blocks as silent catches (flow control, not error swallowing)
-- [37-02] Consolidated multi-line console.error ops alerts into single structured log.error calls
-- [Phase 37]: Used err field name for errors to trigger Pino serializer
-- [Phase 37]: Shared mockLogFns pattern with indirect wrappers for vi.mock hoisting
-- [38-01] Kept post-spawn result handling in assign-executor.ts — platform limits, retry logic are orchestration concerns
-- [38-01] REF-06 (gate-to-DAG migration dedup) documented as N/A — fully resolved by DEAD-04 in Phase 34
-- [38-02] Put ActionHandlerResult in separate action-handler-types.ts to avoid circular imports
-- [38-02] Handler functions receive all deps as parameters (no closure dependencies, no imports from action-executor)
-- [Phase 38]: MCP-specific handlers kept separate for dispatch/task_update/task_complete due to extra behavior (workflow, subscribe, body building)
-- [Phase 38]: Used zod-to-json-schema for OpenClaw JSON Schema generation from co-located Zod schemas
-- [39-01] Kept re-exports in scheduler.ts, task-dispatcher.ts, and aof-tools.ts for backward compatibility with external consumers
-- [39-01] Consolidated duplicate SchedulerAction interfaces into single canonical definition in dispatch/types.ts
-- [Phase 39]: Inlined normalizePath in registry.ts to break config/paths<->registry cycle
-- [Phase 39]: Used dependency inversion for config->org: linter passed as optional parameter
-- [Phase 39]: createProjectStore re-exported from cli/project-utils.ts for backward compatibility
-- [39-03] PermissionAwareTaskStore delegates save/saveToPath directly without permission checks (internal persistence)
-- [Phase 39]: ITaskStore.save() and saveToPath() enforce store encapsulation for all task persistence
-- [40-01] Used satisfies ITaskStore for compile-time mock completeness checking
-- [40-01] Mock logger uses as-unknown cast since EventLogger has private fields
-- [40-01] readTasks scans all status subdirectories matching FilesystemTaskStore layout
-- [40-01] Added @vitest/coverage-v8 as dev dependency for coverage support
-- [40-02] Used tmpDirs tracking array pattern for per-test mkdtempSync cleanup in memory tests
-- [40-02] 6 of 15 listed files already had proper cleanup -- only 9 needed fixes
-- [40-03] getMetric exposed as passthrough to getMetricValue (not bound to a directory)
-- [40-03] Kept EventLogger import in block-cascade.test.ts for inner onEvent tracking logger
+All decisions logged in PROJECT.md Key Decisions table. v1.10 decisions archived in milestones/v1.10-ROADMAP.md.
 
 ### Roadmap Evolution
 
@@ -101,10 +55,9 @@ None.
 
 ### Blockers/Concerns
 
-- Phase 39 (Architecture Fixes): Circular dependency graph requires `madge` analysis before planning — research flag from SUMMARY.md.
-- REF-06 confirmed resolved by DEAD-04 in Phase 34 — documented in 38-01-SUMMARY.md.
+None. All v1.10 blockers resolved.
 
 ## Session Continuity
 
-Last session: 2026-03-16T03:07:00Z
-Stopped at: Completed 40-03-PLAN.md
+Last session: 2026-03-16
+Stopped at: v1.10 milestone completed and archived

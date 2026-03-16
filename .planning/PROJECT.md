@@ -87,20 +87,19 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 - ✓ Agent guidance for callback behavior, at-least-once delivery, idempotency expectations — v1.8
 - ✓ Budget gate CI test enforces 2500-token ceiling on context injection — v1.8
 
+### Validated (v1.10)
+
+- ✓ Dead code removed (~2,900 lines — legacy gate system, unused MCP schemas, deprecated types) — v1.10
+- ✓ Correctness bugs fixed (buildTaskStats counts, daemon startTime scope, UpdatePatch type, TOCTOU race via lock manager) — v1.10
+- ✓ Centralized config registry (Zod-validated singleton, resetConfig() for test isolation, 11 process.env reads consolidated) — v1.10
+- ✓ Structured logging (Pino with child loggers, 120+ console.* calls replaced, 36 silent catches remediated) — v1.10
+- ✓ Code refactoring (god functions decomposed, tool registration unified, callback/trace helpers deduplicated) — v1.10
+- ✓ Architecture fixes (0 circular deps, store abstraction enforced, config→org layering fixed, memory barrel split) — v1.10
+- ✓ Test infrastructure (createTestHarness adopted by 13 files, typed mock factories, coverage expanded to all src/) — v1.10
+
 ### Active
 
-## Current Milestone: v1.10 Codebase Cleanups
-
-**Goal:** Eliminate accumulated entropy from 8 milestones of agent-built code — dead code removal, bug fixes, architectural refactoring, centralized config, structured logging, and test infrastructure improvements.
-
-**Target features:**
-- Dead code removal (legacy gate system, unused imports/exports/schemas)
-- Bug fixes (buildTaskStats, daemon startTime, UpdatePatch.blockers, TOCTOU races)
-- Centralized config registry (replace scattered process.env access with typed, high-performance registry)
-- Structured logging (replace 751 console.* calls in core modules with leveled, structured logger)
-- Code refactoring (extract helpers from god functions, unify tool registration, deduplicate patterns)
-- Architecture fixes (break circular deps, fix store bypass, fix layering violations)
-- Test infrastructure (shared harness, typed mock factories, coverage config, temp dir cleanup)
+(No active milestone — planning next)
 
 ### Validated (v1.2)
 
@@ -137,7 +136,7 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 
 - AOF lives at `~/Projects/AOF/` — TypeScript project with src/, tests/, dist/
 - Source structure: cli/, dispatch/, store/, protocol/, events/, org/, memory/, schemas/, daemon/, recovery/, gateway/, plugins/
-- Builds with tsdown, tests with vitest (~109k LOC, 3,090+ tests)
+- Builds with tsdown, tests with vitest (~107k LOC, 3,017 tests)
 - Runtime data lands in `~/.openclaw/aof/` (events/, tasks/, state/, memory/)
 - OpenClaw gateway is at `~/.openclaw/workspace/package/` — AOF uses its plugin-sdk export
 - The org chart (`org/org-chart.yaml`) drives all routing, memory, and agent configuration
@@ -148,6 +147,7 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 - v1.4 shipped: context optimization — compressed SKILL.md (51% reduction), tiered delivery (seed/full), workflow API on aof_dispatch, CI budget gate
 - v1.5 shipped: event tracing — completion enforcement, session trace capture, `aof trace` CLI with DAG hop correlation
 - v1.8 shipped: task notifications — subscription API, callback delivery with retry, all-granularity batching, depth limiting, restart recovery
+- v1.10 shipped: codebase cleanups — dead code removal, bug fixes, centralized config, structured logging, code refactoring, architecture fixes, test infrastructure
 - OpenClaw constraint: no nested agent sessions — scheduler must advance hops between independent sessions
 - Node 22 pinned as prerequisite (Node 24/25 have better-sqlite3 build failures)
 
@@ -202,6 +202,13 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 | TaskContext.metadata for callbackDepth propagation | Cross-session depth tracking without schema changes to gateway | ✓ Good |
 | AOF_CALLBACK_DEPTH env var bridge for MCP boundary | Only mechanism that crosses OpenClaw agent spawn boundary | ✓ Good (accepted race window) |
 | Budget ceiling 2500 tokens with 30% reduction baseline | ~10% headroom over measured 2268 total after v1.8 SKILL.md growth | ✓ Good |
+| Zod-based config registry (not dotenv) | Typed validation at load, lazy init, resetConfig() for test isolation | ✓ Good |
+| Pino for structured logging (not winston) | JSON output, child loggers, low overhead, pino-pretty for dev | ✓ Good |
+| Shared lock manager for TOCTOU mitigation | InMemoryTaskLockManager shared across ProtocolRouter and Scheduler | ✓ Good |
+| Tool registry pattern for MCP/OpenClaw unification | Single handler implementation, thin adapter layer per transport | ✓ Good |
+| Dependency inversion for config→org cycle | Linter passed as optional parameter to break upward import | ✓ Good |
+| ITaskStore.save/saveToPath for store encapsulation | All persistence routed through interface, no direct serialize+write | ✓ Good |
+| createTestHarness() for test setup unification | One function creates tmpDir, store, logger, events — adopted by 13 files | ✓ Good |
 
 ---
-*Last updated: 2026-03-12 after v1.10 milestone started*
+*Last updated: 2026-03-16 after v1.10 milestone completed*
