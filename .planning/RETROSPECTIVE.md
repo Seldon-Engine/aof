@@ -165,17 +165,64 @@
 
 ---
 
+## Milestone: v1.10 — Codebase Cleanups
+
+**Shipped:** 2026-03-16
+**Phases:** 7 | **Plans:** 18
+
+### What Was Built
+- Removed ~2,900 lines dead code (legacy gate system, 15 unused MCP schemas, deprecated type aliases)
+- Fixed 4 correctness bugs (buildTaskStats, daemon startTime, UpdatePatch type, TOCTOU race via shared lock manager)
+- Centralized config registry with Zod validation, resetConfig() for test isolation
+- Structured logging with Pino (child loggers per module, 120+ console.* calls replaced, 36 silent catches remediated)
+- Decomposed god functions (executeAssignAction, executeActions) into handler modules
+- Unified tool registration across MCP and OpenClaw via shared toolRegistry
+- Broke all circular dependencies (0 cycles via madge), enforced store abstraction (save/saveToPath)
+- Standardized test infrastructure (createTestHarness adopted by 13 files, typed mock factories)
+
+### What Worked
+- Sequential phase ordering (34→35→36→37→38→39→40) naturally built on each other — dead code removed before refactoring, config centralized before logging
+- Phase-level verification caught 2 gaps in Phase 40 (missing getMetric, zero harness adoption) — gap closure plan 40-03 resolved both
+- v1.10 was the first purely internal milestone (no new features) — scope was well-defined by static analysis and code metrics
+- 43 requirements fully traceable across 7 phases — 3-source cross-reference (VERIFICATION + SUMMARY + REQUIREMENTS) confirmed completeness
+- Integration checker verified 47 exports and 5 E2E flows with zero breaks
+
+### What Was Inefficient
+- Plan 40-02 migrated tests to mock factories but not to createTestHarness — gap closure was needed because the plan objective and actual execution diverged
+- Nyquist VALIDATION.md templates created for all phases but never populated — skeleton artifacts add noise without value
+- Summary frontmatter `task_count` field was 0 for most plans — extraction tooling returned no useful data for stats gathering
+- One-liner field missing from all summaries — accomplishment extraction during milestone completion required manual derivation
+
+### Patterns Established
+- Zod-based config registries with resetConfig() for test isolation — reusable pattern for any typed configuration
+- Child logger per module pattern — consistent structured logging with filterable component field
+- Tool registry pattern — single handler map consumed by multiple transport adapters
+- createTestHarness() consolidating tmpDir + store + logger + events — eliminates boilerplate across integration tests
+
+### Key Lessons
+1. Internal cleanup milestones benefit from static analysis research upfront — madge, grep, and LOC counts define scope more precisely than feature milestones
+2. Plan objectives must match actual execution — "migrate to harness" vs "migrate to mock factories" caused a gap closure cycle
+3. Summary frontmatter fields (one_liner, task_count) need to be consistently populated during execution — downstream tooling depends on them
+4. 7-phase milestones with 18 plans execute well in 5 days — larger scope but lower risk than feature milestones
+
+### Cost Observations
+- Total: 107 commits across 242 files (+17,351 / -8,623 lines)
+- Timeline: 5 days (2026-03-12 → 2026-03-16)
+- Notable: Net reduction of codebase by ~8,600 lines despite adding new infrastructure (logging, config, testing) — cleanup milestones are net-negative on LOC
+
+---
+
 ## Cross-Milestone Trends
 
-| Metric | v1.0 | v1.1 | v1.2 | v1.3 | v1.4 | v1.5 | v1.8 |
-|--------|------|------|------|------|------|------|------|
-| Phases | 3 | 6 | 7 | 4 | 4 | 3 | 6 |
-| Plans | 7 | 16 | 16 | 7 | 6 | 6 | 9 |
-| Commits | 15 | 40 | — | — | 39 | ~30 | ~25 |
-| Files changed | 64 | 148 | — | — | 47 | 47 | 22 |
-| Lines added | +3,527 | +7,583 | — | — | +3,767 | +6,600 | +3,970 |
-| Lines removed | -584 | -4,865 | — | — | -580 | -88 | -11 |
-| Timeline | 1 day | 2 days | — | — | 1 day | 2 days | 4 days |
+| Metric | v1.0 | v1.1 | v1.2 | v1.3 | v1.4 | v1.5 | v1.8 | v1.10 |
+|--------|------|------|------|------|------|------|------|-------|
+| Phases | 3 | 6 | 7 | 4 | 4 | 3 | 6 | 7 |
+| Plans | 7 | 16 | 16 | 7 | 6 | 6 | 9 | 18 |
+| Commits | 15 | 40 | — | — | 39 | ~30 | ~25 | 107 |
+| Files changed | 64 | 148 | — | — | 47 | 47 | 22 | 242 |
+| Lines added | +3,527 | +7,583 | — | — | +3,767 | +6,600 | +3,970 | +17,351 |
+| Lines removed | -584 | -4,865 | — | — | -580 | -88 | -11 | -8,623 |
+| Timeline | 1 day | 2 days | — | — | 1 day | 2 days | 4 days | 5 days |
 
 **Observations:**
 - Plan execution time is consistent (~3-5 min avg) regardless of phase complexity
@@ -185,3 +232,5 @@
 - Budget gate pattern (CI test asserting ceiling) is reusable for other measurable constraints
 - v1.8 had lowest lines-removed (-11) — almost entirely additive, indicating clean new feature with no legacy removal
 - Integration gaps (orphaned exports, broken cross-boundary propagation) are a recurring pattern — milestone audit is the safety net
+- v1.10 was the largest milestone by every metric (7 phases, 18 plans, 107 commits, 242 files) but also the first net-negative on LOC (-8,623 removed)
+- Cleanup milestones benefit from well-defined scope via static analysis — 43 requirements derived from grep/madge/LOC audits
