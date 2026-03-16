@@ -18,6 +18,13 @@
 - File existence checks (Glob is fine)
 - Shell commands and builds (Bash is fine)
 
+### Keeping Serena Knowledge Current
+After any session that modifies AOF structure (new files, moved modules, changed interfaces, new conventions):
+1. `list_memories` → check which might be stale
+2. `read_memory` → verify content matches current code
+3. `write_memory` → update any stale memories
+4. Key memories: `project_overview`, `style_conventions`, `v1.10-architecture-changes`
+
 ## Code Conventions
 
 - **Config**: Use `getConfig()` from `src/config/registry.ts`. Never read `process.env` directly outside `src/config/`.
