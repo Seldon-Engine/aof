@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.10
 milestone_name: Codebase Cleanups
 status: in-progress
-stopped_at: Completed 40-02-PLAN.md
-last_updated: "2026-03-15T22:58:18Z"
-last_activity: 2026-03-15 — Completed 40-02 (Test migration to shared utilities)
+stopped_at: Completed 40-03-PLAN.md
+last_updated: "2026-03-16T03:07:00Z"
+last_activity: 2026-03-15 — Completed 40-03 (Gap closure: getMetric + test migration)
 progress:
   total_phases: 7
   completed_phases: 7
-  total_plans: 17
-  completed_plans: 17
+  total_plans: 18
+  completed_plans: 18
   percent: 100
 ---
 
@@ -26,15 +26,15 @@ See: .planning/PROJECT.md (updated 2026-03-12)
 ## Current Position
 
 Phase: 40 of 40 (Test Infrastructure) — seventh of 7 phases in v1.10
-Plan: 2 of 2 (40-02 complete)
+Plan: 3 of 3 (40-03 complete)
 Status: Complete
-Last activity: 2026-03-15 — Completed 40-02 (Test migration to shared utilities)
+Last activity: 2026-03-15 — Completed 40-03 (Gap closure: getMetric + test migration)
 
 Progress: [██████████] 100%
 
 ## Performance Metrics
 
-**All milestones:** v1.0 (7 plans), v1.1 (16 plans), v1.2 (16 plans), v1.3 (7 plans), v1.4 (6 plans), v1.5 (6 plans), v1.8 (9 plans), v1.10 (16 of 17 plans) -- 83 plans total across 40 phases
+**All milestones:** v1.0 (7 plans), v1.1 (16 plans), v1.2 (16 plans), v1.3 (7 plans), v1.4 (6 plans), v1.5 (6 plans), v1.8 (9 plans), v1.10 (17 of 18 plans) -- 84 plans total across 40 phases
 
 ## Accumulated Context
 
@@ -81,6 +81,8 @@ All decisions logged in PROJECT.md Key Decisions table.
 - [40-01] Added @vitest/coverage-v8 as dev dependency for coverage support
 - [40-02] Used tmpDirs tracking array pattern for per-test mkdtempSync cleanup in memory tests
 - [40-02] 6 of 15 listed files already had proper cleanup -- only 9 needed fixes
+- [40-03] getMetric exposed as passthrough to getMetricValue (not bound to a directory)
+- [40-03] Kept EventLogger import in block-cascade.test.ts for inner onEvent tracking logger
 
 ### Roadmap Evolution
 
@@ -104,5 +106,5 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-15T22:58:18Z
-Stopped at: Completed 40-02-PLAN.md
+Last session: 2026-03-16T03:07:00Z
+Stopped at: Completed 40-03-PLAN.md
