@@ -245,6 +245,8 @@ Start daemon (use --foreground for development, otherwise redirects to install)
 |------|-------------|---------|
 | `--foreground` | Run daemon in the current process (development mode) | `false` |
 | `--data-dir <path>` | Data directory (default: --root value) |  |
+| `--gateway-url <url>` | OpenClaw gateway URL (default: env OPENCLAW_GATEWAY_URL or http://localhost:3000) |  |
+| `--gateway-token <token>` | OpenClaw gateway auth token (default: env OPENCLAW_GATEWAY_TOKEN) |  |
 
 ---
 

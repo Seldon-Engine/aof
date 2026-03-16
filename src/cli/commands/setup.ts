@@ -142,18 +142,155 @@ async function migrateLegacyData(dataDir: string): Promise<void> {
 }
 
 /**
+ * Fallback: wire AOF plugin by directly editing openclaw.json.
+ * Used when the `openclaw` CLI binary is not in PATH (common during fresh installs
+ * where the shell hasn't been reloaded, or when openclaw is installed but not on PATH).
+ */
+async function wireOpenClawPluginDirect(dataDir: string, configPath: string): Promise<void> {
+  try {
+    const raw = await readFile(configPath, "utf-8");
+    const config = JSON.parse(raw) as Record<string, unknown>;
+
+    // Deep-get/set helpers for nested paths
+    function deepGet(obj: Record<string, unknown>, path: string): unknown {
+      const parts = path.split(".");
+      let cur: unknown = obj;
+      for (const p of parts) {
+        if (cur == null || typeof cur !== "object") return undefined;
+        cur = (cur as Record<string, unknown>)[p];
+      }
+      return cur;
+    }
+    function deepSet(obj: Record<string, unknown>, path: string, value: unknown): void {
+      const parts = path.split(".");
+      let cur: Record<string, unknown> = obj;
+      for (let i = 0; i < parts.length - 1; i++) {
+        const key = parts[i]!;
+        if (cur[key] == null || typeof cur[key] !== "object") {
+          cur[key] = {};
+        }
+        cur = cur[key] as Record<string, unknown>;
+      }
+      cur[parts[parts.length - 1]!] = value;
+    }
+
+    // Back up config before modifying
+    const backupPath = configPath.replace(".json", `.${Date.now()}.backup.json`);
+    await writeFile(backupPath, raw, "utf-8");
+    say(`Config backup: ${backupPath}`);
+
+    // 1. Register plugin entry
+    const entry = deepGet(config, "plugins.entries.aof") as Record<string, unknown> | undefined;
+    if (!entry) {
+      deepSet(config, "plugins.entries.aof", { enabled: true });
+      say("AOF plugin registered");
+    } else {
+      deepSet(config, "plugins.entries.aof.enabled", true);
+      say("AOF plugin entry updated");
+    }
+
+    // 2. Add to allow list
+    const allowList = (deepGet(config, "plugins.allow") as string[] | undefined) ?? [];
+    if (!allowList.includes("aof")) {
+      allowList.push("aof");
+      deepSet(config, "plugins.allow", allowList);
+    }
+
+    // 3. Set memory slot
+    deepSet(config, "plugins.slots.memory", "aof");
+    deepSet(config, "plugins.entries.aof.config.modules.memory.enabled", true);
+    say("AOF configured as memory plugin");
+
+    // 4. Set plugin load paths
+    const loadPaths = (deepGet(config, "plugins.load.paths") as string[] | undefined) ?? [];
+    const filtered = loadPaths.filter((p) => {
+      if (p === dataDir) return true;
+      return !(p.endsWith("/.aof") || p.endsWith("/aof"));
+    });
+    if (!filtered.includes(dataDir)) {
+      filtered.push(dataDir);
+    }
+    deepSet(config, "plugins.load.paths", filtered);
+    say("Plugin load paths updated");
+
+    // 5. Set dataDir config
+    deepSet(config, "plugins.entries.aof.config.dataDir", dataDir);
+    say("Plugin dataDir configured");
+
+    // 6. Add AOF tools to alsoAllow
+    const aofTools = ["aof_task_complete", "aof_task_update", "aof_task_block", "aof_status_report"];
+    const alsoAllow = (deepGet(config, "tools.alsoAllow") as string[] | undefined) ?? [];
+    const missing = aofTools.filter((t) => !alsoAllow.includes(t));
+    if (missing.length > 0) {
+      alsoAllow.push(...missing);
+      deepSet(config, "tools.alsoAllow", alsoAllow);
+      say(`Added ${missing.length} AOF tool(s) to tools.alsoAllow`);
+    }
+
+    // Write config atomically
+    await writeFileAtomic(configPath, JSON.stringify(config, null, 2) + "\n");
+    say("OpenClaw config updated (direct file edit)");
+  } catch (e) {
+    err(`Failed to wire plugin via direct config edit: ${e instanceof Error ? e.message : String(e)}`);
+    warn("Run 'aof setup' after OpenClaw CLI is in PATH to retry.");
+    return;
+  }
+
+  // Deploy skill files (doesn't need CLI)
+  await deploySkillFiles(dataDir);
+}
+
+/**
+ * Deploy SKILL.md and related files to ~/.openclaw/skills/aof/.
+ */
+async function deploySkillFiles(dataDir: string): Promise<void> {
+  try {
+    const skillTargetDir = join(homedir(), ".openclaw", "skills", "aof");
+    await rm(skillTargetDir, { recursive: true, force: true });
+    await mkdir(skillTargetDir, { recursive: true });
+
+    const skillFiles = [
+      { name: "SKILL.md", required: true },
+      { name: "SKILL-SEED.md", required: false },
+      { name: "skill.json", required: false },
+    ];
+
+    for (const { name, required: isRequired } of skillFiles) {
+      const src = join(dataDir, "skills", "aof", name);
+      try {
+        await access(src);
+        await cp(src, join(skillTargetDir, name));
+        say(`Deployed ${name} to skills directory`);
+      } catch {
+        if (isRequired) {
+          warn(`Required skill file not found: ${name}`);
+        }
+      }
+    }
+  } catch (e) {
+    warn(`Failed to deploy skill files: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+/**
  * Wire AOF as an OpenClaw plugin.
  * Soft requirement: skips with warning if OpenClaw not found.
  */
 async function wireOpenClawPlugin(dataDir: string, openclawPath?: string): Promise<void> {
   // Detect OpenClaw
   let detected = false;
+  let cliAvailable = false;
+  let configPath: string | undefined;
 
   if (openclawPath) {
     try {
       await access(openclawPath);
       detected = true;
+      configPath = openclawPath;
       say(`OpenClaw config found at ${openclawPath}`);
+      // Test if CLI is usable
+      const detection = await detectOpenClaw();
+      cliAvailable = detection.cliAvailable;
     } catch {
       warn(`Specified OpenClaw path not found: ${openclawPath}`);
       return;
@@ -161,6 +298,8 @@ async function wireOpenClawPlugin(dataDir: string, openclawPath?: string): Promi
   } else {
     const detection = await detectOpenClaw();
     detected = detection.detected;
+    cliAvailable = detection.cliAvailable;
+    configPath = detection.configPath;
     if (detected) {
       say(`OpenClaw detected${detection.version ? ` (${detection.version})` : ""}`);
     }
@@ -169,6 +308,17 @@ async function wireOpenClawPlugin(dataDir: string, openclawPath?: string): Promi
   if (!detected) {
     warn("OpenClaw not detected. Skipping plugin wiring.");
     warn("Install OpenClaw to use AOF as a platform plugin.");
+    return;
+  }
+
+  // If CLI not in PATH, fall back to direct JSON config editing
+  if (!cliAvailable) {
+    warn("OpenClaw CLI not in PATH — using direct config file editing");
+    if (configPath) {
+      await wireOpenClawPluginDirect(dataDir, configPath);
+    } else {
+      warn("Cannot wire plugin: no config path and no CLI. Run 'aof setup' after OpenClaw is in PATH.");
+    }
     return;
   }
 
@@ -264,32 +414,7 @@ async function wireOpenClawPlugin(dataDir: string, openclawPath?: string): Promi
   }
 
   // Deploy skill files to ~/.openclaw/skills/aof/
-  try {
-    const skillTargetDir = join(homedir(), ".openclaw", "skills", "aof");
-    await rm(skillTargetDir, { recursive: true, force: true });
-    await mkdir(skillTargetDir, { recursive: true });
-
-    const skillFiles = [
-      { name: "SKILL.md", required: true },
-      { name: "SKILL-SEED.md", required: false },
-      { name: "skill.json", required: false },
-    ];
-
-    for (const { name, required } of skillFiles) {
-      const src = join(dataDir, "skills", "aof", name);
-      try {
-        await access(src);
-        await cp(src, join(skillTargetDir, name));
-        say(`Deployed ${name} to skills directory`);
-      } catch {
-        if (required) {
-          warn(`Required skill file not found: ${name}`);
-        }
-      }
-    }
-  } catch (e) {
-    warn(`Failed to deploy skill files: ${e instanceof Error ? e.message : String(e)}`);
-  }
+  await deploySkillFiles(dataDir);
 }
 
 // --- Main setup function ---

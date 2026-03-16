@@ -17,6 +17,8 @@ export interface OpenClawDetection {
   detected: boolean;
   configPath?: string;
   version?: string;
+  /** Whether the `openclaw` CLI binary is in PATH and usable for config commands. */
+  cliAvailable: boolean;
 }
 
 export interface MemoryPluginInfo {
@@ -94,20 +96,21 @@ export async function openclawConfigUnset(path: string): Promise<void> {
 
 /**
  * Detect whether OpenClaw is installed and the config file is present.
+ * Sets `cliAvailable` to indicate whether `openclaw config` commands will work.
  */
 export async function detectOpenClaw(homeDir = homedir()): Promise<OpenClawDetection> {
   const configPath = join(homeDir, ".openclaw", "openclaw.json");
   try {
     await access(configPath);
   } catch {
-    return { detected: false };
+    return { detected: false, cliAvailable: false };
   }
-  // Try to get version
+  // Try to get version — also proves the CLI binary is in PATH
   try {
     const { stdout } = await execFileAsync("openclaw", ["--version"], { timeout: 5_000 });
-    return { detected: true, configPath, version: stdout.trim() };
+    return { detected: true, configPath, version: stdout.trim(), cliAvailable: true };
   } catch {
-    return { detected: true, configPath };
+    return { detected: true, configPath, cliAvailable: false };
   }
 }
 
