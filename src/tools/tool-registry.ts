@@ -34,6 +34,12 @@ import {
 } from "./task-workflow-tools.js";
 import { aofStatusReport } from "./query-tools.js";
 import { aofContextLoad } from "./context-tools.js";
+import {
+  taskSubscribeInputSchema,
+  taskUnsubscribeInputSchema,
+  aofTaskSubscribe,
+  aofTaskUnsubscribe,
+} from "./subscription-tools.js";
 
 /**
  * A tool definition that pairs a Zod schema with a framework-agnostic handler.
@@ -124,5 +130,17 @@ export const toolRegistry: ToolRegistry = {
         skillsDir: (ctx as any)._skillsDir,
       });
     },
+  },
+
+  aof_task_subscribe: {
+    description: "Subscribe to task outcome notifications",
+    schema: taskSubscribeInputSchema,
+    handler: async (ctx, input) => aofTaskSubscribe(ctx, input),
+  },
+
+  aof_task_unsubscribe: {
+    description: "Cancel a task outcome subscription",
+    schema: taskUnsubscribeInputSchema,
+    handler: async (ctx, input) => aofTaskUnsubscribe(ctx, input),
   },
 };

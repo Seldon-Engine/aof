@@ -142,7 +142,7 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
       name,
       description: def.description,
       parameters: zodToJsonSchema(def.schema) as { type: string; properties?: Record<string, unknown>; required?: string[] },
-      execute: withPermissions(def.handler, resolveProjectStore, getStoreForActor, logger),
+      execute: withPermissions(def.handler, resolveProjectStore, getStoreForActor, logger, opts.orgChartPath),
     });
   }
 

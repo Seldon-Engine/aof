@@ -19,9 +19,8 @@ import {
   handleAofTaskDepRemove,
   handleAofProjectCreate,
   handleAofProjectList,
-  handleAofTaskSubscribe,
-  handleAofTaskUnsubscribe,
 } from "../tools.js";
+import { aofTaskSubscribe, aofTaskUnsubscribe } from "../../tools/subscription-tools.js";
 import { buildBoard } from "../resources.js";
 
 const ORG_CHART = `schemaVersion: 1
@@ -400,7 +399,7 @@ describe("mcp tools", () => {
     });
     await store.transition(task.frontmatter.id, "ready");
 
-    const result = await handleAofTaskSubscribe(ctx, {
+    const result = await aofTaskSubscribe({ store: ctx.store, logger: ctx.logger, orgChartPath: ctx.orgChartPath }, {
       taskId: task.frontmatter.id,
       subscriberId: "swe-qa",
       granularity: "completion",
@@ -422,7 +421,7 @@ describe("mcp tools", () => {
     });
 
     await expect(
-      handleAofTaskSubscribe(ctx, {
+      aofTaskSubscribe({ store: ctx.store, logger: ctx.logger, orgChartPath: ctx.orgChartPath }, {
         taskId: "non-existent-task-id",
         subscriberId: "swe-backend",
         granularity: "completion",
@@ -445,13 +444,13 @@ describe("mcp tools", () => {
     });
     await store.transition(task.frontmatter.id, "ready");
 
-    const first = await handleAofTaskSubscribe(ctx, {
+    const first = await aofTaskSubscribe({ store: ctx.store, logger: ctx.logger, orgChartPath: ctx.orgChartPath }, {
       taskId: task.frontmatter.id,
       subscriberId: "swe-qa",
       granularity: "completion",
     });
 
-    const second = await handleAofTaskSubscribe(ctx, {
+    const second = await aofTaskSubscribe({ store: ctx.store, logger: ctx.logger, orgChartPath: ctx.orgChartPath }, {
       taskId: task.frontmatter.id,
       subscriberId: "swe-qa",
       granularity: "completion",
@@ -475,13 +474,13 @@ describe("mcp tools", () => {
     });
     await store.transition(task.frontmatter.id, "ready");
 
-    const sub = await handleAofTaskSubscribe(ctx, {
+    const sub = await aofTaskSubscribe({ store: ctx.store, logger: ctx.logger, orgChartPath: ctx.orgChartPath }, {
       taskId: task.frontmatter.id,
       subscriberId: "swe-qa",
       granularity: "all",
     });
 
-    const result = await handleAofTaskUnsubscribe(ctx, {
+    const result = await aofTaskUnsubscribe({ store: ctx.store, logger: ctx.logger, orgChartPath: ctx.orgChartPath }, {
       taskId: task.frontmatter.id,
       subscriptionId: sub.subscriptionId,
     });
@@ -506,7 +505,7 @@ describe("mcp tools", () => {
     await store.transition(task.frontmatter.id, "ready");
 
     await expect(
-      handleAofTaskUnsubscribe(ctx, {
+      aofTaskUnsubscribe({ store: ctx.store, logger: ctx.logger, orgChartPath: ctx.orgChartPath }, {
         taskId: task.frontmatter.id,
         subscriptionId: "non-existent-sub-id",
       }),
@@ -521,7 +520,7 @@ describe("mcp tools", () => {
     });
 
     await expect(
-      handleAofTaskUnsubscribe(ctx, {
+      aofTaskUnsubscribe({ store: ctx.store, logger: ctx.logger, orgChartPath: ctx.orgChartPath }, {
         taskId: "non-existent-task-id",
         subscriptionId: "some-sub-id",
       }),
@@ -639,7 +638,7 @@ describe("mcp tools", () => {
     });
     await store.transition(task.frontmatter.id, "ready");
 
-    const result = await handleAofTaskSubscribe(ctx, {
+    const result = await aofTaskSubscribe({ store: ctx.store, logger: ctx.logger, orgChartPath: ctx.orgChartPath }, {
       taskId: task.frontmatter.id,
       subscriberId: "swe-backend",
       granularity: "completion",
@@ -665,7 +664,7 @@ describe("mcp tools", () => {
     await store.transition(task.frontmatter.id, "ready");
 
     await expect(
-      handleAofTaskSubscribe(ctx, {
+      aofTaskSubscribe({ store: ctx.store, logger: ctx.logger, orgChartPath: ctx.orgChartPath }, {
         taskId: task.frontmatter.id,
         subscriberId: "nonexistent-agent",
         granularity: "completion",
@@ -761,7 +760,7 @@ describe("mcp tools", () => {
 
     // "mcp" is NOT in the org chart fixture, so this should fail
     await expect(
-      handleAofTaskSubscribe(ctx, {
+      aofTaskSubscribe({ store: ctx.store, logger: ctx.logger, orgChartPath: ctx.orgChartPath }, {
         taskId: task.frontmatter.id,
         subscriberId: "mcp",
         granularity: "completion",

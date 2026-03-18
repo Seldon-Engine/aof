@@ -19,4 +19,6 @@ export interface ToolContext {
   logger: EventLogger;
   /** Project ID for scoping operations; auto-populated from the active task's project. */
   projectId?: string;
+  /** Path to the org chart file; used for subscriber validation in subscription tools. */
+  orgChartPath?: string;
 }

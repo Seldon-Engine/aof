@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { TaskStatus, TaskPriority } from "../schemas/task.js";
 import { compactResponse, type ToolResponseEnvelope } from "./envelope.js";
 import type { ToolContext } from "./types.js";
+import { createSubscriptionStore, validateSubscriberAgent } from "./subscription-tools.js";
 
 /**
  * Zod schema for aof_dispatch input (shared between MCP and OpenClaw).
@@ -24,6 +25,7 @@ export const dispatchSchema = z.object({
   tags: z.array(z.string()).optional(),
   actor: z.string().optional(),
   project: z.string().optional(),
+  subscribe: z.enum(["completion", "all"]).optional(),
 });
 
 /**
@@ -54,6 +56,8 @@ export interface AOFDispatchInput {
   tags?: string[];
   /** Identity of the agent or user creating the task; defaults to "unknown". */
   actor?: string;
+  /** Subscribe to task notifications at dispatch time. */
+  subscribe?: "completion" | "all";
 }
 
 /**
@@ -66,6 +70,8 @@ export interface AOFDispatchResult extends ToolResponseEnvelope {
   status: TaskStatus;
   /** Filesystem path where the task markdown file resides. */
   filePath: string;
+  /** Subscription ID if subscribe-at-dispatch was requested. */
+  subscriptionId?: string;
 }
 
 function normalizePriority(priority?: string): TaskPriority {
@@ -154,6 +160,22 @@ export async function aofDispatch(
     "task_dispatch"
   );
 
+  // Subscribe at dispatch time
+  let subscriptionId: string | undefined;
+  if (input.subscribe) {
+    const subscriberId = input.actor ?? "unknown";
+    await validateSubscriberAgent(ctx.orgChartPath, subscriberId);
+    const subscriptionStore = createSubscriptionStore(ctx.store);
+    const existing = await subscriptionStore.list(task.frontmatter.id, { status: "active" });
+    const duplicate = existing.find(s => s.subscriberId === subscriberId && s.granularity === input.subscribe);
+    if (duplicate) {
+      subscriptionId = duplicate.id;
+    } else {
+      const sub = await subscriptionStore.create(task.frontmatter.id, subscriberId, input.subscribe!);
+      subscriptionId = sub.id;
+    }
+  }
+
   // Build response envelope
   const summary = `Task ${readyTask.frontmatter.id} created and ready for assignment`;
   const envelope = compactResponse(summary, {
@@ -169,5 +191,6 @@ export async function aofDispatch(
     taskId: readyTask.frontmatter.id,
     status: readyTask.frontmatter.status,
     filePath,
+    ...(subscriptionId && { subscriptionId }),
   };
 }

@@ -30,6 +30,7 @@ export function withPermissions(
   resolveProjectStore: ResolveProjectStore,
   getStoreForActor: GetStoreForActor,
   logger: EventLogger,
+  orgChartPath?: string,
 ): (id: string, params: Record<string, unknown>) => Promise<ToolResult> {
   return async (_id: string, params: Record<string, unknown>): Promise<ToolResult> => {
     const actor = params.actor as string | undefined;
@@ -42,6 +43,7 @@ export function withPermissions(
       store: permissionStore,
       logger,
       projectId,
+      orgChartPath,
     };
 
     const result = await handler(ctx, params);

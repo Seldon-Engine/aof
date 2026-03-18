@@ -54,6 +54,8 @@ describe("OpenClaw adapter", () => {
       "aof_task_block",
       "aof_task_unblock",
       "aof_context_load",
+      "aof_task_subscribe",
+      "aof_task_unsubscribe",
       // Adapter-specific tools
       "aof_project_create",
       "aof_project_list",

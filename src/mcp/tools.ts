@@ -18,6 +18,7 @@ import { loadOrgChart } from "../org/loader.js";
 import { appendSection, formatTimestamp, normalizePriority, resolveTask, type AofMcpContext } from "./shared.js";
 import { WorkflowDefinition, validateDAG, type WorkflowDefinition as WorkflowDefinitionType } from "../schemas/workflow-dag.js";
 import { toolRegistry } from "../tools/tool-registry.js";
+import { createSubscriptionStore, validateSubscriberAgent } from "../tools/subscription-tools.js";
 
 // --- MCP-specific schemas (not in shared registry) ---
 
@@ -60,17 +61,6 @@ const boardInputSchema = z.object({
   priority: z.string().optional(),
 });
 
-const taskSubscribeInputSchema = z.object({
-  taskId: z.string(),
-  subscriberId: z.string().min(1),
-  granularity: z.enum(["completion", "all"]),
-});
-
-const taskUnsubscribeInputSchema = z.object({
-  taskId: z.string(),
-  subscriptionId: z.string(),
-});
-
 const projectCreateInputSchema = z.object({
   id: z.string(),
   title: z.string().optional(),
@@ -89,20 +79,6 @@ async function resolveOwnerTeam(ctx: AofMcpContext, input: z.infer<typeof mcpDis
   const chart = await loadOrgChart(ctx.orgChartPath).catch(() => null);
   if (!chart?.success || !chart.chart) return undefined;
   return chart.chart.agents.find(agent => agent.id === input.assignedAgent)?.team;
-}
-
-async function validateSubscriberId(orgChartPath: string, subscriberId: string): Promise<void> {
-  const result = await loadOrgChart(orgChartPath);
-  if (!result.success || !result.chart) {
-    throw new McpError(ErrorCode.InternalError, "Failed to load org chart for subscriber validation");
-  }
-  const agentExists = result.chart.agents.some(a => a.id === subscriberId);
-  if (!agentExists) {
-    throw new McpError(
-      ErrorCode.InvalidParams,
-      `subscriberId "${subscriberId}" not found in org chart. Available agents: ${result.chart.agents.map(a => a.id).join(", ")}`,
-    );
-  }
 }
 
 // --- MCP-specific handlers (complex behavior beyond base tools) ---
@@ -170,13 +146,14 @@ export async function handleAofDispatch(ctx: AofMcpContext, input: z.infer<typeo
   let subscriptionId: string | undefined;
   if (input.subscribe) {
     const subscriberId = input.actor ?? "mcp";
-    await validateSubscriberId(ctx.orgChartPath, subscriberId);
-    const existing = await ctx.subscriptionStore.list(task.frontmatter.id, { status: "active" });
+    await validateSubscriberAgent(ctx.orgChartPath, subscriberId);
+    const subscriptionStore = createSubscriptionStore(ctx.store);
+    const existing = await subscriptionStore.list(task.frontmatter.id, { status: "active" });
     const duplicate = existing.find(s => s.subscriberId === subscriberId && s.granularity === input.subscribe);
     if (duplicate) {
       subscriptionId = duplicate.id;
     } else {
-      const sub = await ctx.subscriptionStore.create(task.frontmatter.id, subscriberId, input.subscribe);
+      const sub = await subscriptionStore.create(task.frontmatter.id, subscriberId, input.subscribe);
       subscriptionId = sub.id;
     }
   }
@@ -322,28 +299,6 @@ export async function handleAofTaskDepRemove(ctx: AofMcpContext, input: Record<s
   return { success: true, taskId: result.taskId, blockerId: result.blockerId, dependsOn: result.dependsOn };
 }
 
-export async function handleAofTaskSubscribe(ctx: AofMcpContext, input: z.infer<typeof taskSubscribeInputSchema>) {
-  const task = await resolveTask(ctx.store, input.taskId);
-  await validateSubscriberId(ctx.orgChartPath, input.subscriberId);
-  const existing = await ctx.subscriptionStore.list(task.frontmatter.id, { status: "active" });
-  const duplicate = existing.find(s => s.subscriberId === input.subscriberId && s.granularity === input.granularity);
-  if (duplicate) {
-    return { subscriptionId: duplicate.id, taskId: task.frontmatter.id, granularity: duplicate.granularity, status: duplicate.status, taskStatus: task.frontmatter.status, createdAt: duplicate.createdAt };
-  }
-  const sub = await ctx.subscriptionStore.create(task.frontmatter.id, input.subscriberId, input.granularity);
-  return { subscriptionId: sub.id, taskId: task.frontmatter.id, granularity: sub.granularity, status: sub.status, taskStatus: task.frontmatter.status, createdAt: sub.createdAt };
-}
-
-export async function handleAofTaskUnsubscribe(ctx: AofMcpContext, input: z.infer<typeof taskUnsubscribeInputSchema>) {
-  const task = await resolveTask(ctx.store, input.taskId);
-  try {
-    const cancelled = await ctx.subscriptionStore.cancel(task.frontmatter.id, input.subscriptionId);
-    return { subscriptionId: cancelled.id, status: "cancelled" as const };
-  } catch {
-    throw new McpError(ErrorCode.InvalidParams, `Subscription not found: ${input.subscriptionId}`);
-  }
-}
-
 export async function handleAofProjectCreate(ctx: AofMcpContext, input: z.infer<typeof projectCreateInputSchema>) {
   const { createProject } = await import("../projects/create.js");
   const result = await createProject(input.id, { vaultRoot: ctx.vaultRoot, title: input.title, type: input.type, participants: input.participants, template: true });
@@ -364,7 +319,7 @@ const mcpContent = (data: unknown) => ({
 
 export function registerAofTools(server: McpServer, ctx: AofMcpContext, buildBoard: (team: string, status?: string, priority?: string) => Promise<unknown>) {
   // --- Shared tools from registry (loop registration) ---
-  const toolCtx = () => ({ store: ctx.store, logger: ctx.logger });
+  const toolCtx = () => ({ store: ctx.store, logger: ctx.logger, orgChartPath: ctx.orgChartPath });
 
   for (const [name, def] of Object.entries(toolRegistry)) {
     // Skip tools that have MCP-specific handlers below
@@ -408,18 +363,6 @@ export function registerAofTools(server: McpServer, ctx: AofMcpContext, buildBoa
     description: "Get kanban board view for a team",
     inputSchema: boardInputSchema,
   }, async (input) => mcpContent(await buildBoard(input.team ?? "swe", input.status, input.priority)));
-
-  // --- Subscription tools (MCP-specific, need subscriptionStore) ---
-
-  server.registerTool("aof_task_subscribe", {
-    description: "Subscribe to task outcome notifications",
-    inputSchema: taskSubscribeInputSchema,
-  }, async (input) => mcpContent(await handleAofTaskSubscribe(ctx, input)));
-
-  server.registerTool("aof_task_unsubscribe", {
-    description: "Cancel a task outcome subscription",
-    inputSchema: taskUnsubscribeInputSchema,
-  }, async (input) => mcpContent(await handleAofTaskUnsubscribe(ctx, input)));
 
   // --- Project tools (MCP-specific, need vaultRoot) ---
 
