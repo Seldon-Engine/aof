@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.10.2](https://github.com/d0labs/aof/compare/v1.10.1...v1.10.2) (2026-03-18)
+
+### Features
+
+* wire subscription tools into shared tool registry ([65c583c](https://github.com/d0labs/aof/commit/65c583c7583a8f6053ab87ba4cddeb667c166dde))
+
 ## [1.10.1](https://github.com/d0labs/aof/compare/v1.10.0...v1.10.1) (2026-03-16)
 
 ### Bug Fixes
