@@ -47,10 +47,44 @@ npm run docs:generate # Regenerate CLI docs (pre-commit hook enforces)
 
 ## Release Process
 
-- GitHub-only releases (NOT on npm). Never reference npm publishing.
-- `npm run release:patch` / `release:minor` / `release:major`
-- release-it handles: version bump, changelog, git tag, GitHub release
-- Tarball layout: `~/.aof/dist/` contains compiled code, `~/.aof/package.json` at root
+AOF is **GitHub-only** (never published to npm). Do not reference npm publishing.
+
+### How to release
+
+```bash
+# Pick one:
+npm run release:patch    # bug fixes
+npm run release:minor    # new features
+npm run release:major    # breaking changes
+
+# For non-interactive (CI-style) release:
+GITHUB_TOKEN=$(gh auth token) release-it patch --ci
+```
+
+**NEVER pass `--no-npm`** — this skips the `package.json` version bump, not just npm publish.
+The config already has `"npm": { "publish": false }` which disables publishing while keeping the bump.
+
+### What release-it does automatically
+1. Runs `typecheck` and `test` (before:init hooks)
+2. Bumps version in `package.json` and `package-lock.json`
+3. Stamps version into `openclaw.plugin.json` (after:bump hook)
+4. Generates CHANGELOG.md entry
+5. Commits, tags, pushes
+6. Creates GitHub release
+
+### What CI does on tag push (`.github/workflows/release.yml`)
+7. Builds the release tarball via `scripts/build-tarball.mjs` (includes version coherence check)
+8. Uploads tarball as GitHub release asset
+
+### Upgrading local deployment after release
+
+```bash
+# Plugin path (OpenClaw gateway):
+npm run deploy:plugin
+
+# Standalone path (~/.aof):
+sh scripts/install.sh --version <X.Y.Z>
+```
 
 ## Architecture Notes
 
