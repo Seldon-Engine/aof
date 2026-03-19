@@ -44,7 +44,8 @@
     ],
     "after:bump": [
       "node scripts/stamp-version.mjs",
-      "git add openclaw.plugin.json"
+      "git add openclaw.plugin.json",
+      "git add package-lock.json"
     ]
   }
 }

@@ -8,6 +8,27 @@ if (!version) {
   process.exit(1);
 }
 
+// --- Version coherence check ---
+// Ensure package.json and openclaw.plugin.json agree with the requested version.
+// This catches cases where the version bump was skipped (e.g. release-it --no-npm).
+const tagVersion = version.replace(/^v/, '');
+const pkgRoot = JSON.parse(readFileSync('package.json', 'utf8'));
+const pluginRoot = JSON.parse(readFileSync('openclaw.plugin.json', 'utf8'));
+
+const mismatches = [];
+if (pkgRoot.version !== tagVersion) {
+  mismatches.push(`package.json has "${pkgRoot.version}", expected "${tagVersion}"`);
+}
+if (pluginRoot.version !== tagVersion) {
+  mismatches.push(`openclaw.plugin.json has "${pluginRoot.version}", expected "${tagVersion}"`);
+}
+if (mismatches.length > 0) {
+  console.error(`Version mismatch — tarball version ${tagVersion} does not match source files:`);
+  for (const m of mismatches) console.error(`  - ${m}`);
+  console.error('Ensure the release process bumps all version files before building the tarball.');
+  process.exit(1);
+}
+
 const staging = '.release-staging';
 mkdirSync(staging, { recursive: true });
 
