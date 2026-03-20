@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.3](https://github.com/d0labs/aof/compare/v1.10.2...v1.10.3) (2026-03-20)
+
+### Bug Fixes
+
+* add version coherence checks to release pipeline ([26bfba6](https://github.com/d0labs/aof/commit/26bfba6522f298a2c72e5b1207b4a175b79d968d))
+* **deploy:** rewrite manifest main field for flattened layout ([ccf021b](https://github.com/d0labs/aof/commit/ccf021bf3c2d467de3592a3165cfb525486d770a))
+
 ## [1.10.2](https://github.com/d0labs/aof/compare/v1.10.1...v1.10.2) (2026-03-18)
 
 ### Features
