@@ -26,8 +26,16 @@ if [[ ! -f "${EXT_DIR}/plugin.js" ]]; then
   exit 1
 fi
 
-echo "[deploy-plugin] Copying manifest..."
-cp "${ROOT_DIR}/openclaw.plugin.json" "${EXT_DIR}/openclaw.plugin.json"
+echo "[deploy-plugin] Copying manifest (rewriting main for flattened layout)..."
+node - "${ROOT_DIR}" "${EXT_DIR}" <<'MANIFEST'
+const fs = require("fs");
+const path = require("path");
+const root = process.argv[2];
+const ext = process.argv[3];
+const manifest = JSON.parse(fs.readFileSync(path.join(root, "openclaw.plugin.json"), "utf8"));
+manifest.main = "plugin.js";
+fs.writeFileSync(path.join(ext, "openclaw.plugin.json"), JSON.stringify(manifest, null, 2) + "\n");
+MANIFEST
 
 TMP_PKG="$(mktemp)"
 node - "${ROOT_DIR}" "${TMP_PKG}" <<'NODE'
