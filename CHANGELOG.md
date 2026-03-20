@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.10.4](https://github.com/d0labs/aof/compare/v1.10.3...v1.10.4) (2026-03-20)
+
+### Bug Fixes
+
+* prevent AOF plugin wiring failures on fresh install/update ([598557a](https://github.com/d0labs/aof/commit/598557ad3f067017b44ab956b61622994215d059))
+
 ## [1.10.3](https://github.com/d0labs/aof/compare/v1.10.2...v1.10.3) (2026-03-20)
 
 ### Bug Fixes
