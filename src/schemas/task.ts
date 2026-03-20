@@ -141,7 +141,7 @@ export const TaskFrontmatter = z.preprocess((input) => {
   priority: TaskPriority.default("normal"),
   routing: TaskRouting.default({}),
   sla: TaskSLA.optional().describe("SLA configuration (time limits and violation policy)"),
-  lease: TaskLease.optional().describe("Present when status is assigned/in-progress"),
+  lease: TaskLease.nullable().optional().transform(v => v ?? undefined).describe("Present when status is assigned/in-progress"),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   lastTransitionAt: z.string().datetime().describe("Last status change timestamp"),

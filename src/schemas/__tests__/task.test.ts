@@ -108,4 +108,35 @@ describe("TaskFrontmatter", () => {
     expect(result.dependsOn).toEqual([]);
     expect(result.metadata).toEqual({});
   });
+
+  it("accepts lease: null and normalizes to undefined", () => {
+    const result = TaskFrontmatter.safeParse({ ...validTask, lease: null });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.lease).toBeUndefined();
+    }
+  });
+
+  it("accepts omitted lease (undefined)", () => {
+    const result = TaskFrontmatter.safeParse(validTask);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.lease).toBeUndefined();
+    }
+  });
+
+  it("accepts a valid lease object", () => {
+    const result = TaskFrontmatter.safeParse({
+      ...validTask,
+      lease: {
+        agent: "main",
+        acquiredAt: "2026-02-06T19:00:00Z",
+        expiresAt: "2026-02-06T19:10:00Z",
+      },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.lease?.agent).toBe("main");
+    }
+  });
 });

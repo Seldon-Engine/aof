@@ -7,7 +7,7 @@
 
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { existsSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { execSync } from "node:child_process";
 
 // ---------------------------------------------------------------------------
@@ -76,6 +76,29 @@ export function getServiceFilePath(platform: NodeJS.Platform): string {
 }
 
 // ---------------------------------------------------------------------------
+// Gateway detection helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Read the OpenClaw gateway port from openclaw.json synchronously.
+ * Returns the port number if found, undefined otherwise.
+ */
+function detectOpenClawGatewayPort(stateDir?: string): number | undefined {
+  try {
+    const dir = stateDir?.replace(/^~/, homedir()) ?? join(homedir(), ".openclaw");
+    const raw = readFileSync(join(dir, "openclaw.json"), "utf-8");
+    const parsed = JSON.parse(raw);
+    const port = parsed?.gateway?.port;
+    if (port != null && Number.isFinite(Number(port))) {
+      return Number(port);
+    }
+  } catch {
+    // Config file missing or unreadable — fall through
+  }
+  return undefined;
+}
+
+// ---------------------------------------------------------------------------
 // Generators
 // ---------------------------------------------------------------------------
 
@@ -90,8 +113,10 @@ export function generateLaunchdPlist(config: ServiceFileConfig): string {
 
   const args = [node, daemon, "--root", dataDir, ...(config.extraArgs ?? [])];
 
+  const detectedPort = detectOpenClawGatewayPort();
   const envEntries: Record<string, string> = {
     AOF_ROOT: dataDir,
+    ...(detectedPort != null ? { OPENCLAW_GATEWAY_URL: `http://localhost:${detectedPort}` } : {}),
     ...config.extraEnv,
   };
 
@@ -151,7 +176,11 @@ export function generateSystemdUnit(config: ServiceFileConfig): string {
 
   const extraArgs = config.extraArgs?.length ? " " + config.extraArgs.join(" ") : "";
 
+  const detectedPort = detectOpenClawGatewayPort();
   const envLines: string[] = [`Environment=AOF_ROOT=${dataDir}`];
+  if (detectedPort != null) {
+    envLines.push(`Environment=OPENCLAW_GATEWAY_URL=http://localhost:${detectedPort}`);
+  }
   if (config.extraEnv) {
     for (const [k, v] of Object.entries(config.extraEnv)) {
       envLines.push(`Environment=${k}=${v}`);

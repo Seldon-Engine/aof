@@ -322,7 +322,27 @@ async function wireOpenClawPlugin(dataDir: string, openclawPath?: string): Promi
     return;
   }
 
-  // Register AOF plugin
+  // Set plugin load paths first — the allow-list validator needs the load path
+  // to exist before registerAofPlugin() adds "aof" to plugins.allow
+  try {
+    const existingPaths = (await openclawConfigGet("plugins.load.paths")) as string[] | undefined;
+    const paths = Array.isArray(existingPaths) ? [...existingPaths] : [];
+
+    // Remove old AOF paths and add current dataDir
+    const filtered = paths.filter((p) => {
+      if (p === dataDir) return true;
+      return !(p.endsWith("/.aof") || p.endsWith("/aof"));
+    });
+    if (!filtered.includes(dataDir)) {
+      filtered.push(dataDir);
+    }
+    await openclawConfigSet("plugins.load.paths", filtered);
+    say("Plugin load paths updated");
+  } catch (e) {
+    warn(`Failed to update plugin load paths: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  // Register AOF plugin (entries + allow list)
   try {
     const alreadyRegistered = await isAofPluginRegistered();
     await registerAofPlugin();
@@ -343,25 +363,6 @@ async function wireOpenClawPlugin(dataDir: string, openclawPath?: string): Promi
     }
   } catch (e) {
     warn(`Failed to configure memory plugin: ${e instanceof Error ? e.message : String(e)}`);
-  }
-
-  // Set plugin load paths to include dataDir
-  try {
-    const existingPaths = (await openclawConfigGet("plugins.load.paths")) as string[] | undefined;
-    const paths = Array.isArray(existingPaths) ? [...existingPaths] : [];
-
-    // Remove old AOF paths and add current dataDir
-    const filtered = paths.filter((p) => {
-      if (p === dataDir) return true;
-      return !(p.endsWith("/.aof") || p.endsWith("/aof"));
-    });
-    if (!filtered.includes(dataDir)) {
-      filtered.push(dataDir);
-    }
-    await openclawConfigSet("plugins.load.paths", filtered);
-    say("Plugin load paths updated");
-  } catch (e) {
-    warn(`Failed to update plugin load paths: ${e instanceof Error ? e.message : String(e)}`);
   }
 
   // Set dataDir in plugin config

@@ -5,6 +5,9 @@
  * runs outside of the OpenClaw process (e.g. after shell installer setup).
  */
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import type {
   GatewayAdapter,
   TaskContext,
@@ -29,11 +32,35 @@ export class StandaloneAdapter implements GatewayAdapter {
 
   constructor(opts: StandaloneAdapterOptions = {}) {
     const cfg = getConfig();
-    this.gatewayUrl =
+    let url =
       opts.gatewayUrl ??
       cfg.openclaw.gatewayUrl;
+    // If the URL is still the hardcoded default, try to detect the real port
+    if (url === "http://localhost:3000") {
+      url = this.detectGatewayUrl(cfg.openclaw.stateDir) ?? url;
+    }
+    this.gatewayUrl = url;
     this.gatewayToken =
       opts.gatewayToken ?? cfg.openclaw.gatewayToken;
+  }
+
+  /**
+   * Read the actual gateway port from the OpenClaw config file.
+   * Returns `http://localhost:${port}` if found, undefined otherwise.
+   */
+  private detectGatewayUrl(stateDir?: string): string | undefined {
+    try {
+      const dir = stateDir?.replace(/^~/, homedir()) ?? join(homedir(), ".openclaw");
+      const raw = readFileSync(join(dir, "openclaw.json"), "utf-8");
+      const parsed = JSON.parse(raw);
+      const port = parsed?.gateway?.port;
+      if (port != null && Number.isFinite(Number(port))) {
+        return `http://localhost:${port}`;
+      }
+    } catch {
+      // Config file missing or unreadable — fall through
+    }
+    return undefined;
   }
 
   private headers(): Record<string, string> {
