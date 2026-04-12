@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.11.0](https://github.com/d0labs/aof/compare/v1.10.4...v1.11.0) (2026-04-12)
+
+### Features
+
+* unified deploy, scheduler self-start, team routing, model override ([a7329c4](https://github.com/d0labs/aof/commit/a7329c4eb4f4aa2665c68d37b1a635fe706340d6))
+
 ## [1.10.4](https://github.com/d0labs/aof/compare/v1.10.3...v1.10.4) (2026-03-20)
 
 ### Bug Fixes
