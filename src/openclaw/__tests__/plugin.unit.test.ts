@@ -105,7 +105,15 @@ describe("AOF OpenClaw plugin entrypoint", () => {
     expect(registry.toolOptionals).toEqual([false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false]);
     expect(registry.httpRoutes).toEqual(["/aof/metrics", "/aof/status"]);
     expect(registry.events).toEqual(
-      expect.arrayContaining(["session_end", "before_compaction", "agent_end", "message_received"]),
+      expect.arrayContaining([
+        "session_end",
+        "before_compaction",
+        "agent_end",
+        "message_received",
+        "message_sent",
+        "before_tool_call",
+        "after_tool_call",
+      ]),
     );
   });
 

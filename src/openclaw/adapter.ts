@@ -11,6 +11,9 @@ import { NotificationPolicyEngine, DEFAULT_RULES } from "../events/notification-
 import { ConsoleNotifier } from "../adapters/console-notifier.js";
 import { MatrixNotifier } from "./matrix-notifier.js";
 import { OpenClawAdapter } from "./openclaw-executor.js";
+import { OpenClawToolInvocationContextStore } from "./tool-invocation-context.js";
+import { OpenClawTaskRecipientNotifier } from "./task-recipient-notifier.js";
+import { mergeNotificationRecipient } from "./notification-recipient.js";
 import { MockAdapter } from "../dispatch/executor.js";
 import type { GatewayAdapter } from "../dispatch/executor.js";
 import { loadOrgChart } from "../org/loader.js";
@@ -67,6 +70,7 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
   const store = opts.store ?? new FilesystemTaskStore(opts.dataDir);
   const logger = opts.logger ?? new EventLogger(join(opts.dataDir, "events"));
   const metrics = opts.metrics ?? new AOFMetrics();
+  const invocationContextStore = new OpenClawToolInvocationContextStore();
 
   // Load org chart for permission enforcement
   let orgChartPromise: Promise<OrgChart | undefined> | undefined;
@@ -112,7 +116,29 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
     : new ConsoleNotifier();
   const engine = new NotificationPolicyEngine(notifAdapter, DEFAULT_RULES);
 
-  // Create executor for agent dispatch
+  const resolveStoreForTask = async (taskId: string): Promise<ITaskStore | undefined> => {
+    const candidates = new Set<ITaskStore>([
+      store,
+      ...(opts.projectStores?.values() ?? []),
+    ]);
+
+    for (const candidate of candidates) {
+      if (await candidate.get(taskId)) {
+        return candidate;
+      }
+    }
+
+    return undefined;
+  };
+
+  if (opts.messageTool) {
+    const recipientNotifier = new OpenClawTaskRecipientNotifier(resolveStoreForTask, opts.messageTool);
+    logger.addOnEvent((event) => recipientNotifier.handleEvent(event));
+  } else {
+    logger.addOnEvent((event) => engine.handleEvent(event));
+  }
+
+  // Create executor for agent dispatch (only when explicitly not in dry-run mode)
   const executor = opts.dryRun === false
     ? resolveAdapter(api, store)
     : undefined;
@@ -129,6 +155,25 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
         maxConcurrentDispatches: opts.maxConcurrentDispatches,
       },
     );
+
+  const mergeDispatchNotificationRecipient = (params: Record<string, unknown>, toolCallId: string) => {
+    if (params.notifyOnCompletion === false) {
+      return params;
+    }
+
+    const recipient = invocationContextStore.consumeToolCall(toolCallId);
+    if (!recipient) {
+      return params;
+    }
+
+    return {
+      ...params,
+      metadata: mergeNotificationRecipient(
+        params.metadata as Record<string, unknown> | undefined,
+        recipient,
+      ),
+    };
+  };
 
   // --- Service ---
   api.registerService({
@@ -151,18 +196,42 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
   }
 
   // --- Event hooks ---
-  api.on("session_end", () => { void service.handleSessionEnd(); });
-  api.on("before_compaction", () => { void service.handleSessionEnd(); });
-  api.on("agent_end", (event) => { void service.handleAgentEnd(event); });
-  api.on("message_received", (event) => { void service.handleMessageReceived(event); });
+  api.on("session_end", () => {
+    void service.handleSessionEnd();
+  });
+  api.on("before_compaction", () => {
+    void service.handleSessionEnd();
+  });
+  api.on("agent_end", (event) => {
+    void service.handleAgentEnd(event);
+  });
+  api.on("message_received", (event) => {
+    invocationContextStore.captureMessageRoute(event);
+    void service.handleMessageReceived(event);
+  });
+  api.on("message_sent", (event) => {
+    invocationContextStore.captureMessageRoute(event);
+  });
+  api.on("before_tool_call", (event) => {
+    invocationContextStore.captureToolCall(event);
+  });
+  api.on("after_tool_call", (event) => {
+    invocationContextStore.clearToolCall(event);
+  });
 
   // --- Tools: shared registry loop (eliminates copy-pasted execute blocks) ---
   for (const [name, def] of Object.entries(toolRegistry)) {
+    const execute = withPermissions(def.handler, resolveProjectStore, getStoreForActor, logger, opts.orgChartPath);
     api.registerTool({
       name,
       description: def.description,
       parameters: zodToJsonSchema(def.schema) as { type: string; properties?: Record<string, unknown>; required?: string[] },
-      execute: withPermissions(def.handler, resolveProjectStore, getStoreForActor, logger, opts.orgChartPath),
+      execute: async (id, params) => {
+        const effectiveParams = name === "aof_dispatch"
+          ? mergeDispatchNotificationRecipient(params, id)
+          : params;
+        return execute(id, effectiveParams);
+      },
     });
   }
 

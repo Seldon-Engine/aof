@@ -101,6 +101,7 @@ describe("OpenClawAdapter (embedded agent)", () => {
     const params = mockRunEmbeddedPiAgent.mock.calls[0][0];
     expect(params).toMatchObject({
       sessionId: "test-uuid-1234",
+      sessionKey: "agent:swe-backend:subagent:test-uuid-1234",
       runId: "test-uuid-1234",
       agentId: "swe-backend",
       prompt: expect.stringContaining("TASK-001"),

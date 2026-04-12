@@ -98,6 +98,7 @@ export class OpenClawAdapter implements GatewayAdapter {
 
     const agentId = this.normalizeAgentId(context.agent);
     const sessionId = randomUUID();
+    const sessionKey = `agent:${agentId}:subagent:${sessionId}`;
     const runId = sessionId;
     // The scheduler's spawnTimeoutMs (default 30s) was designed for fast HTTP
     // dispatch. For embedded agents, we need the full execution budget.
@@ -124,6 +125,7 @@ export class OpenClawAdapter implements GatewayAdapter {
       void this.runAgentBackground(ext, {
         ...(modelOverride && { model: modelOverride }),
         sessionId,
+        sessionKey,
         sessionFile,
         workspaceDir,
         agentDir,
@@ -204,6 +206,7 @@ export class OpenClawAdapter implements GatewayAdapter {
     ext: ExtensionApi,
     params: {
       sessionId: string;
+      sessionKey: string;
       sessionFile: string;
       workspaceDir: string;
       agentDir: string;
@@ -224,6 +227,7 @@ export class OpenClawAdapter implements GatewayAdapter {
       // Race agent execution against a hard timeout
       const agentPromise = ext.runEmbeddedPiAgent({
         sessionId: params.sessionId,
+        sessionKey: params.sessionKey,
         sessionFile: params.sessionFile,
         workspaceDir: params.workspaceDir,
         agentDir: params.agentDir,

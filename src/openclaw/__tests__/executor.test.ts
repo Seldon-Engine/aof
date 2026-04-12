@@ -63,6 +63,7 @@ describe("OpenClawAdapter", () => {
     expect(mockRunEmbeddedPiAgent).toHaveBeenCalledWith(
       expect.objectContaining({
         agentId: "swe-backend",
+        sessionKey: expect.stringMatching(/^agent:swe-backend:subagent:/),
         prompt: expect.stringContaining("TASK-001"),
       }),
     );

@@ -17,7 +17,7 @@ export interface EventLoggerOptions {
 
 export class EventLogger {
   private readonly eventsDir: string;
-  private readonly onEvent?: EventCallback;
+  private readonly onEvents: EventCallback[] = [];
   private eventCounter: number = 0;
   private _lastEventAt: number = 0;
 
@@ -28,7 +28,14 @@ export class EventLogger {
 
   constructor(eventsDir: string, options?: EventLoggerOptions) {
     this.eventsDir = eventsDir;
-    this.onEvent = options?.onEvent;
+    if (options?.onEvent) {
+      this.onEvents.push(options.onEvent);
+    }
+  }
+
+  /** Register an additional event callback. */
+  addOnEvent(callback: EventCallback): void {
+    this.onEvents.push(callback);
   }
 
   /** Append an event to today's JSONL file. */
@@ -62,8 +69,8 @@ export class EventLogger {
     // Maintain symlink to current log (BUG-005 fix)
     await this.updateSymlink(date);
 
-    if (this.onEvent) {
-      await Promise.resolve(this.onEvent(event));
+    for (const callback of this.onEvents) {
+      await Promise.resolve(callback(event));
     }
 
     return event;
