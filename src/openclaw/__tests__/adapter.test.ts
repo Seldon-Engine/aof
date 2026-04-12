@@ -23,7 +23,7 @@ describe("OpenClaw adapter", () => {
     };
 
     const service = {
-      start: vi.fn(),
+      start: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn(),
       getStatus: vi.fn(() => ({ running: false })),
       handleSessionEnd: vi.fn(),

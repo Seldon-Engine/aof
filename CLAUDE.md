@@ -1,94 +1,45 @@
 # AOF — Project Instructions
 
-## Serena MCP (MANDATORY)
+## Context
+Deterministic orchestration for multi-agent systems. No LLMs in the control plane. Tasks are Markdown+YAML frontmatter files in `tasks/<status>/`, physically moved on transitions. Two entry points converge on one core: plugin mode (`src/plugin.ts` → OpenClawAdapter, in-process) and standalone mode (`src/daemon/` → StandaloneAdapter, HTTP). Both feed `AOFService` → `poll()` → dispatch pipeline. These paths never cross.
+**Stack**: TypeScript ESM, Node >=22, Zod, Pino, better-sqlite3, hnswlib-node, Commander.js, Vitest.
+**Tests**: ~3,017 unit (10s), 224 E2E (sequential, single fork, 60s). `createTestHarness()` for integration, `createMockStore()`/`createMockLogger()` for unit. Regression tests: `bug-NNN-description.test.ts`.
+See `CODE_MAP.md` for full architecture, module layering, and subsystem details.
 
-**Always use Serena's symbolic tools as the primary code navigation and editing approach.** The Serena MCP server is configured for this project and has rich memories about AOF architecture.
+## Engineering Standards
+- **TDD**: Failing test first. Tests describe behavior, not implementation details. Integration tests over scattered unit tests.
+- **TBD**: Small, atomic commits to main. No long-lived branches. Feature flags over feature branches when gating.
+- **Root causes over bandaids, always.** No side effects. No workarounds that paper over the issue.
+- **When you make a mistake that gets corrected** → document it in `lessons.md`.
 
-### Required Workflow
-1. **Before reading any source file**, use `get_symbols_overview` to see its structure
-2. **To read a specific function/class**, use `find_symbol` with `include_body=true` — do NOT read the entire file
-3. **To find callers/references**, use `find_referencing_symbols` — do NOT grep for function names
-4. **To edit a function**, use `replace_symbol_body` — do NOT use string-match Edit on large blocks
-5. **To add code**, use `insert_after_symbol` or `insert_before_symbol`
-6. **Check Serena memories** (`read_memory`) before investigating unfamiliar areas — project context is stored there
+## Conventions
+- **Config**: `getConfig()` from `src/config/registry.ts`. No `process.env` elsewhere (exception: `AOF_CALLBACK_DEPTH` cross-process).
+- **Logging**: `createLogger('component')`. No `console.*` in core modules (CLI output OK).
+- **Store**: `ITaskStore` methods only. Never `serializeTask` + `writeFileAtomic` directly.
+- **Schemas**: Zod source of truth. `const Foo = z.object({...})` + `type Foo = z.infer<typeof Foo>`.
+- **Tools**: Register in `src/tools/tool-registry.ts`. Both adapters consume the shared registry.
+- **No circular deps**: Shared types → `types.ts` leaf files. Verify: `npx madge --circular --extensions ts src/`.
+- **Naming**: PascalCase types, camelCase functions, `I` prefix for store interfaces. `.js` in import paths.
+- **Barrels**: `index.ts` = pure re-exports only. No logic.
 
-### When NOT to use Serena
-- Non-code files (JSON, YAML, Markdown, config)
-- Raw text pattern searches across many files (Grep is fine)
-- File existence checks (Glob is fine)
-- Shell commands and builds (Bash is fine)
+## Feature Anatomy
+Schema (`src/schemas/`) → store (if task-related) → logic (`src/dispatch/` or domain module) → tool handler (`src/tools/*-tools.ts`) → registry (`tool-registry.ts`) → tests (colocated `__tests__/`). CLI command optional. Tools needing adapter-specific behavior get overrides in `mcp/tools.ts` or `openclaw/adapter.ts`.
 
-### Keeping Serena Knowledge Current
-After any session that modifies AOF structure (new files, moved modules, changed interfaces, new conventions):
-1. `list_memories` → check which might be stale
-2. `read_memory` → verify content matches current code
-3. `write_memory` → update any stale memories
-4. Key memories: `project_overview`, `style_conventions`, `v1.10-architecture-changes`
+## Fragile — Tread Carefully
+- **Plugin/standalone executor wiring** (`plugin.ts`, `openclaw/adapter.ts`, `daemon/daemon.ts`): Two separate code paths. Changes risk breaking one mode while testing the other.
+- **MCP tool skip-list** (`mcp/tools.ts:326`): Hardcoded 5-name array. Must update manually when adding MCP-specific overrides.
+- **Dispatch chain** (`scheduler.ts` → `task-dispatcher.ts` → `action-executor.ts` → `assign-executor.ts`): Tightly coupled. Changes cascade.
+- **`AOF_CALLBACK_DEPTH`** env mutation (`dispatch/callback-delivery.ts`): Only exception to config-only env access. Don't add more.
 
-## Code Conventions
+## Serena MCP
+**Use Serena as primary code navigation.** `get_symbols_overview` before reading files, `find_symbol(include_body=true)` for code, `find_referencing_symbols` for callers, `replace_symbol_body` for edits. Check `read_memory` before investigating unfamiliar areas. After structural changes, update stale memories. Serena can't parse: `events/logger.ts`, `events/notifier.ts`, `views/kanban.ts`, `views/mailbox.ts`, `events/notification-policy/engine.ts` — use Read for those.
 
-- **Config**: Use `getConfig()` from `src/config/registry.ts`. Never read `process.env` directly outside `src/config/`.
-- **Logging**: Use `createLogger('component')` from `src/logging/index.ts`. Never use `console.*` in core modules (CLI output is OK).
-- **Store**: Always use `ITaskStore` methods. Never call `serializeTask` + `writeFileAtomic` directly.
-- **Schemas**: Zod is source of truth. Types are derived via `z.infer<>`.
-- **Tools**: Register handlers in `src/tools/tool-registry.ts`. MCP and OpenClaw adapters consume the shared registry.
-- **No circular deps**: Extract shared types to leaf files. Verify with `npx madge --circular src/`.
-- **Tests**: Use `createTestHarness()` for integration tests, `createMockStore()`/`createMockLogger()` for unit tests.
-
-## Build & Test
-
+## Build & Release
 ```bash
-npm run typecheck    # Type check (must pass before commit)
-npm test             # Unit tests (~3,017 tests)
-npm run test:e2e     # E2E tests (224 tests)
-npm run build        # Full build
-npm run docs:generate # Regenerate CLI docs (pre-commit hook enforces)
+npm run typecheck && npm test     # Must pass before commit
+npm run test:e2e                  # E2E suite
+npm run build                     # Full build
+npm run docs:generate             # Regen CLI docs (pre-commit hook enforces)
+npm run release:patch|minor|major # GitHub-only. NEVER pass --no-npm (skips version bump, not just publish).
+npm run deploy                    # Build + deploy to ~/.aof + symlink plugin
 ```
-
-## Release Process
-
-AOF is **GitHub-only** (never published to npm). Do not reference npm publishing.
-
-### How to release
-
-```bash
-# Pick one:
-npm run release:patch    # bug fixes
-npm run release:minor    # new features
-npm run release:major    # breaking changes
-
-# For non-interactive (CI-style) release:
-GITHUB_TOKEN=$(gh auth token) release-it patch --ci
-```
-
-**NEVER pass `--no-npm`** — this skips the `package.json` version bump, not just npm publish.
-The config already has `"npm": { "publish": false }` which disables publishing while keeping the bump.
-
-### What release-it does automatically
-1. Runs `typecheck` and `test` (before:init hooks)
-2. Bumps version in `package.json` and `package-lock.json`
-3. Stamps version into `openclaw.plugin.json` (after:bump hook)
-4. Generates CHANGELOG.md entry
-5. Commits, tags, pushes
-6. Creates GitHub release
-
-### What CI does on tag push (`.github/workflows/release.yml`)
-7. Builds the release tarball via `scripts/build-tarball.mjs` (includes version coherence check)
-8. Uploads tarball as GitHub release asset
-
-### Upgrading local deployment after release
-
-```bash
-# Plugin path (OpenClaw gateway):
-npm run deploy:plugin
-
-# Standalone path (~/.aof):
-sh scripts/install.sh --version <X.Y.Z>
-```
-
-## Architecture Notes
-
-- **Two execution modes**: Plugin mode (inside OpenClaw gateway via `src/plugin.ts`) and Standalone mode (CLI daemon via `src/daemon/`)
-- **Plugin mode** uses `OpenClawAdapter` (in-process agent dispatch)
-- **Standalone mode** uses `StandaloneAdapter` (HTTP dispatch to external gateway)
-- These paths never cross — see Serena memory `plugin-executor-path-analysis` for details

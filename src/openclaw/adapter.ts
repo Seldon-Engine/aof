@@ -42,6 +42,13 @@ export interface AOFPluginOptions {
 
 const SERVICE_NAME = "aof-scheduler";
 
+// Module-level singleton: the scheduler must run exactly once inside the gateway
+// process. AOF is loaded as a per-session memory plugin, so register() is called
+// on every agent session start — but startPluginServices (which calls service.start())
+// only runs once at gateway boot, before the memory plugin loads. Self-start on
+// first registration to ensure the scheduler actually runs.
+let schedulerService: AOFService | null = null;
+
 /**
  * Resolve the appropriate GatewayAdapter based on configuration.
  */
@@ -110,7 +117,8 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
     ? resolveAdapter(api, store)
     : undefined;
 
-  const service = opts.service
+  // Reuse the singleton if it exists (subsequent per-session loads), otherwise create.
+  const service = opts.service ?? schedulerService
     ?? new AOFService(
       { store, logger, metrics, engine, executor },
       {
@@ -129,6 +137,18 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
     stop: () => service.stop(),
     status: () => service.getStatus(),
   });
+
+  // Self-start: gateway's startPluginServices runs at boot before this memory
+  // plugin loads, so service.start() is never called via the service lifecycle.
+  // Start on first registration; subsequent per-session loads are no-ops
+  // (AOFService.start guards with `if (this.running) return`).
+  if (!schedulerService) {
+    schedulerService = service;
+    service.start().catch((err) => {
+      log.error({ err }, "AOF scheduler failed to self-start");
+      schedulerService = null;
+    });
+  }
 
   // --- Event hooks ---
   api.on("session_end", () => { void service.handleSessionEnd(); });

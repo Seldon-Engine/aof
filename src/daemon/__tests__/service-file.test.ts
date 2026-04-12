@@ -139,11 +139,11 @@ describe("generateSystemdUnit", () => {
     expect(unit).toContain("After=network.target");
   });
 
-  it("includes ExecStart with /usr/bin/env node, daemon binary, --root, and dataDir", () => {
+  it("includes ExecStart with node binary, daemon binary, --root, and dataDir", () => {
     const cfg = makeConfig({ dataDir: "/home/user/.aof" });
     const unit = generateSystemdUnit(cfg);
     expect(unit).toContain(
-      "ExecStart=/usr/bin/env node /usr/local/lib/node_modules/aof/dist/daemon/index.js --root /home/user/.aof",
+      "ExecStart=/usr/local/bin/node /usr/local/lib/node_modules/aof/dist/daemon/index.js --root /home/user/.aof",
     );
   });
 

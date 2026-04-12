@@ -28,6 +28,7 @@ interface ExtensionApi {
   resolveAgentDir: (cfg: Record<string, unknown>, agentId: string) => string;
   ensureAgentWorkspace: (params: { dir: string }) => Promise<{ dir: string }>;
   resolveSessionFilePath: (sessionId: string) => string;
+  resolveAgentEffectiveModelPrimary?: (cfg: Record<string, unknown>, agentId: string) => string | undefined;
 }
 
 /** Subset of the result type we actually use */
@@ -118,7 +119,10 @@ export class OpenClawAdapter implements GatewayAdapter {
       // isn't blocked by the spawnTimeoutMs (designed for fast HTTP dispatch).
       // The agent calls aof_task_complete when done; the scheduler's lease
       // expiry handles the failure case.
+      const modelOverride = ext.resolveAgentEffectiveModelPrimary?.(config, agentId);
+
       void this.runAgentBackground(ext, {
+        ...(modelOverride && { model: modelOverride }),
         sessionId,
         sessionFile,
         workspaceDir,

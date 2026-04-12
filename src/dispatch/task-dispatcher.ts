@@ -188,7 +188,22 @@ export async function buildDispatchActions(
       continue;
     }
     
-    const targetAgent = routing.agent ?? routing.role ?? routing.team;
+    // Resolve routing target to a concrete agent ID.
+    // If routing.agent or routing.team matches a team ID in the org chart,
+    // resolve to the team's lead/orchestrator so the gateway spawns a real agent.
+    let targetAgent = routing.agent ?? routing.role ?? routing.team;
+    if (targetAgent && orgChart?.chart?.teams) {
+      const matchedTeam = orgChart.chart.teams.find((t: { id: string }) => t.id === targetAgent);
+      if (matchedTeam) {
+        const resolved = (matchedTeam as { orchestrator?: string; lead?: string }).orchestrator
+          ?? (matchedTeam as { lead?: string }).lead;
+        if (resolved) {
+          log.info({ taskId: task.frontmatter.id, from: targetAgent, to: resolved, op: "team-resolve" },
+            "resolved team routing to lead");
+          targetAgent = resolved;
+        }
+      }
+    }
 
     // PROJ-03: Check project participant list before assigning
     const projectId = task.frontmatter.project;

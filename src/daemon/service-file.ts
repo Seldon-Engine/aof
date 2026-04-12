@@ -45,18 +45,31 @@ export const AOF_SERVICE_LABEL = "ai.openclaw.aof";
 
 /**
  * Resolve the path to the aof-daemon entry point.
- * Searches relative to this file (../../daemon/index.js in dist) first,
- * then falls back to the package bin entry.
+ *
+ * Priority order:
+ *   1. Canonical installed location (~/.aof/dist/daemon/index.js) — this is
+ *      where deploy.sh puts it, and what the launchd plist should reference.
+ *      Checked first so that `aof daemon install` run from a dev tree still
+ *      generates a plist pointing to the stable installed path.
+ *   2. Adjacent to this file (for when running directly from the installed dist).
+ *   3. Package root fallback (../../dist/daemon/index.js — dev tree layout).
  */
 function resolveDaemonBinary(): string {
-  // In dist layout: dist/daemon/service-file.js -> dist/daemon/index.js
+  // 1. Canonical installed path — preferred for service files
+  const canonical = join(homedir(), ".aof", "dist", "daemon", "index.js");
+  if (existsSync(canonical)) return canonical;
+
+  // 2. Adjacent (dist/daemon/service-file.js → dist/daemon/index.js)
   const adjacent = join(import.meta.dirname, "index.js");
   if (existsSync(adjacent)) return adjacent;
-  // Fallback: traverse from package root
+
+  // 3. Dev tree fallback
   const fromRoot = join(import.meta.dirname, "..", "..", "dist", "daemon", "index.js");
   if (existsSync(fromRoot)) return fromRoot;
-  // Final fallback — caller must supply it
-  throw new Error("Could not resolve aof-daemon binary. Pass daemonBinary in config.");
+
+  throw new Error(
+    "Could not resolve aof-daemon binary. Run `npm run deploy` first, or pass daemonBinary in config.",
+  );
 }
 
 /**
@@ -83,15 +96,23 @@ export function getServiceFilePath(platform: NodeJS.Platform): string {
  * Read the OpenClaw gateway port from openclaw.json synchronously.
  * Returns the port number if found, undefined otherwise.
  */
-function detectOpenClawGatewayPort(stateDir?: string): number | undefined {
+interface GatewayInfo {
+  port: number;
+  token?: string;
+}
+
+function detectOpenClawGateway(stateDir?: string): GatewayInfo | undefined {
   try {
     const dir = stateDir?.replace(/^~/, homedir()) ?? join(homedir(), ".openclaw");
     const raw = readFileSync(join(dir, "openclaw.json"), "utf-8");
     const parsed = JSON.parse(raw);
     const port = parsed?.gateway?.port;
-    if (port != null && Number.isFinite(Number(port))) {
-      return Number(port);
-    }
+    if (port == null || !Number.isFinite(Number(port))) return undefined;
+    const token = parsed?.gateway?.auth?.token;
+    return {
+      port: Number(port),
+      ...(typeof token === "string" && token.length > 0 ? { token } : {}),
+    };
   } catch {
     // Config file missing or unreadable — fall through
   }
@@ -103,20 +124,34 @@ function detectOpenClawGatewayPort(stateDir?: string): number | undefined {
 // ---------------------------------------------------------------------------
 
 /**
+ * Resolve the node binary path for service files.
+ *
+ * process.execPath returns the versioned Cellar path (e.g.
+ * /opt/homebrew/Cellar/node@22/22.22.0/bin/node) which breaks when
+ * Homebrew upgrades node. Prefer the stable symlink instead.
+ */
+function resolveNodeBinary(): string {
+  const brewSymlink = "/opt/homebrew/bin/node";
+  if (existsSync(brewSymlink)) return brewSymlink;
+  return process.execPath;
+}
+
+/**
  * Generate a launchd plist XML string for macOS.
  */
 export function generateLaunchdPlist(config: ServiceFileConfig): string {
-  const node = config.nodeBinary ?? process.execPath;
+  const node = config.nodeBinary ?? resolveNodeBinary();
   const daemon = config.daemonBinary ?? resolveDaemonBinary();
   const dataDir = config.dataDir;
   const logDir = join(dataDir, "logs");
 
   const args = [node, daemon, "--root", dataDir, ...(config.extraArgs ?? [])];
 
-  const detectedPort = detectOpenClawGatewayPort();
+  const gw = detectOpenClawGateway();
   const envEntries: Record<string, string> = {
     AOF_ROOT: dataDir,
-    ...(detectedPort != null ? { OPENCLAW_GATEWAY_URL: `http://localhost:${detectedPort}` } : {}),
+    ...(gw?.port != null ? { OPENCLAW_GATEWAY_URL: `http://localhost:${gw.port}` } : {}),
+    ...(gw?.token ? { OPENCLAW_GATEWAY_TOKEN: gw.token } : {}),
     ...config.extraEnv,
   };
 
@@ -169,17 +204,20 @@ ${envXml}
  * Generate a systemd user unit file string for Linux.
  */
 export function generateSystemdUnit(config: ServiceFileConfig): string {
-  const node = config.nodeBinary ?? process.execPath;
+  const node = config.nodeBinary ?? resolveNodeBinary();
   const daemon = config.daemonBinary ?? resolveDaemonBinary();
   const dataDir = config.dataDir;
   const logDir = join(dataDir, "logs");
 
   const extraArgs = config.extraArgs?.length ? " " + config.extraArgs.join(" ") : "";
 
-  const detectedPort = detectOpenClawGatewayPort();
+  const gw = detectOpenClawGateway();
   const envLines: string[] = [`Environment=AOF_ROOT=${dataDir}`];
-  if (detectedPort != null) {
-    envLines.push(`Environment=OPENCLAW_GATEWAY_URL=http://localhost:${detectedPort}`);
+  if (gw?.port != null) {
+    envLines.push(`Environment=OPENCLAW_GATEWAY_URL=http://localhost:${gw.port}`);
+  }
+  if (gw?.token) {
+    envLines.push(`Environment=OPENCLAW_GATEWAY_TOKEN=${gw.token}`);
   }
   if (config.extraEnv) {
     for (const [k, v] of Object.entries(config.extraEnv)) {
@@ -193,7 +231,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/env node ${daemon} --root ${dataDir}${extraArgs}
+ExecStart=${node} ${daemon} --root ${dataDir}${extraArgs}
 Restart=on-failure
 RestartSec=5
 ${envLines.join("\n")}
