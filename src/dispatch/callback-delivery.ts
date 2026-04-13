@@ -8,7 +8,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { Task } from "../schemas/task.js";
-import type { TaskSubscription } from "../schemas/subscription.js";
+import { resolveDeliveryKind, type TaskSubscription } from "../schemas/subscription.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import type { SubscriptionStore } from "../store/subscription-store.js";
 import type { GatewayAdapter, TaskContext } from "./executor.js";
@@ -66,7 +66,9 @@ export async function deliverCallbacks(opts: DeliverCallbacksOptions): Promise<v
   }
 
   const activeSubs = await subscriptionStore.list(taskId, { status: "active" });
-  const completionSubs = activeSubs.filter((s) => s.granularity === "completion");
+  const completionSubs = activeSubs.filter(
+    (s) => s.granularity === "completion" && resolveDeliveryKind(s) === "agent-callback",
+  );
 
   for (const sub of completionSubs) {
     try {
@@ -94,7 +96,7 @@ export async function retryPendingDeliveries(opts: DeliverCallbacksOptions): Pro
   // SAFE-02: Expanded filter — include both granularities and deliveryAttempts >= 0
   // (handles never-attempted recovery AND retry of previously failed attempts)
   const retryCandidates = activeSubs.filter(
-    (s) => s.deliveryAttempts < MAX_DELIVERY_ATTEMPTS,
+    (s) => s.deliveryAttempts < MAX_DELIVERY_ATTEMPTS && resolveDeliveryKind(s) === "agent-callback",
   );
 
   const now = Date.now();
@@ -203,7 +205,9 @@ export async function deliverAllGranularityCallbacks(opts: DeliverCallbacksOptio
   }
 
   const activeSubs = await subscriptionStore.list(taskId, { status: "active" });
-  const allSubs = activeSubs.filter((s) => s.granularity === "all");
+  const allSubs = activeSubs.filter(
+    (s) => s.granularity === "all" && resolveDeliveryKind(s) === "agent-callback",
+  );
 
   for (const sub of allSubs) {
     try {

@@ -4,6 +4,7 @@
 
 import { z } from "zod";
 import type { TaskStatus, TaskPriority } from "../schemas/task.js";
+import { SubscriptionDelivery } from "../schemas/subscription.js";
 import { compactResponse, type ToolResponseEnvelope } from "./envelope.js";
 import type { ToolContext } from "./types.js";
 import { createSubscriptionStore, validateSubscriberAgent } from "./subscription-tools.js";
@@ -26,6 +27,10 @@ export const dispatchSchema = z.object({
   actor: z.string().optional(),
   project: z.string().optional(),
   subscribe: z.enum(["completion", "all"]).optional(),
+  // Plugin-driven completion notification. Boolean is a signal; plugins
+  // (e.g. OpenClaw) may translate `true`/omitted into a concrete delivery
+  // record via pre-handler transforms. An explicit object is used verbatim.
+  notifyOnCompletion: z.union([z.boolean(), SubscriptionDelivery]).optional(),
 });
 
 /**
@@ -58,6 +63,13 @@ export interface AOFDispatchInput {
   actor?: string;
   /** Subscribe to task notifications at dispatch time. */
   subscribe?: "completion" | "all";
+  /**
+   * Plugin-driven completion notification. `false` disables; an object is
+   * treated as a concrete delivery record and stored verbatim on the new
+   * subscription. Plugins may rewrite `true`/omitted into an object via
+   * their own pre-handler transforms before this reaches core.
+   */
+  notifyOnCompletion?: boolean | (Record<string, unknown> & { kind: string });
 }
 
 /**
@@ -72,6 +84,8 @@ export interface AOFDispatchResult extends ToolResponseEnvelope {
   filePath: string;
   /** Subscription ID if subscribe-at-dispatch was requested. */
   subscriptionId?: string;
+  /** Plugin-driven completion-notification subscription ID, if one was created. */
+  notificationSubscriptionId?: string;
 }
 
 function normalizePriority(priority?: string): TaskPriority {
@@ -81,6 +95,23 @@ function normalizePriority(priority?: string): TaskPriority {
     return normalized as TaskPriority;
   }
   return "normal";
+}
+
+function normalizeCompletionDelivery(
+  raw: Record<string, unknown>,
+): Record<string, unknown> & { kind: string; subscriberId?: string } {
+  const { kind: rawKind, subscriberId: rawSubscriberId, ...rest } = raw;
+  const kind = typeof rawKind === "string" ? rawKind.trim() : "";
+  if (kind.length === 0) {
+    throw new Error("notifyOnCompletion.kind must be a non-empty string");
+  }
+
+  const subscriberId = typeof rawSubscriberId === "string" ? rawSubscriberId.trim() : "";
+  return {
+    ...rest,
+    kind,
+    ...(subscriberId.length > 0 ? { subscriberId } : {}),
+  };
 }
 
 /**
@@ -109,6 +140,11 @@ export async function aofDispatch(
   if (!brief || brief.trim().length === 0) {
     throw new Error("Task brief/description is required");
   }
+
+  const completionDelivery =
+    input.notifyOnCompletion && typeof input.notifyOnCompletion === "object"
+      ? normalizeCompletionDelivery(input.notifyOnCompletion as Record<string, unknown>)
+      : undefined;
 
   // Normalize priority
   const priority = normalizePriority(input.priority);
@@ -176,6 +212,24 @@ export async function aofDispatch(
     }
   }
 
+  // Plugin-driven completion notification. Core is idiom-agnostic: it only
+  // understands that a delivery object with a `kind` becomes a subscription
+  // whose payload is opaque to core and interpreted by the matching plugin
+  // delivery handler.
+  let notificationSubscriptionId: string | undefined;
+  if (completionDelivery) {
+    const deliverySubscriberId =
+      completionDelivery.subscriberId ?? `notify:${completionDelivery.kind}`;
+    const subscriptionStore = createSubscriptionStore(ctx.store);
+    const sub = await subscriptionStore.create(
+      task.frontmatter.id,
+      deliverySubscriberId,
+      "completion",
+      completionDelivery,
+    );
+    notificationSubscriptionId = sub.id;
+  }
+
   // Build response envelope
   const summary = `Task ${readyTask.frontmatter.id} created and ready for assignment`;
   const envelope = compactResponse(summary, {
@@ -192,5 +246,6 @@ export async function aofDispatch(
     status: readyTask.frontmatter.status,
     filePath,
     ...(subscriptionId && { subscriptionId }),
+    ...(notificationSubscriptionId && { notificationSubscriptionId }),
   };
 }

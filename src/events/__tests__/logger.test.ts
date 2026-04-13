@@ -2,7 +2,7 @@
  * Tests for event logger — context budget event logging.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { EventLogger } from "../logger.js";
 import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -117,5 +117,23 @@ describe("EventLogger - context.budget", () => {
     const event2 = JSON.parse(lines[1]!);
 
     expect(event2.eventId).toBeGreaterThan(event1.eventId);
+  });
+
+  it("isolates onEvent callback failures", async () => {
+    const failingCallback = vi.fn(async () => {
+      throw new Error("boom");
+    });
+    const succeedingCallback = vi.fn();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    logger = new EventLogger(eventsDir, { onEvent: failingCallback });
+    logger.addOnEvent(succeedingCallback);
+
+    await expect(logger.logSystem("system.startup")).resolves.toBeUndefined();
+
+    expect(failingCallback).toHaveBeenCalledTimes(1);
+    expect(succeedingCallback).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith("[EventLogger] onEvent callback failed: boom");
+    warnSpy.mockRestore();
   });
 });

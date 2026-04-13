@@ -4,15 +4,15 @@
   "description": "AOF agent skill — tools, DAG workflows, org chart, protocols",
   "tags": ["orchestration", "task-management", "dag-workflows", "multi-agent"],
   "entrypoint": "SKILL.md",
-  "estimatedTokens": 1665,
+  "estimatedTokens": 1725,
   "tiers": {
     "seed": {
       "entrypoint": "SKILL-SEED.md",
-      "estimatedTokens": 563
+      "estimatedTokens": 640
     },
     "full": {
       "entrypoint": "SKILL.md",
-      "estimatedTokens": 1665
+      "estimatedTokens": 1725
     }
   }
 }

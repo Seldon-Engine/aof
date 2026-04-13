@@ -11,6 +11,11 @@ import { NotificationPolicyEngine, DEFAULT_RULES } from "../events/notification-
 import { ConsoleNotifier } from "../adapters/console-notifier.js";
 import { MatrixNotifier } from "./matrix-notifier.js";
 import { OpenClawAdapter } from "./openclaw-executor.js";
+import { OpenClawToolInvocationContextStore } from "./tool-invocation-context.js";
+import {
+  OpenClawChatDeliveryNotifier,
+  OPENCLAW_CHAT_DELIVERY_KIND,
+} from "./openclaw-chat-delivery.js";
 import { MockAdapter } from "../dispatch/executor.js";
 import type { GatewayAdapter } from "../dispatch/executor.js";
 import { loadOrgChart } from "../org/loader.js";
@@ -67,6 +72,7 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
   const store = opts.store ?? new FilesystemTaskStore(opts.dataDir);
   const logger = opts.logger ?? new EventLogger(join(opts.dataDir, "events"));
   const metrics = opts.metrics ?? new AOFMetrics();
+  const invocationContextStore = new OpenClawToolInvocationContextStore();
 
   // Load org chart for permission enforcement
   let orgChartPromise: Promise<OrgChart | undefined> | undefined;
@@ -112,7 +118,31 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
     : new ConsoleNotifier();
   const engine = new NotificationPolicyEngine(notifAdapter, DEFAULT_RULES);
 
-  // Create executor for agent dispatch
+  const resolveStoreForTask = async (taskId: string): Promise<ITaskStore | undefined> => {
+    const candidates = new Set<ITaskStore>([
+      store,
+      ...(opts.projectStores?.values() ?? []),
+    ]);
+
+    for (const candidate of candidates) {
+      if (await candidate.get(taskId)) {
+        return candidate;
+      }
+    }
+
+    return undefined;
+  };
+
+  logger.addOnEvent((event) => engine.handleEvent(event));
+  if (opts.messageTool) {
+    const chatDelivery = new OpenClawChatDeliveryNotifier({
+      resolveStoreForTask,
+      messageTool: opts.messageTool,
+    });
+    logger.addOnEvent((event) => chatDelivery.handleEvent(event));
+  }
+
+  // Create executor for agent dispatch (only when explicitly not in dry-run mode)
   const executor = opts.dryRun === false
     ? resolveAdapter(api, store)
     : undefined;
@@ -129,6 +159,47 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
         maxConcurrentDispatches: opts.maxConcurrentDispatches,
       },
     );
+
+  // Translate OpenClaw session capture into a core-agnostic completion
+  // notification delivery record. The core handler in aof_dispatch will
+  // create a subscription with this opaque payload; session idioms never
+  // leak into core.
+  //
+  // Precedence: an explicit object passed by the caller wins. `false`
+  // disables entirely. `true` / undefined triggers auto-capture; missing
+  // fields are filled from the captured session route.
+  const mergeDispatchNotificationRecipient = (params: Record<string, unknown>, toolCallId: string) => {
+    const raw = params.notifyOnCompletion;
+    if (raw === false) return params;
+
+    const captured = invocationContextStore.consumeToolCall(toolCallId);
+    const explicit = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : undefined;
+    const { kind: explicitKindRaw, ...explicitRest } = explicit ?? {};
+    const explicitKind = typeof explicitKindRaw === "string" && explicitKindRaw.trim().length > 0
+      ? explicitKindRaw.trim()
+      : undefined;
+
+    if (!explicit && !captured) return params;
+
+    const delivery: Record<string, unknown> = {
+      ...(captured ? {
+        target: captured.replyTarget,
+        sessionKey: captured.sessionKey,
+        sessionId: captured.sessionId,
+        channel: captured.channel,
+        threadId: captured.threadId,
+      } : {}),
+      ...explicitRest,
+      kind: explicitKind ?? OPENCLAW_CHAT_DELIVERY_KIND,
+    };
+
+    // Strip undefineds so schema validation doesn't choke on passthrough.
+    for (const key of Object.keys(delivery)) {
+      if (delivery[key] === undefined) delete delivery[key];
+    }
+
+    return { ...params, notifyOnCompletion: delivery };
+  };
 
   // --- Service ---
   api.registerService({
@@ -151,18 +222,44 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
   }
 
   // --- Event hooks ---
-  api.on("session_end", () => { void service.handleSessionEnd(); });
-  api.on("before_compaction", () => { void service.handleSessionEnd(); });
-  api.on("agent_end", (event) => { void service.handleAgentEnd(event); });
-  api.on("message_received", (event) => { void service.handleMessageReceived(event); });
+  api.on("session_end", (event) => {
+    invocationContextStore.clearSessionRoute(event);
+    void service.handleSessionEnd();
+  });
+  api.on("before_compaction", () => {
+    invocationContextStore.clearAll();
+    void service.handleSessionEnd();
+  });
+  api.on("agent_end", (event) => {
+    void service.handleAgentEnd(event);
+  });
+  api.on("message_received", (event) => {
+    invocationContextStore.captureMessageRoute(event);
+    void service.handleMessageReceived(event);
+  });
+  api.on("message_sent", (event) => {
+    invocationContextStore.captureMessageRoute(event);
+  });
+  api.on("before_tool_call", (event) => {
+    invocationContextStore.captureToolCall(event);
+  });
+  api.on("after_tool_call", (event) => {
+    invocationContextStore.clearToolCall(event);
+  });
 
   // --- Tools: shared registry loop (eliminates copy-pasted execute blocks) ---
   for (const [name, def] of Object.entries(toolRegistry)) {
+    const execute = withPermissions(def.handler, resolveProjectStore, getStoreForActor, logger, opts.orgChartPath);
     api.registerTool({
       name,
       description: def.description,
       parameters: zodToJsonSchema(def.schema) as { type: string; properties?: Record<string, unknown>; required?: string[] },
-      execute: withPermissions(def.handler, resolveProjectStore, getStoreForActor, logger, opts.orgChartPath),
+      execute: async (id, params) => {
+        const effectiveParams = name === "aof_dispatch"
+          ? mergeDispatchNotificationRecipient(params, id)
+          : params;
+        return execute(id, effectiveParams);
+      },
     });
   }
 

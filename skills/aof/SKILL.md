@@ -20,7 +20,7 @@ Agents use MCP tools below. CLI (`aof`) is for human operators only (setup, debu
 
 | Tool | Purpose | Returns |
 |------|---------|---------|
-| `aof_dispatch` | Create task and assign to agent/team. Accepts `workflow` (see DAG section) and `subscribe` params. | `{ taskId, status, assignedAgent, filePath, sessionId, subscriptionId }` |
+| `aof_dispatch` | Create task and assign to agent/team. Accepts `workflow` (see DAG section), `subscribe`, and `notifyOnCompletion` params. | `{ taskId, status, assignedAgent, filePath, sessionId, subscriptionId, notificationSubscriptionId }` |
 | `aof_task_update` | Log work, change status, mark blocked, append outputs | `{ success, taskId, newStatus, updatedAt }` |
 | `aof_task_complete` | Mark task done with summary and deliverables | `{ success, taskId, finalStatus, completedAt }` |
 | `aof_status_report` | Query task counts filtered by agent/status | `{ total, byStatus, tasks[], summary }` |
@@ -210,13 +210,15 @@ Always call `aof_task_complete` with a brief summary when done. Exiting without 
 
 ## Subscriptions & Callbacks
 
-Subscribe to task notifications. Callbacks spawn a new session to the subscriber agent with task results.
+Two distinct notification mechanisms — pick by intent, both can coexist on the same task.
 
-- **Subscribe at dispatch:** `subscribe: "completion"` or `subscribe: "all"` param on `aof_dispatch`
-- **Subscribe later:** `aof_task_subscribe` tool (subscriberId must be a valid org chart agent ID)
+### 1. Agent-callback subscriptions (supervision)
+
+Spawn a **new agent session** to a subscriber agent when the task reaches a terminal state. Use for agent-to-agent supervision (e.g. an architect wanting to react to each subtask finishing).
+
+- **Subscribe at dispatch:** `subscribe: "completion"` or `subscribe: "all"` on `aof_dispatch` — subscriber is the dispatching `actor`
+- **Subscribe later:** `aof_task_subscribe` (subscriberId must be a valid org chart agent ID)
 - **Unsubscribe:** `aof_task_unsubscribe` with the subscriptionId
-
-### Granularity
 
 | Granularity | Fires | Use for |
 |-------------|-------|---------|
@@ -225,9 +227,17 @@ Subscribe to task notifications. Callbacks spawn a new session to the subscriber
 
 `all` is a superset of `completion` -- no need for both on the same task.
 
-### Callback Handler Contract
-
+**Callback handler contract:**
 - You receive a session with task results as context. Process it and exit.
-- Delivery is at-least-once. You may receive the same callback more than once. Design handlers to be idempotent.
-- Callback chains are depth-limited to 3.
-- Callback sessions have a 2-minute timeout -- keep handlers lightweight.
+- Delivery is at-least-once. Design handlers to be idempotent.
+- Callback chains are depth-limited to 3. Sessions have a 2-minute timeout — keep handlers lightweight.
+
+### 2. Chat-message notifications (plugin-driven)
+
+The hosting plugin (e.g. OpenClaw) can send a single chat message when a task reaches an actionable status (blocked/review/done/cancelled/deadletter). Use for pinging humans back in the chat they dispatched from.
+
+- **Default (OpenClaw):** on — the originating chat session is auto-captured and pinged on completion.
+- **Explicit opt-out:** pass `notifyOnCompletion: false` on `aof_dispatch`.
+- **Explicit target** (cron/CLI or cross-channel routing): pass `notifyOnCompletion: { kind: "<plugin-kind>", target: "<address>" }`. For OpenClaw: `{ kind: "openclaw-chat", target: "telegram:-12345" }`.
+
+Chat delivery is a single message, dedup'd per-status, best-effort. It does **not** spawn a new agent session. Use agent-callback (#1) when you need an agent to react programmatically.

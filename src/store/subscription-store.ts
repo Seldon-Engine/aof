@@ -11,6 +11,7 @@ import { randomUUID } from "node:crypto";
 import writeFileAtomic from "write-file-atomic";
 import {
   SubscriptionsFile,
+  type SubscriptionDelivery,
   type SubscriptionGranularity,
   type SubscriptionStatus,
   type TaskSubscription,
@@ -33,6 +34,7 @@ export class SubscriptionStore {
     taskId: string,
     subscriberId: string,
     granularity: SubscriptionGranularity,
+    delivery?: SubscriptionDelivery,
   ): Promise<TaskSubscription> {
     const taskDir = await this.taskDirResolver(taskId);
     await mkdir(taskDir, { recursive: true });
@@ -49,6 +51,8 @@ export class SubscriptionStore {
       createdAt: now,
       updatedAt: now,
       deliveryAttempts: 0,
+      notifiedStatuses: [],
+      ...(delivery ? { delivery } : {}),
     };
 
     data.subscriptions.push(subscription);
@@ -99,7 +103,7 @@ export class SubscriptionStore {
     fields: Partial<
       Pick<
         TaskSubscription,
-        "status" | "deliveredAt" | "failureReason" | "deliveryAttempts" | "lastAttemptAt" | "lastDeliveredAt"
+        "status" | "deliveredAt" | "failureReason" | "deliveryAttempts" | "lastAttemptAt" | "lastDeliveredAt" | "notifiedStatuses"
       >
     >,
   ): Promise<TaskSubscription> {
@@ -150,6 +154,36 @@ export class SubscriptionStore {
       ...data.subscriptions[index]!,
       status: "cancelled" as const,
       updatedAt: now,
+    };
+    data.subscriptions[index] = updated;
+
+    await this.writeSubscriptionsFile(filePath, data);
+    return updated;
+  }
+
+  /**
+   * Append a status to `notifiedStatuses` for dedupe bookkeeping.
+   * No-op if the status is already present. Returns the updated subscription.
+   */
+  async markStatusNotified(
+    taskId: string,
+    subscriptionId: string,
+    status: string,
+  ): Promise<TaskSubscription | undefined> {
+    const taskDir = await this.taskDirResolver(taskId);
+    const filePath = join(taskDir, SUBSCRIPTIONS_FILENAME);
+    const data = await this.readSubscriptionsFile(filePath);
+
+    const index = data.subscriptions.findIndex((s) => s.id === subscriptionId);
+    if (index === -1) return undefined;
+
+    const existing = data.subscriptions[index]!;
+    if (existing.notifiedStatuses.includes(status)) return existing;
+
+    const updated: TaskSubscription = {
+      ...existing,
+      notifiedStatuses: [...existing.notifiedStatuses, status],
+      updatedAt: new Date().toISOString(),
     };
     data.subscriptions[index] = updated;
 
