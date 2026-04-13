@@ -297,6 +297,29 @@ describe("OpenClawAdapter", () => {
     expect(mockRunEmbeddedPiAgent).not.toHaveBeenCalled();
   });
 
+  it("reports runtime subagent sessions as alive for non-terminal waitForRun statuses", async () => {
+    mockRuntimeSubagentRun.mockResolvedValueOnce({
+      runId: "run-status-alive",
+      childSessionKey: "agent:swe-backend:subagent:child-alive",
+    });
+    mockRuntimeSubagentWaitForRun.mockResolvedValue({
+      status: "running",
+    });
+
+    const context: TaskContext = {
+      taskId: "TASK-STATUS-001",
+      taskPath: "/path/to/task.md",
+      agent: "swe-backend",
+      priority: "normal",
+      routing: {},
+    };
+
+    const spawn = await executor.spawnSession(context);
+    const status = await executor.getSessionStatus(spawn.sessionId!);
+
+    expect(status.alive).toBe(true);
+  });
+
   it("falls back to legacy extensionAPI when runtime helpers are unavailable", async () => {
     delete (mockApi.runtime as any).subagent;
     delete (mockApi.runtime as any).agent;
@@ -402,6 +425,34 @@ describe("OpenClawAdapter", () => {
     const outcome: AgentRunOutcome = onRunComplete.mock.calls[0][0];
     expect(outcome.success).toBe(false);
     expect(outcome.aborted).toBe(true);
+  });
+
+  it("treats non-terminal waitForRun statuses as unsuccessful completion outcomes", async () => {
+    mockRuntimeSubagentRun.mockResolvedValueOnce({
+      runId: "run-callback-running",
+    });
+    mockRuntimeSubagentWaitForRun.mockResolvedValueOnce({
+      status: "running",
+    });
+
+    const onRunComplete = vi.fn();
+
+    const context: TaskContext = {
+      taskId: "TASK-CB-004",
+      taskPath: "/path/to/task.md",
+      agent: "swe-backend",
+      priority: "normal",
+      routing: {},
+    };
+
+    await executor.spawnSession(context, { onRunComplete });
+
+    await vi.waitFor(() => expect(onRunComplete).toHaveBeenCalledTimes(1));
+    const outcome: AgentRunOutcome = onRunComplete.mock.calls[0][0];
+    expect(outcome.success).toBe(false);
+    expect(outcome.aborted).toBe(false);
+    expect(outcome.error?.kind).toBe("subagent");
+    expect(outcome.error?.message).toContain("did not reach a terminal status");
   });
 
   it("passes alsoAllow with AOF tool names to embedded runtime fallback", async () => {

@@ -53,6 +53,10 @@ interface EmbeddedPiRunResult {
 }
 
 const DEFAULT_TIMEOUT_MS = 300_000; // 5 minutes
+const SUBAGENT_SUCCESS_STATUSES = new Set(["completed", "succeeded", "done"]);
+const SUBAGENT_FAILURE_STATUSES = new Set(["failed", "error"]);
+const SUBAGENT_ABORTED_STATUSES = new Set(["aborted", "cancelled"]);
+const SUBAGENT_RUNNING_STATUSES = new Set(["running", "in_progress", "queued", "pending"]);
 
 export class OpenClawAdapter implements GatewayAdapter {
   private extensionApi: ExtensionApi | undefined;
@@ -203,12 +207,16 @@ export class OpenClawAdapter implements GatewayAdapter {
       try {
         const result = await this.api.runtime.subagent.waitForRun({ runId: runState.runId, timeoutMs: 1 });
         const status = result.status?.toLowerCase();
-        if (status === "completed" || status === "succeeded" || status === "done") {
+        if (status && SUBAGENT_SUCCESS_STATUSES.has(status)) {
           return { sessionId, alive: false };
         }
-        if (status === "failed" || status === "error" || status === "aborted" || status === "cancelled") {
+        if (status && (SUBAGENT_FAILURE_STATUSES.has(status) || SUBAGENT_ABORTED_STATUSES.has(status))) {
           return { sessionId, alive: false };
         }
+        if (!status || SUBAGENT_RUNNING_STATUSES.has(status)) {
+          return { sessionId, alive: true };
+        }
+        return { sessionId, alive: true };
       } catch {
         // Non-blocking status probe; fall back to heartbeat/status file behavior.
       }
@@ -512,19 +520,23 @@ export class OpenClawAdapter implements GatewayAdapter {
     try {
       const result = await params.waitForRun({ runId: params.runId, timeoutMs: params.timeoutMs });
       const status = result.status?.toLowerCase();
-      const succeeded = status === "completed" || status === "succeeded" || status === "done";
-      const aborted = status === "aborted" || status === "cancelled";
-
-      const failed = status === "failed" || status === "error";
+      const succeeded = Boolean(status && SUBAGENT_SUCCESS_STATUSES.has(status));
+      const aborted = Boolean(status && SUBAGENT_ABORTED_STATUSES.has(status));
+      const failed = Boolean(status && SUBAGENT_FAILURE_STATUSES.has(status));
+      const running = !status || SUBAGENT_RUNNING_STATUSES.has(status);
       outcome = {
         taskId: params.taskId,
         sessionId: params.sessionId,
-        success: !failed && !aborted && !result.error,
+        success: succeeded && !result.error,
         aborted,
         error: result.error
           ? { kind: result.error.kind ?? "subagent", message: result.error.message ?? "Subagent run failed" }
           : failed
             ? { kind: "subagent", message: `Subagent run ended with status ${result.status}` }
+            : running
+              ? { kind: "subagent", message: `Subagent run did not reach a terminal status (${result.status ?? "unknown"})` }
+              : !succeeded && !aborted
+                ? { kind: "subagent", message: `Subagent run ended with unexpected status ${result.status ?? "unknown"}` }
           : undefined,
         durationMs: Date.now() - startMs,
       };
