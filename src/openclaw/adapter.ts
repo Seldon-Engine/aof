@@ -174,11 +174,14 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
 
     const captured = invocationContextStore.consumeToolCall(toolCallId);
     const explicit = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : undefined;
+    const { kind: explicitKindRaw, ...explicitRest } = explicit ?? {};
+    const explicitKind = typeof explicitKindRaw === "string" && explicitKindRaw.trim().length > 0
+      ? explicitKindRaw.trim()
+      : undefined;
 
     if (!explicit && !captured) return params;
 
     const delivery: Record<string, unknown> = {
-      kind: OPENCLAW_CHAT_DELIVERY_KIND,
       ...(captured ? {
         target: captured.replyTarget,
         sessionKey: captured.sessionKey,
@@ -186,13 +189,9 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
         channel: captured.channel,
         threadId: captured.threadId,
       } : {}),
-      ...(explicit ?? {}),
+      ...explicitRest,
+      kind: explicitKind ?? OPENCLAW_CHAT_DELIVERY_KIND,
     };
-
-    // Caller explicitly named a different kind — don't force openclaw-chat on them.
-    if (explicit && typeof explicit.kind === "string") {
-      delivery.kind = explicit.kind;
-    }
 
     // Strip undefineds so schema validation doesn't choke on passthrough.
     for (const key of Object.keys(delivery)) {

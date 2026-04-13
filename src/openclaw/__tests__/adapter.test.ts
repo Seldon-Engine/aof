@@ -201,6 +201,48 @@ describe("OpenClaw adapter", () => {
     });
   });
 
+  it("sanitizes an explicit notifyOnCompletion kind before persisting delivery", async () => {
+    const tools: Array<{ name: string; execute: (id: string, params: Record<string, unknown>) => Promise<any> }> = [];
+    const tmpDir = await mkdtemp(join(tmpdir(), "aof-openclaw-adapter-invalid-kind-"));
+    const store = new FilesystemTaskStore(tmpDir);
+    const logger = new EventLogger(join(tmpDir, "events"));
+    await store.init();
+
+    const api: OpenClawApi = {
+      registerService: vi.fn(),
+      registerTool: (def) => tools.push(def as any),
+      registerHttpRoute: vi.fn(),
+      on: vi.fn(),
+    };
+
+    registerAofPlugin(api, {
+      dataDir: tmpDir,
+      store,
+      logger,
+      messageTool: { send: vi.fn(async () => undefined) },
+    });
+
+    const dispatchTool = tools.find((tool) => tool.name === "aof_dispatch");
+    const result = await dispatchTool!.execute("cron-call-invalid-kind", {
+      title: "Cron task with invalid kind",
+      brief: "Adapter should fall back to openclaw-chat",
+      actor: "cron",
+      notifyOnCompletion: {
+        kind: 42,
+        target: "telegram:-12345",
+      },
+    });
+    const payload = JSON.parse(result.content[0].text);
+    const task = await store.get(payload.taskId);
+    const subsPath = join(tmpDir, "tasks", task!.frontmatter.status, task!.frontmatter.id, "subscriptions.json");
+    const subsFile = JSON.parse(await readFile(subsPath, "utf-8"));
+
+    expect(subsFile.subscriptions[0].delivery).toMatchObject({
+      kind: "openclaw-chat",
+      target: "telegram:-12345",
+    });
+  });
+
   it("honours notifyOnCompletion: false to disable chat-delivery subscription", async () => {
     const tools: Array<{ name: string; execute: (id: string, params: Record<string, unknown>) => Promise<any> }> = [];
     const events: Record<string, (...args: unknown[]) => void> = {};

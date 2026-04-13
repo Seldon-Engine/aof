@@ -97,6 +97,23 @@ function normalizePriority(priority?: string): TaskPriority {
   return "normal";
 }
 
+function normalizeCompletionDelivery(
+  raw: Record<string, unknown>,
+): Record<string, unknown> & { kind: string; subscriberId?: string } {
+  const { kind: rawKind, subscriberId: rawSubscriberId, ...rest } = raw;
+  const kind = typeof rawKind === "string" ? rawKind.trim() : "";
+  if (kind.length === 0) {
+    throw new Error("notifyOnCompletion.kind must be a non-empty string");
+  }
+
+  const subscriberId = typeof rawSubscriberId === "string" ? rawSubscriberId.trim() : "";
+  return {
+    ...rest,
+    kind,
+    ...(subscriberId.length > 0 ? { subscriberId } : {}),
+  };
+}
+
 /**
  * Create a new task and immediately transition it to "ready" for dispatch.
  *
@@ -123,6 +140,11 @@ export async function aofDispatch(
   if (!brief || brief.trim().length === 0) {
     throw new Error("Task brief/description is required");
   }
+
+  const completionDelivery =
+    input.notifyOnCompletion && typeof input.notifyOnCompletion === "object"
+      ? normalizeCompletionDelivery(input.notifyOnCompletion as Record<string, unknown>)
+      : undefined;
 
   // Normalize priority
   const priority = normalizePriority(input.priority);
@@ -195,18 +217,15 @@ export async function aofDispatch(
   // whose payload is opaque to core and interpreted by the matching plugin
   // delivery handler.
   let notificationSubscriptionId: string | undefined;
-  if (input.notifyOnCompletion && typeof input.notifyOnCompletion === "object") {
-    const delivery = input.notifyOnCompletion;
+  if (completionDelivery) {
     const deliverySubscriberId =
-      typeof (delivery as Record<string, unknown>).subscriberId === "string"
-        ? (delivery as Record<string, unknown>).subscriberId as string
-        : `notify:${delivery.kind}`;
+      completionDelivery.subscriberId ?? `notify:${completionDelivery.kind}`;
     const subscriptionStore = createSubscriptionStore(ctx.store);
     const sub = await subscriptionStore.create(
       task.frontmatter.id,
       deliverySubscriberId,
       "completion",
-      delivery,
+      completionDelivery,
     );
     notificationSubscriptionId = sub.id;
   }

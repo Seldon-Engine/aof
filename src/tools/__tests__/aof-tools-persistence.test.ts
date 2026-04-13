@@ -190,6 +190,23 @@ describe("BUG-003: AOF tool persistence", () => {
     expect(statusResult.tasks).toHaveLength(3);
   });
 
+  it("rejects malformed notifyOnCompletion deliveries before persisting task state", async () => {
+    await expect(
+      aofDispatch(
+        { store: harness.store, logger: harness.logger },
+        {
+          title: "Malformed notification",
+          brief: "Should fail fast",
+          actor: "test-actor",
+          notifyOnCompletion: { target: "telegram:-1" } as any,
+        },
+      ),
+    ).rejects.toThrow("notifyOnCompletion.kind must be a non-empty string");
+
+    const statusResult = await aofStatusReport({ store: harness.store, logger: harness.logger }, {});
+    expect(statusResult.total).toBe(0);
+  });
+
   it("status report filters by status correctly", async () => {
     // Create tasks in different statuses
     const task1 = await aofDispatch({ store: harness.store, logger: harness.logger }, {

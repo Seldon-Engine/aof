@@ -134,5 +134,6 @@ describe("EventLogger - context.budget", () => {
     expect(failingCallback).toHaveBeenCalledTimes(1);
     expect(succeedingCallback).toHaveBeenCalledTimes(1);
     expect(warnSpy).toHaveBeenCalledWith("[EventLogger] onEvent callback failed: boom");
+    warnSpy.mockRestore();
   });
 });
