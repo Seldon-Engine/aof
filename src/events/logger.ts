@@ -70,7 +70,12 @@ export class EventLogger {
     await this.updateSymlink(date);
 
     for (const callback of this.onEvents) {
-      await Promise.resolve(callback(event));
+      try {
+        await Promise.resolve(callback(event));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn(`[EventLogger] onEvent callback failed: ${message}`);
+      }
     }
 
     return event;

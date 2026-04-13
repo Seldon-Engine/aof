@@ -3,16 +3,37 @@ import type { ITaskStore } from "../store/interfaces.js";
 import { readRunResult } from "../recovery/run-artifacts.js";
 import type { MatrixMessageTool } from "./matrix-notifier.js";
 import { getNotificationRecipient } from "./notification-recipient.js";
+import type { EventLogger } from "../events/logger.js";
 
 const NOTIFIABLE_STATUSES = new Set(["blocked", "review", "done"]);
+const ELLIPSIS = "...";
+const DEFAULT_DELIVERY_TTL_MS = 60 * 60 * 1000;
+const DEFAULT_MAX_DELIVERIES = 2048;
+
+interface OpenClawTaskRecipientNotifierOptions {
+  deliveryTtlMs?: number;
+  maxDeliveries?: number;
+  now?: () => number;
+  logger?: EventLogger;
+}
 
 export class OpenClawTaskRecipientNotifier {
-  private readonly delivered = new Set<string>();
+  private readonly delivered = new Map<string, number>();
+  private readonly deliveryTtlMs: number;
+  private readonly maxDeliveries: number;
+  private readonly now: () => number;
+  private readonly logger?: EventLogger;
 
   constructor(
     private readonly resolveStoreForTask: (taskId: string) => Promise<ITaskStore | undefined>,
     private readonly messageTool: MatrixMessageTool,
-  ) {}
+    options: OpenClawTaskRecipientNotifierOptions = {},
+  ) {
+    this.deliveryTtlMs = options.deliveryTtlMs ?? DEFAULT_DELIVERY_TTL_MS;
+    this.maxDeliveries = options.maxDeliveries ?? DEFAULT_MAX_DELIVERIES;
+    this.now = options.now ?? (() => Date.now());
+    this.logger = options.logger;
+  }
 
   async handleEvent(event: BaseEvent): Promise<void> {
     if (event.type !== "task.transitioned" || !event.taskId) {
@@ -45,7 +66,7 @@ export class OpenClawTaskRecipientNotifier {
     }
 
     const deliveryKey = `${event.taskId}:${to}:${target}`;
-    if (this.delivered.has(deliveryKey)) {
+    if (this.hasDelivered(deliveryKey)) {
       return;
     }
 
@@ -72,9 +93,52 @@ export class OpenClawTaskRecipientNotifier {
 
     try {
       await this.messageTool.send(target, lines.join("\n"));
-      this.delivered.add(deliveryKey);
+      this.markDelivered(deliveryKey);
     } catch (err) {
-      console.error(`[AOF] Failed to deliver task notification for ${event.taskId}:`, err);
+      if (this.logger) {
+        await this.logger.logDispatch("dispatch.error", "openclaw", event.taskId, {
+          error: err instanceof Error ? err.message : String(err),
+          source: "openclaw.task-recipient-notifier",
+          target,
+          status: to,
+        });
+      } else {
+        console.error(`[AOF] Failed to deliver task notification for ${event.taskId}:`, err);
+      }
+    }
+  }
+
+  private hasDelivered(deliveryKey: string): boolean {
+    this.pruneDelivered();
+    const expiresAt = this.delivered.get(deliveryKey);
+    if (!expiresAt) {
+      return false;
+    }
+    if (expiresAt <= this.now()) {
+      this.delivered.delete(deliveryKey);
+      return false;
+    }
+    return true;
+  }
+
+  private markDelivered(deliveryKey: string): void {
+    this.pruneDelivered();
+    this.delivered.set(deliveryKey, this.now() + this.deliveryTtlMs);
+    while (this.delivered.size > this.maxDeliveries) {
+      const oldestKey = this.delivered.keys().next().value;
+      if (!oldestKey) {
+        break;
+      }
+      this.delivered.delete(oldestKey);
+    }
+  }
+
+  private pruneDelivered(): void {
+    const now = this.now();
+    for (const [key, expiresAt] of this.delivered.entries()) {
+      if (expiresAt <= now) {
+        this.delivered.delete(key);
+      }
     }
   }
 }
@@ -93,8 +157,14 @@ function renderStatusLead(status: string): string {
 }
 
 function truncate(value: string, limit: number): string {
+  if (limit <= 0) {
+    return "";
+  }
   if (value.length <= limit) {
     return value;
   }
-  return `${value.slice(0, limit - 1)}...`;
+  if (limit <= ELLIPSIS.length) {
+    return ELLIPSIS.slice(0, limit);
+  }
+  return `${value.slice(0, limit - ELLIPSIS.length)}${ELLIPSIS}`;
 }

@@ -146,4 +146,27 @@ describe("OpenClaw adapter", () => {
       channel: "telegram",
     });
   });
+
+  it("registers both policy-engine and recipient notifier callbacks in plugin mode", async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), "aof-openclaw-callbacks-"));
+    const logger = new EventLogger(join(tmpDir, "events"));
+    const addOnEventSpy = vi.spyOn(logger, "addOnEvent");
+
+    const api: OpenClawApi = {
+      registerService: vi.fn(),
+      registerTool: vi.fn(),
+      registerHttpRoute: vi.fn(),
+      on: vi.fn(),
+    };
+
+    registerAofPlugin(api, {
+      dataDir: tmpDir,
+      logger,
+      messageTool: {
+        send: vi.fn(async () => undefined),
+      },
+    });
+
+    expect(addOnEventSpy).toHaveBeenCalledTimes(2);
+  });
 });

@@ -132,7 +132,8 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
   };
 
   if (opts.messageTool) {
-    const recipientNotifier = new OpenClawTaskRecipientNotifier(resolveStoreForTask, opts.messageTool);
+    const recipientNotifier = new OpenClawTaskRecipientNotifier(resolveStoreForTask, opts.messageTool, { logger });
+    logger.addOnEvent((event) => engine.handleEvent(event));
     logger.addOnEvent((event) => recipientNotifier.handleEvent(event));
   } else {
     logger.addOnEvent((event) => engine.handleEvent(event));
@@ -196,10 +197,12 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
   }
 
   // --- Event hooks ---
-  api.on("session_end", () => {
+  api.on("session_end", (event) => {
+    invocationContextStore.clearSessionRoute(event);
     void service.handleSessionEnd();
   });
   api.on("before_compaction", () => {
+    invocationContextStore.clearAll();
     void service.handleSessionEnd();
   });
   api.on("agent_end", (event) => {

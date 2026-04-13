@@ -1,6 +1,14 @@
 import type { OpenClawNotificationRecipient } from "./notification-recipient.js";
 
 type UnknownRecord = Record<string, unknown>;
+type StoredRecipient = {
+  recipient: OpenClawNotificationRecipient;
+  expiresAt: number;
+};
+
+const DEFAULT_ROUTE_TTL_MS = 60 * 60 * 1000;
+const DEFAULT_MAX_SESSION_ROUTES = 2048;
+const DEFAULT_MAX_TOOL_CALLS = 2048;
 
 function asRecord(value: unknown): UnknownRecord | undefined {
   return value && typeof value === "object" ? (value as UnknownRecord) : undefined;
@@ -120,25 +128,43 @@ function mergeRecipients(
 }
 
 export class OpenClawToolInvocationContextStore {
-  private readonly bySessionKey = new Map<string, OpenClawNotificationRecipient>();
-  private readonly bySessionId = new Map<string, OpenClawNotificationRecipient>();
-  private readonly byToolCallId = new Map<string, OpenClawNotificationRecipient>();
+  private readonly bySessionKey = new Map<string, StoredRecipient>();
+  private readonly bySessionId = new Map<string, StoredRecipient>();
+  private readonly byToolCallId = new Map<string, StoredRecipient>();
+  private readonly routeTtlMs: number;
+  private readonly maxSessionRoutes: number;
+  private readonly maxToolCalls: number;
+  private readonly now: () => number;
+
+  constructor(options: {
+    routeTtlMs?: number;
+    maxSessionRoutes?: number;
+    maxToolCalls?: number;
+    now?: () => number;
+  } = {}) {
+    this.routeTtlMs = options.routeTtlMs ?? DEFAULT_ROUTE_TTL_MS;
+    this.maxSessionRoutes = options.maxSessionRoutes ?? DEFAULT_MAX_SESSION_ROUTES;
+    this.maxToolCalls = options.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS;
+    this.now = options.now ?? (() => Date.now());
+  }
 
   captureMessageRoute(event: unknown): void {
+    this.pruneExpired();
     const recipient = extractRecipient(event);
     if (!recipient) {
       return;
     }
 
     if (recipient.sessionKey) {
-      this.bySessionKey.set(recipient.sessionKey, recipient);
+      this.storeRecipient(this.bySessionKey, recipient.sessionKey, recipient, this.maxSessionRoutes);
     }
     if (recipient.sessionId) {
-      this.bySessionId.set(recipient.sessionId, recipient);
+      this.storeRecipient(this.bySessionId, recipient.sessionId, recipient, this.maxSessionRoutes);
     }
   }
 
   captureToolCall(event: unknown): void {
+    this.pruneExpired();
     if (extractToolName(event) !== "aof_dispatch") {
       return;
     }
@@ -154,19 +180,23 @@ export class OpenClawToolInvocationContextStore {
     }
 
     const fallback = recipient.sessionKey
-      ? this.bySessionKey.get(recipient.sessionKey)
+      ? this.getRecipient(this.bySessionKey, recipient.sessionKey)
       : recipient.sessionId
-        ? this.bySessionId.get(recipient.sessionId)
+        ? this.getRecipient(this.bySessionId, recipient.sessionId)
         : undefined;
 
-    this.byToolCallId.set(toolCallId, mergeRecipients(recipient, fallback));
+    this.storeRecipient(
+      this.byToolCallId,
+      toolCallId,
+      mergeRecipients(recipient, fallback),
+      this.maxToolCalls,
+    );
   }
 
   consumeToolCall(toolCallId: string): OpenClawNotificationRecipient | undefined {
-    const recipient = this.byToolCallId.get(toolCallId);
-    if (recipient) {
-      this.byToolCallId.delete(toolCallId);
-    }
+    this.pruneExpired();
+    const recipient = this.getRecipient(this.byToolCallId, toolCallId);
+    this.byToolCallId.delete(toolCallId);
     return recipient;
   }
 
@@ -174,6 +204,69 @@ export class OpenClawToolInvocationContextStore {
     const toolCallId = extractToolCallId(event);
     if (toolCallId) {
       this.byToolCallId.delete(toolCallId);
+    }
+  }
+
+  clearSessionRoute(event: unknown): void {
+    const recipient = extractRecipient(event);
+    if (recipient?.sessionKey) {
+      this.bySessionKey.delete(recipient.sessionKey);
+    }
+    if (recipient?.sessionId) {
+      this.bySessionId.delete(recipient.sessionId);
+    }
+    this.pruneExpired();
+  }
+
+  clearAll(): void {
+    this.bySessionKey.clear();
+    this.bySessionId.clear();
+    this.byToolCallId.clear();
+  }
+
+  private storeRecipient(
+    map: Map<string, StoredRecipient>,
+    key: string,
+    recipient: OpenClawNotificationRecipient,
+    maxEntries: number,
+  ): void {
+    map.set(key, {
+      recipient,
+      expiresAt: this.now() + this.routeTtlMs,
+    });
+
+    while (map.size > maxEntries) {
+      const oldestKey = map.keys().next().value;
+      if (!oldestKey) {
+        break;
+      }
+      map.delete(oldestKey);
+    }
+  }
+
+  private getRecipient(
+    map: Map<string, StoredRecipient>,
+    key: string,
+  ): OpenClawNotificationRecipient | undefined {
+    const entry = map.get(key);
+    if (!entry) {
+      return undefined;
+    }
+    if (entry.expiresAt <= this.now()) {
+      map.delete(key);
+      return undefined;
+    }
+    return entry.recipient;
+  }
+
+  private pruneExpired(): void {
+    const now = this.now();
+    for (const map of [this.bySessionKey, this.bySessionId, this.byToolCallId]) {
+      for (const [key, entry] of map.entries()) {
+        if (entry.expiresAt <= now) {
+          map.delete(key);
+        }
+      }
     }
   }
 }
