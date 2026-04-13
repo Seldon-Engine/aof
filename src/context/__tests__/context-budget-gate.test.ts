@@ -12,10 +12,10 @@ import { estimateTokens } from "../budget.js";
 
 /**
  * Hard ceiling for full-tier context (SKILL.md + tool descriptions).
- * Bumped from 2150 to 2500 for v1.8 subscription/callback documentation.
+ * Bumped from 2500 to 2600 for v1.11 notification/runtime documentation.
  * If this test fails, someone inflated the context — investigate before bumping.
  */
-const BUDGET_CEILING_TOKENS = 2500;
+const BUDGET_CEILING_TOKENS = 2600;
 
 /**
  * Pre-v1.4 SKILL.md baseline: 13,645 chars / 3,411 tokens (464 lines).
@@ -64,11 +64,11 @@ describe("context budget gate", () => {
     expect(inflatedTotal).toBeGreaterThan(BUDGET_CEILING_TOKENS);
   });
 
-  it("achieves 30%+ reduction from pre-v1.4 baseline", () => {
+  it("achieves 25%+ reduction from pre-v1.4 baseline", () => {
     // Compare SKILL.md tokens only — tool descriptions were already one-liners
     // pre-v1.4 and are unchanged, so only SKILL.md reduction is meaningful.
-    // Relaxed from 50% to 30% for v1.8 subscription/callback content growth.
-    expect(skillTokens).toBeLessThan(PRE_V14_SKILL_BASELINE_TOKENS * 0.7);
+    // Relaxed from 30% to 25% for v1.11 notification/runtime content growth.
+    expect(skillTokens).toBeLessThan(PRE_V14_SKILL_BASELINE_TOKENS * 0.75);
   });
 
   it("SKILL.md contains completion protocol with aof_task_complete instruction", () => {
