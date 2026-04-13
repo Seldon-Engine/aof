@@ -1,6 +1,21 @@
-import type { OpenClawNotificationRecipient } from "./notification-recipient.js";
-
 type UnknownRecord = Record<string, unknown>;
+
+/**
+ * Captured OpenClaw session route — plugin-local idiom (sessionKey/sessionId
+ * are OpenClaw concepts). Translated at dispatch time into a core-agnostic
+ * SubscriptionDelivery payload before ever crossing into AOF core.
+ */
+export interface OpenClawNotificationRecipient {
+  kind: "openclaw-session";
+  sessionKey?: string;
+  sessionId?: string;
+  replyTarget?: string;
+  channel?: string;
+  threadId?: string;
+  actor?: string;
+  capturedAt: string;
+}
+
 type StoredRecipient = {
   recipient: OpenClawNotificationRecipient;
   expiresAt: number;

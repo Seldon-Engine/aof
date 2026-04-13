@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, it, expect, vi } from "vitest";
@@ -91,7 +91,7 @@ describe("OpenClaw adapter", () => {
     expect(service.handleMessageReceived).toHaveBeenCalled();
   });
 
-  it("persists the calling session as the notification recipient for aof_dispatch", async () => {
+  it("creates an openclaw-chat subscription from auto-captured session on aof_dispatch", async () => {
     const tools: Array<{ name: string; execute: (id: string, params: Record<string, unknown>) => Promise<any> }> = [];
     const events: Record<string, (...args: unknown[]) => void> = {};
     const tmpDir = await mkdtemp(join(tmpdir(), "aof-openclaw-adapter-"));
@@ -133,21 +133,111 @@ describe("OpenClaw adapter", () => {
 
     const result = await dispatchTool!.execute("tool-call-1", {
       title: "Test task",
-      brief: "Persist recipient metadata",
+      brief: "Persist recipient as subscription",
       actor: "main",
     });
     const payload = JSON.parse(result.content[0].text);
-    const task = await store.get(payload.taskId);
+    expect(payload.notificationSubscriptionId).toBeDefined();
 
-    expect(task?.frontmatter.metadata.notificationRecipient).toMatchObject({
-      kind: "openclaw-session",
-      sessionKey: "agent:main:telegram:group:42",
-      replyTarget: "telegram:-10042",
-      channel: "telegram",
+    const task = await store.get(payload.taskId);
+    expect(task).toBeDefined();
+    // Delivery never leaks into task frontmatter metadata.
+    expect(task?.frontmatter.metadata.notificationRecipient).toBeUndefined();
+
+    // Subscription is co-located with the task.
+    const subsPath = join(tmpDir, "tasks", task!.frontmatter.status, task!.frontmatter.id, "subscriptions.json");
+    const subsFile = JSON.parse(await readFile(subsPath, "utf-8"));
+    expect(subsFile.subscriptions).toHaveLength(1);
+    expect(subsFile.subscriptions[0]).toMatchObject({
+      granularity: "completion",
+      delivery: {
+        kind: "openclaw-chat",
+        sessionKey: "agent:main:telegram:group:42",
+        target: "telegram:-10042",
+        channel: "telegram",
+      },
     });
   });
 
-  it("registers both policy-engine and recipient notifier callbacks in plugin mode", async () => {
+  it("respects an explicit notifyOnCompletion target over auto-capture (cron/CLI path)", async () => {
+    const tools: Array<{ name: string; execute: (id: string, params: Record<string, unknown>) => Promise<any> }> = [];
+    const tmpDir = await mkdtemp(join(tmpdir(), "aof-openclaw-adapter-explicit-"));
+    const store = new FilesystemTaskStore(tmpDir);
+    const logger = new EventLogger(join(tmpDir, "events"));
+    await store.init();
+
+    const api: OpenClawApi = {
+      registerService: vi.fn(),
+      registerTool: (def) => tools.push(def as any),
+      registerHttpRoute: vi.fn(),
+      on: vi.fn(),
+    };
+
+    registerAofPlugin(api, {
+      dataDir: tmpDir,
+      store,
+      logger,
+      messageTool: { send: vi.fn(async () => undefined) },
+    });
+
+    const dispatchTool = tools.find((tool) => tool.name === "aof_dispatch");
+    const result = await dispatchTool!.execute("cron-call-1", {
+      title: "Cron task",
+      brief: "Explicit chat target — no session in scope",
+      actor: "cron",
+      notifyOnCompletion: {
+        kind: "openclaw-chat",
+        target: "telegram:-98765",
+      },
+    });
+    const payload = JSON.parse(result.content[0].text);
+    const task = await store.get(payload.taskId);
+    const subsPath = join(tmpDir, "tasks", task!.frontmatter.status, task!.frontmatter.id, "subscriptions.json");
+    const subsFile = JSON.parse(await readFile(subsPath, "utf-8"));
+
+    expect(subsFile.subscriptions[0].delivery).toMatchObject({
+      kind: "openclaw-chat",
+      target: "telegram:-98765",
+    });
+  });
+
+  it("honours notifyOnCompletion: false to disable chat-delivery subscription", async () => {
+    const tools: Array<{ name: string; execute: (id: string, params: Record<string, unknown>) => Promise<any> }> = [];
+    const events: Record<string, (...args: unknown[]) => void> = {};
+    const tmpDir = await mkdtemp(join(tmpdir(), "aof-openclaw-adapter-optout-"));
+    const store = new FilesystemTaskStore(tmpDir);
+    const logger = new EventLogger(join(tmpDir, "events"));
+    await store.init();
+
+    const api: OpenClawApi = {
+      registerService: vi.fn(),
+      registerTool: (def) => tools.push(def as any),
+      registerHttpRoute: vi.fn(),
+      on: (event, handler) => { events[event] = handler; },
+    };
+
+    registerAofPlugin(api, {
+      dataDir: tmpDir,
+      store,
+      logger,
+      messageTool: { send: vi.fn(async () => undefined) },
+    });
+
+    events["message_received"]?.({ sessionKey: "s", target: "t", channel: "c" });
+    events["before_tool_call"]?.({ name: "aof_dispatch", id: "tc-optout", sessionKey: "s" });
+
+    const dispatchTool = tools.find((tool) => tool.name === "aof_dispatch");
+    const result = await dispatchTool!.execute("tc-optout", {
+      title: "Opted-out task",
+      brief: "Should not produce any subscription",
+      actor: "main",
+      notifyOnCompletion: false,
+    });
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload.notificationSubscriptionId).toBeUndefined();
+  });
+
+  it("registers policy-engine and chat-delivery callbacks in plugin mode", async () => {
     const tmpDir = await mkdtemp(join(tmpdir(), "aof-openclaw-callbacks-"));
     const logger = new EventLogger(join(tmpDir, "events"));
     const addOnEventSpy = vi.spyOn(logger, "addOnEvent");
@@ -167,6 +257,24 @@ describe("OpenClaw adapter", () => {
       },
     });
 
+    // engine + chat delivery = 2
     expect(addOnEventSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("registers only the policy-engine callback when no messageTool is provided", async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), "aof-openclaw-callbacks-nochat-"));
+    const logger = new EventLogger(join(tmpDir, "events"));
+    const addOnEventSpy = vi.spyOn(logger, "addOnEvent");
+
+    const api: OpenClawApi = {
+      registerService: vi.fn(),
+      registerTool: vi.fn(),
+      registerHttpRoute: vi.fn(),
+      on: vi.fn(),
+    };
+
+    registerAofPlugin(api, { dataDir: tmpDir, logger });
+
+    expect(addOnEventSpy).toHaveBeenCalledTimes(1);
   });
 });

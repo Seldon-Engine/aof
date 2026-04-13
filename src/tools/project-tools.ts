@@ -4,6 +4,7 @@
 
 import { z } from "zod";
 import type { TaskStatus, TaskPriority } from "../schemas/task.js";
+import { SubscriptionDelivery } from "../schemas/subscription.js";
 import { compactResponse, type ToolResponseEnvelope } from "./envelope.js";
 import type { ToolContext } from "./types.js";
 import { createSubscriptionStore, validateSubscriberAgent } from "./subscription-tools.js";
@@ -26,6 +27,10 @@ export const dispatchSchema = z.object({
   actor: z.string().optional(),
   project: z.string().optional(),
   subscribe: z.enum(["completion", "all"]).optional(),
+  // Plugin-driven completion notification. Boolean is a signal; plugins
+  // (e.g. OpenClaw) may translate `true`/omitted into a concrete delivery
+  // record via pre-handler transforms. An explicit object is used verbatim.
+  notifyOnCompletion: z.union([z.boolean(), SubscriptionDelivery]).optional(),
 });
 
 /**
@@ -58,6 +63,13 @@ export interface AOFDispatchInput {
   actor?: string;
   /** Subscribe to task notifications at dispatch time. */
   subscribe?: "completion" | "all";
+  /**
+   * Plugin-driven completion notification. `false` disables; an object is
+   * treated as a concrete delivery record and stored verbatim on the new
+   * subscription. Plugins may rewrite `true`/omitted into an object via
+   * their own pre-handler transforms before this reaches core.
+   */
+  notifyOnCompletion?: boolean | (Record<string, unknown> & { kind: string });
 }
 
 /**
@@ -72,6 +84,8 @@ export interface AOFDispatchResult extends ToolResponseEnvelope {
   filePath: string;
   /** Subscription ID if subscribe-at-dispatch was requested. */
   subscriptionId?: string;
+  /** Plugin-driven completion-notification subscription ID, if one was created. */
+  notificationSubscriptionId?: string;
 }
 
 function normalizePriority(priority?: string): TaskPriority {
@@ -176,6 +190,27 @@ export async function aofDispatch(
     }
   }
 
+  // Plugin-driven completion notification. Core is idiom-agnostic: it only
+  // understands that a delivery object with a `kind` becomes a subscription
+  // whose payload is opaque to core and interpreted by the matching plugin
+  // delivery handler.
+  let notificationSubscriptionId: string | undefined;
+  if (input.notifyOnCompletion && typeof input.notifyOnCompletion === "object") {
+    const delivery = input.notifyOnCompletion;
+    const deliverySubscriberId =
+      typeof (delivery as Record<string, unknown>).subscriberId === "string"
+        ? (delivery as Record<string, unknown>).subscriberId as string
+        : `notify:${delivery.kind}`;
+    const subscriptionStore = createSubscriptionStore(ctx.store);
+    const sub = await subscriptionStore.create(
+      task.frontmatter.id,
+      deliverySubscriberId,
+      "completion",
+      delivery,
+    );
+    notificationSubscriptionId = sub.id;
+  }
+
   // Build response envelope
   const summary = `Task ${readyTask.frontmatter.id} created and ready for assignment`;
   const envelope = compactResponse(summary, {
@@ -192,5 +227,6 @@ export async function aofDispatch(
     status: readyTask.frontmatter.status,
     filePath,
     ...(subscriptionId && { subscriptionId }),
+    ...(notificationSubscriptionId && { notificationSubscriptionId }),
   };
 }

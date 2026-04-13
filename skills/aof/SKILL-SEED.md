@@ -14,7 +14,7 @@ Deterministic orchestration for multi-agent systems. Agents use MCP tools below.
 
 | Tool | Purpose | Returns |
 |------|---------|---------|
-| `aof_dispatch` | Create task and assign to agent/team. Accepts `workflow` and `subscribe` params. | `{ taskId, status, assignedAgent, filePath, sessionId, subscriptionId }` |
+| `aof_dispatch` | Create task and assign to agent/team. Accepts `workflow`, `subscribe`, and `notifyOnCompletion` params. | `{ taskId, status, assignedAgent, filePath, sessionId, subscriptionId, notificationSubscriptionId }` |
 | `aof_task_update` | Log work, change status, mark blocked | `{ success, taskId, newStatus, updatedAt }` |
 | `aof_task_complete` | Mark task done with summary and deliverables | `{ success, taskId, finalStatus, completedAt }` |
 | `aof_status_report` | Query task counts filtered by agent/status | `{ total, byStatus, tasks[], summary }` |
@@ -56,6 +56,15 @@ AOF/1 envelope: `AOF/1 {"protocol":"aof","version":1,"type":"...","taskId":"..."
 | `blocked` | Task -> blocked; notifies coordinator |
 | `needs_review` | Task -> review; awaits review |
 | `partial` | Task -> review; partial completion logged |
+
+---
+
+## Notifications — two mechanisms
+
+- `subscribe: "completion" | "all"` on dispatch — **spawns a new agent session** to the subscriber on terminal state. Use for supervision (architect gets pinged when each subtask finishes).
+- `notifyOnCompletion` on dispatch — **plugin-driven chat message** (no new session). OpenClaw auto-captures the originating chat session by default; pass `false` to opt out, or `{ kind: "openclaw-chat", target: "<addr>" }` to target explicitly from cron/CLI.
+
+Both can coexist on the same task.
 
 ---
 

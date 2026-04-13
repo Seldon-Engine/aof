@@ -12,8 +12,10 @@ import { ConsoleNotifier } from "../adapters/console-notifier.js";
 import { MatrixNotifier } from "./matrix-notifier.js";
 import { OpenClawAdapter } from "./openclaw-executor.js";
 import { OpenClawToolInvocationContextStore } from "./tool-invocation-context.js";
-import { OpenClawTaskRecipientNotifier } from "./task-recipient-notifier.js";
-import { mergeNotificationRecipient } from "./notification-recipient.js";
+import {
+  OpenClawChatDeliveryNotifier,
+  OPENCLAW_CHAT_DELIVERY_KIND,
+} from "./openclaw-chat-delivery.js";
 import { MockAdapter } from "../dispatch/executor.js";
 import type { GatewayAdapter } from "../dispatch/executor.js";
 import { loadOrgChart } from "../org/loader.js";
@@ -131,12 +133,13 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
     return undefined;
   };
 
+  logger.addOnEvent((event) => engine.handleEvent(event));
   if (opts.messageTool) {
-    const recipientNotifier = new OpenClawTaskRecipientNotifier(resolveStoreForTask, opts.messageTool, { logger });
-    logger.addOnEvent((event) => engine.handleEvent(event));
-    logger.addOnEvent((event) => recipientNotifier.handleEvent(event));
-  } else {
-    logger.addOnEvent((event) => engine.handleEvent(event));
+    const chatDelivery = new OpenClawChatDeliveryNotifier({
+      resolveStoreForTask,
+      messageTool: opts.messageTool,
+    });
+    logger.addOnEvent((event) => chatDelivery.handleEvent(event));
   }
 
   // Create executor for agent dispatch (only when explicitly not in dry-run mode)
@@ -157,23 +160,46 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
       },
     );
 
+  // Translate OpenClaw session capture into a core-agnostic completion
+  // notification delivery record. The core handler in aof_dispatch will
+  // create a subscription with this opaque payload; session idioms never
+  // leak into core.
+  //
+  // Precedence: an explicit object passed by the caller wins. `false`
+  // disables entirely. `true` / undefined triggers auto-capture; missing
+  // fields are filled from the captured session route.
   const mergeDispatchNotificationRecipient = (params: Record<string, unknown>, toolCallId: string) => {
-    if (params.notifyOnCompletion === false) {
-      return params;
-    }
+    const raw = params.notifyOnCompletion;
+    if (raw === false) return params;
 
-    const recipient = invocationContextStore.consumeToolCall(toolCallId);
-    if (!recipient) {
-      return params;
-    }
+    const captured = invocationContextStore.consumeToolCall(toolCallId);
+    const explicit = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : undefined;
 
-    return {
-      ...params,
-      metadata: mergeNotificationRecipient(
-        params.metadata as Record<string, unknown> | undefined,
-        recipient,
-      ),
+    if (!explicit && !captured) return params;
+
+    const delivery: Record<string, unknown> = {
+      kind: OPENCLAW_CHAT_DELIVERY_KIND,
+      ...(captured ? {
+        target: captured.replyTarget,
+        sessionKey: captured.sessionKey,
+        sessionId: captured.sessionId,
+        channel: captured.channel,
+        threadId: captured.threadId,
+      } : {}),
+      ...(explicit ?? {}),
     };
+
+    // Caller explicitly named a different kind — don't force openclaw-chat on them.
+    if (explicit && typeof explicit.kind === "string") {
+      delivery.kind = explicit.kind;
+    }
+
+    // Strip undefineds so schema validation doesn't choke on passthrough.
+    for (const key of Object.keys(delivery)) {
+      if (delivery[key] === undefined) delete delivery[key];
+    }
+
+    return { ...params, notifyOnCompletion: delivery };
   };
 
   // --- Service ---
