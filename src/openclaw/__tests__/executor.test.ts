@@ -20,6 +20,13 @@ vi.mock("../../logging/index.js", () => ({
 }));
 
 const mockRunEmbeddedPiAgent = vi.fn();
+const mockRuntimeSubagentRun = vi.fn();
+const mockRuntimeSubagentWaitForRun = vi.fn();
+const mockRuntimeAgentRunEmbeddedPiAgent = vi.fn();
+const mockRuntimeAgentResolveAgentWorkspaceDir = vi.fn(() => "/tmp/runtime-ws");
+const mockRuntimeAgentResolveAgentDir = vi.fn(() => "/tmp/runtime-agent");
+const mockRuntimeAgentEnsureAgentWorkspace = vi.fn(async () => ({ dir: "/tmp/runtime-ws" }));
+const mockRuntimeAgentResolveSessionFilePath = vi.fn((_: unknown, id: string) => `/tmp/runtime-s/${id}.jsonl`);
 const mockExtApi = {
   runEmbeddedPiAgent: mockRunEmbeddedPiAgent,
   resolveAgentWorkspaceDir: vi.fn(() => "/tmp/ws"),
@@ -34,14 +41,44 @@ describe("OpenClawAdapter", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockApi = { config: { agents: {} } } as unknown as OpenClawApi;
+    mockRunEmbeddedPiAgent.mockReset();
+    mockRuntimeSubagentRun.mockReset();
+    mockRuntimeSubagentWaitForRun.mockReset();
+    mockRuntimeAgentRunEmbeddedPiAgent.mockReset();
+    mockRuntimeAgentResolveAgentWorkspaceDir.mockReset().mockImplementation(() => "/tmp/runtime-ws");
+    mockRuntimeAgentResolveAgentDir.mockReset().mockImplementation(() => "/tmp/runtime-agent");
+    mockRuntimeAgentEnsureAgentWorkspace.mockReset().mockImplementation(async () => ({ dir: "/tmp/runtime-ws" }));
+    mockRuntimeAgentResolveSessionFilePath.mockReset().mockImplementation((_: unknown, id: string) => `/tmp/runtime-s/${id}.jsonl`);
+    mockExtApi.resolveAgentWorkspaceDir.mockReset().mockImplementation(() => "/tmp/ws");
+    mockExtApi.resolveAgentDir.mockReset().mockImplementation(() => "/tmp/agent");
+    mockExtApi.ensureAgentWorkspace.mockReset().mockImplementation(async (p: { dir: string }) => ({ dir: p.dir }));
+    mockExtApi.resolveSessionFilePath.mockReset().mockImplementation((id: string) => `/tmp/s/${id}.jsonl`);
+    mockApi = {
+      config: { agents: {} },
+      runtime: {
+        subagent: {
+          run: mockRuntimeSubagentRun,
+          waitForRun: mockRuntimeSubagentWaitForRun,
+        },
+        agent: {
+          runEmbeddedPiAgent: mockRuntimeAgentRunEmbeddedPiAgent,
+          resolveAgentWorkspaceDir: mockRuntimeAgentResolveAgentWorkspaceDir,
+          resolveAgentDir: mockRuntimeAgentResolveAgentDir,
+          ensureAgentWorkspace: mockRuntimeAgentEnsureAgentWorkspace,
+          session: {
+            resolveSessionFilePath: mockRuntimeAgentResolveSessionFilePath,
+          },
+        },
+      },
+    } as unknown as OpenClawApi;
     executor = new OpenClawAdapter(mockApi);
     (executor as any).extensionApi = mockExtApi;
   });
 
   it("spawns agent session successfully", async () => {
-    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
-      meta: { durationMs: 1000, agentMeta: { sessionId: "session-12345", provider: "a", model: "m" } },
+    mockRuntimeSubagentRun.mockResolvedValueOnce({
+      runId: "run-123",
+      childSessionKey: "agent:swe-backend:subagent:child-123",
     });
 
     const context: TaskContext = {
@@ -58,22 +95,21 @@ describe("OpenClawAdapter", () => {
     expect(result.success).toBe(true);
     expect(result.sessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
 
-    // Wait for background agent call to resolve
-    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
-    expect(mockRunEmbeddedPiAgent).toHaveBeenCalledWith(
+    await vi.waitFor(() => expect(mockRuntimeSubagentRun).toHaveBeenCalledTimes(1));
+    expect(mockRuntimeSubagentRun).toHaveBeenCalledWith(
       expect.objectContaining({
-        agentId: "swe-backend",
         sessionKey: expect.stringMatching(/^agent:swe-backend:subagent:/),
-        prompt: expect.stringContaining("TASK-001"),
+        agentId: "swe-backend",
+        message: expect.stringContaining("TASK-001"),
+        deliver: false,
       }),
     );
+    expect(mockRuntimeAgentRunEmbeddedPiAgent).not.toHaveBeenCalled();
+    expect(mockRunEmbeddedPiAgent).not.toHaveBeenCalled();
   });
 
   it("handles setup failure gracefully (ensureAgentWorkspace throws)", async () => {
-    // Fire-and-forget: errors from runEmbeddedPiAgent happen in background.
-    // Only setup-stage errors (before the agent is launched) surface in the return value.
-    // Mock a setup-stage error: ensureAgentWorkspace throwing.
-    mockExtApi.ensureAgentWorkspace.mockRejectedValueOnce(new Error("Agent not found"));
+    mockRuntimeSubagentRun.mockRejectedValueOnce(new Error("Agent not found"));
 
     const context: TaskContext = {
       taskId: "TASK-002",
@@ -91,8 +127,8 @@ describe("OpenClawAdapter", () => {
 
   it("clamps timeout to 300_000ms minimum", async () => {
     // Code applies Math.max(opts.timeoutMs, 300_000) — anything below 300s is clamped
-    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
-      meta: { durationMs: 1000, agentMeta: { sessionId: "s-t", provider: "a", model: "m" } },
+    mockRuntimeSubagentRun.mockResolvedValueOnce({
+      runId: "run-timeout-min",
     });
 
     const context: TaskContext = {
@@ -105,15 +141,15 @@ describe("OpenClawAdapter", () => {
 
     await executor.spawnSession(context, { timeoutMs: 60_000 });
 
-    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
-    expect(mockRunEmbeddedPiAgent).toHaveBeenCalledWith(
+    await vi.waitFor(() => expect(mockRuntimeSubagentRun).toHaveBeenCalledTimes(1));
+    expect(mockRuntimeSubagentRun).toHaveBeenCalledWith(
       expect.objectContaining({ timeoutMs: 300_000 }),
     );
   });
 
   it("passes through timeout above 300_000ms minimum", async () => {
-    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
-      meta: { durationMs: 1000, agentMeta: { sessionId: "s-t2", provider: "a", model: "m" } },
+    mockRuntimeSubagentRun.mockResolvedValueOnce({
+      runId: "run-timeout-max",
     });
 
     const context: TaskContext = {
@@ -126,15 +162,15 @@ describe("OpenClawAdapter", () => {
 
     await executor.spawnSession(context, { timeoutMs: 600_000 });
 
-    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
-    expect(mockRunEmbeddedPiAgent).toHaveBeenCalledWith(
+    await vi.waitFor(() => expect(mockRuntimeSubagentRun).toHaveBeenCalledTimes(1));
+    expect(mockRuntimeSubagentRun).toHaveBeenCalledWith(
       expect.objectContaining({ timeoutMs: 600_000 }),
     );
   });
 
   it("includes routing metadata in prompt", async () => {
-    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
-      meta: { durationMs: 1000, agentMeta: { sessionId: "s-r", provider: "a", model: "m" } },
+    mockRuntimeSubagentRun.mockResolvedValueOnce({
+      runId: "run-routing",
     });
 
     const context: TaskContext = {
@@ -147,15 +183,14 @@ describe("OpenClawAdapter", () => {
 
     await executor.spawnSession(context);
 
-    const params = mockRunEmbeddedPiAgent.mock.calls[0][0];
-    expect(params.prompt).toContain("frontend-engineer");
+    const params = mockRuntimeSubagentRun.mock.calls[0][0];
+    expect(params.message).toContain("frontend-engineer");
   });
 
   it("handles background API exceptions without affecting spawn result", async () => {
-    // Fire-and-forget: thrown errors from runEmbeddedPiAgent are caught in
-    // runAgentBackground and logged — they don't surface in spawnSession return.
     mockExecLogFns.error.mockClear();
-    mockRunEmbeddedPiAgent.mockRejectedValueOnce(new Error("Network error"));
+    mockRuntimeSubagentRun.mockResolvedValueOnce({ runId: "run-bg-error" });
+    mockRuntimeSubagentWaitForRun.mockRejectedValueOnce(new Error("Network error"));
 
     const context: TaskContext = {
       taskId: "TASK-005",
@@ -172,14 +207,14 @@ describe("OpenClawAdapter", () => {
 
     // Background logs the error via structured logger
     await vi.waitFor(() => expect(mockExecLogFns.error).toHaveBeenCalledWith(
-      expect.objectContaining({ taskId: "TASK-005" }),
-      expect.stringContaining("background agent run failed"),
+      expect.objectContaining({ taskId: "TASK-005", runId: "run-bg-error" }),
+      expect.stringContaining("subagent waitForRun failed"),
     ));
   });
 
   it("includes aof_task_complete instruction with taskId", async () => {
-    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
-      meta: { durationMs: 1000, agentMeta: { sessionId: "s-c", provider: "a", model: "m" } },
+    mockRuntimeSubagentRun.mockResolvedValueOnce({
+      runId: "run-complete",
     });
 
     const context: TaskContext = {
@@ -192,14 +227,14 @@ describe("OpenClawAdapter", () => {
 
     await executor.spawnSession(context);
 
-    const params = mockRunEmbeddedPiAgent.mock.calls[0][0];
-    expect(params.prompt).toContain("aof_task_complete");
-    expect(params.prompt).toContain('taskId="TASK-006"');
+    const params = mockRuntimeSubagentRun.mock.calls[0][0];
+    expect(params.message).toContain("aof_task_complete");
+    expect(params.message).toContain('taskId="TASK-006"');
   });
 
   it("normalizes agent:prefix:suffix to agent name", async () => {
-    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
-      meta: { durationMs: 1000, agentMeta: { sessionId: "s-n", provider: "a", model: "m" } },
+    mockRuntimeSubagentRun.mockResolvedValueOnce({
+      runId: "run-normalize",
     });
 
     const context: TaskContext = {
@@ -212,7 +247,7 @@ describe("OpenClawAdapter", () => {
 
     await executor.spawnSession(context);
 
-    expect(mockRunEmbeddedPiAgent).toHaveBeenCalledWith(
+    expect(mockRuntimeSubagentRun).toHaveBeenCalledWith(
       expect.objectContaining({ agentId: "swe-backend" }),
     );
   });
@@ -234,9 +269,90 @@ describe("OpenClawAdapter", () => {
     expect(result.error).toContain("config");
   });
 
-  it("invokes onRunComplete callback after successful agent run", async () => {
+  it("falls back to api.runtime.agent.runEmbeddedPiAgent when subagent runtime is unavailable", async () => {
+    delete (mockApi.runtime as any).subagent;
+    mockRuntimeAgentRunEmbeddedPiAgent.mockResolvedValueOnce({
+      meta: { durationMs: 1000, agentMeta: { sessionId: "runtime-agent-123", provider: "a", model: "m" } },
+    });
+
+    const context: TaskContext = {
+      taskId: "TASK-RT-001",
+      taskPath: "/path/to/task.md",
+      agent: "swe-backend",
+      priority: "normal",
+      routing: {},
+    };
+
+    const result = await executor.spawnSession(context);
+
+    expect(result.success).toBe(true);
+    await vi.waitFor(() => expect(mockRuntimeAgentRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
+    expect(mockRuntimeAgentRunEmbeddedPiAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionKey: expect.stringMatching(/^agent:swe-backend:subagent:/),
+        agentId: "swe-backend",
+        prompt: expect.stringContaining("TASK-RT-001"),
+      }),
+    );
+    expect(mockRunEmbeddedPiAgent).not.toHaveBeenCalled();
+  });
+
+  it("reports runtime subagent sessions as alive for non-terminal waitForRun statuses", async () => {
+    mockRuntimeSubagentRun.mockResolvedValueOnce({
+      runId: "run-status-alive",
+      childSessionKey: "agent:swe-backend:subagent:child-alive",
+    });
+    mockRuntimeSubagentWaitForRun.mockResolvedValue({
+      status: "running",
+    });
+
+    const context: TaskContext = {
+      taskId: "TASK-STATUS-001",
+      taskPath: "/path/to/task.md",
+      agent: "swe-backend",
+      priority: "normal",
+      routing: {},
+    };
+
+    const spawn = await executor.spawnSession(context);
+    const status = await executor.getSessionStatus(spawn.sessionId!);
+
+    expect(status.alive).toBe(true);
+  });
+
+  it("falls back to legacy extensionAPI when runtime helpers are unavailable", async () => {
+    delete (mockApi.runtime as any).subagent;
+    delete (mockApi.runtime as any).agent;
     mockRunEmbeddedPiAgent.mockResolvedValueOnce({
-      meta: { durationMs: 2000, agentMeta: { sessionId: "s-cb", provider: "a", model: "m" } },
+      meta: { durationMs: 1000, agentMeta: { sessionId: "legacy-123", provider: "a", model: "m" } },
+    });
+
+    const context: TaskContext = {
+      taskId: "TASK-LEGACY-001",
+      taskPath: "/path/to/task.md",
+      agent: "swe-backend",
+      priority: "normal",
+      routing: {},
+    };
+
+    const result = await executor.spawnSession(context);
+
+    expect(result.success).toBe(true);
+    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
+    expect(mockRunEmbeddedPiAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionKey: expect.stringMatching(/^agent:swe-backend:subagent:/),
+        agentId: "swe-backend",
+      }),
+    );
+  });
+
+  it("invokes onRunComplete callback after successful agent run", async () => {
+    mockRuntimeSubagentRun.mockResolvedValueOnce({
+      runId: "run-callback",
+    });
+    mockRuntimeSubagentWaitForRun.mockResolvedValueOnce({
+      status: "completed",
     });
 
     const onRunComplete = vi.fn();
@@ -256,12 +372,14 @@ describe("OpenClawAdapter", () => {
     expect(outcome.taskId).toBe("TASK-CB-001");
     expect(outcome.success).toBe(true);
     expect(outcome.aborted).toBe(false);
-    expect(outcome.durationMs).toBe(2000);
+    expect(outcome.durationMs).toBeGreaterThanOrEqual(0);
   });
 
   it("invokes onRunComplete with error when agent fails", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    mockRunEmbeddedPiAgent.mockRejectedValueOnce(new Error("Agent crashed"));
+    mockRuntimeSubagentRun.mockResolvedValueOnce({
+      runId: "run-callback-error",
+    });
+    mockRuntimeSubagentWaitForRun.mockRejectedValueOnce(new Error("Agent crashed"));
 
     const onRunComplete = vi.fn();
 
@@ -279,16 +397,16 @@ describe("OpenClawAdapter", () => {
     const outcome: AgentRunOutcome = onRunComplete.mock.calls[0][0];
     expect(outcome.taskId).toBe("TASK-CB-002");
     expect(outcome.success).toBe(false);
-    expect(outcome.error?.kind).toBe("exception");
+    expect(outcome.error?.kind).toBe("subagent_wait");
     expect(outcome.error?.message).toContain("Agent crashed");
-
-    errorSpy.mockRestore();
   });
 
   it("invokes onRunComplete with aborted=true when agent is aborted", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
-      meta: { durationMs: 500, aborted: true },
+    mockRuntimeSubagentRun.mockResolvedValueOnce({
+      runId: "run-callback-aborted",
+    });
+    mockRuntimeSubagentWaitForRun.mockResolvedValueOnce({
+      status: "aborted",
     });
 
     const onRunComplete = vi.fn();
@@ -307,12 +425,39 @@ describe("OpenClawAdapter", () => {
     const outcome: AgentRunOutcome = onRunComplete.mock.calls[0][0];
     expect(outcome.success).toBe(false);
     expect(outcome.aborted).toBe(true);
-
-    warnSpy.mockRestore();
   });
 
-  it("passes alsoAllow with AOF tool names to runEmbeddedPiAgent", async () => {
-    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
+  it("treats non-terminal waitForRun statuses as unsuccessful completion outcomes", async () => {
+    mockRuntimeSubagentRun.mockResolvedValueOnce({
+      runId: "run-callback-running",
+    });
+    mockRuntimeSubagentWaitForRun.mockResolvedValueOnce({
+      status: "running",
+    });
+
+    const onRunComplete = vi.fn();
+
+    const context: TaskContext = {
+      taskId: "TASK-CB-004",
+      taskPath: "/path/to/task.md",
+      agent: "swe-backend",
+      priority: "normal",
+      routing: {},
+    };
+
+    await executor.spawnSession(context, { onRunComplete });
+
+    await vi.waitFor(() => expect(onRunComplete).toHaveBeenCalledTimes(1));
+    const outcome: AgentRunOutcome = onRunComplete.mock.calls[0][0];
+    expect(outcome.success).toBe(false);
+    expect(outcome.aborted).toBe(false);
+    expect(outcome.error?.kind).toBe("subagent");
+    expect(outcome.error?.message).toContain("did not reach a terminal status");
+  });
+
+  it("passes alsoAllow with AOF tool names to embedded runtime fallback", async () => {
+    delete (mockApi.runtime as any).subagent;
+    mockRuntimeAgentRunEmbeddedPiAgent.mockResolvedValueOnce({
       meta: { durationMs: 1000 },
     });
 
@@ -326,17 +471,17 @@ describe("OpenClawAdapter", () => {
 
     await executor.spawnSession(context);
 
-    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
-    expect(mockRunEmbeddedPiAgent).toHaveBeenCalledWith(
+    await vi.waitFor(() => expect(mockRuntimeAgentRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
+    expect(mockRuntimeAgentRunEmbeddedPiAgent).toHaveBeenCalledWith(
       expect.objectContaining({
         alsoAllow: expect.arrayContaining(["aof_task_complete", "aof_task_update"]),
       }),
     );
   });
 
-  it("includes tool verification instruction in prompt", async () => {
-    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
-      meta: { durationMs: 1000 },
+  it("includes tool verification instruction in subagent message", async () => {
+    mockRuntimeSubagentRun.mockResolvedValueOnce({
+      runId: "run-verify",
     });
 
     const context: TaskContext = {
@@ -349,14 +494,14 @@ describe("OpenClawAdapter", () => {
 
     await executor.spawnSession(context);
 
-    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
-    const params = mockRunEmbeddedPiAgent.mock.calls[0][0];
-    expect(params.prompt).toContain("verify that the `aof_task_complete` tool is available");
+    await vi.waitFor(() => expect(mockRuntimeSubagentRun).toHaveBeenCalledTimes(1));
+    const params = mockRuntimeSubagentRun.mock.calls[0][0];
+    expect(params.message).toContain("verify that the `aof_task_complete` tool is available");
   });
 
   it("formatTaskInstruction includes FAILED consequence warning", async () => {
-    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
-      meta: { durationMs: 1000, agentMeta: { sessionId: "s-enf1", provider: "a", model: "m" } },
+    mockRuntimeSubagentRun.mockResolvedValueOnce({
+      runId: "run-enf-1",
     });
 
     const context: TaskContext = {
@@ -369,14 +514,14 @@ describe("OpenClawAdapter", () => {
 
     await executor.spawnSession(context);
 
-    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
-    const params = mockRunEmbeddedPiAgent.mock.calls[0][0];
-    expect(params.prompt).toContain("FAILED");
+    await vi.waitFor(() => expect(mockRuntimeSubagentRun).toHaveBeenCalledTimes(1));
+    const params = mockRuntimeSubagentRun.mock.calls[0][0];
+    expect(params.message).toContain("FAILED");
   });
 
   it("formatTaskInstruction includes retried-by-another-agent language", async () => {
-    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
-      meta: { durationMs: 1000, agentMeta: { sessionId: "s-enf2", provider: "a", model: "m" } },
+    mockRuntimeSubagentRun.mockResolvedValueOnce({
+      runId: "run-enf-2",
     });
 
     const context: TaskContext = {
@@ -389,14 +534,14 @@ describe("OpenClawAdapter", () => {
 
     await executor.spawnSession(context);
 
-    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
-    const params = mockRunEmbeddedPiAgent.mock.calls[0][0];
-    expect(params.prompt).toContain("retried by another agent");
+    await vi.waitFor(() => expect(mockRuntimeSubagentRun).toHaveBeenCalledTimes(1));
+    const params = mockRuntimeSubagentRun.mock.calls[0][0];
+    expect(params.message).toContain("retried by another agent");
   });
 
   it("formatTaskInstruction includes summary-of-actions instruction", async () => {
-    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
-      meta: { durationMs: 1000, agentMeta: { sessionId: "s-enf3", provider: "a", model: "m" } },
+    mockRuntimeSubagentRun.mockResolvedValueOnce({
+      runId: "run-enf-3",
     });
 
     const context: TaskContext = {
@@ -409,15 +554,18 @@ describe("OpenClawAdapter", () => {
 
     await executor.spawnSession(context);
 
-    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
-    const params = mockRunEmbeddedPiAgent.mock.calls[0][0];
-    expect(params.prompt).toContain("summary of actions");
+    await vi.waitFor(() => expect(mockRuntimeSubagentRun).toHaveBeenCalledTimes(1));
+    const params = mockRuntimeSubagentRun.mock.calls[0][0];
+    expect(params.message).toContain("summary of actions");
   });
 
   it("handles onRunComplete callback errors gracefully", async () => {
     mockExecLogFns.error.mockClear();
-    mockRunEmbeddedPiAgent.mockResolvedValueOnce({
-      meta: { durationMs: 1000 },
+    mockRuntimeSubagentRun.mockResolvedValueOnce({
+      runId: "run-callback-boom",
+    });
+    mockRuntimeSubagentWaitForRun.mockResolvedValueOnce({
+      status: "completed",
     });
 
     const onRunComplete = vi.fn().mockRejectedValueOnce(new Error("callback boom"));
