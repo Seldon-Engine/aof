@@ -7,8 +7,8 @@
 # Safety net (added after orphan incident 2026-04-12): vitest fork workers
 # stuck in synchronous CPU hangs can survive their parent's death and peg
 # CPU indefinitely. This script puts vitest in its own process group and
-# runs two watchdogs that SIGKILL the whole group if (a) this script's
-# parent dies or (b) a wall-clock timeout elapses.
+# runs a single background watchdog loop that SIGKILLs the whole group if
+# (a) this script's parent dies or (b) a wall-clock timeout elapses.
 #
 # Transitional until AOF-adf (dispatch throttling) ships at the scheduler
 # level. Once concurrent agents use git worktrees, each gets its own lock
@@ -59,9 +59,12 @@ cleanup() {
   exit "$exit_code"
 }
 trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
-trap 'exit 129' HUP
+# Forward terminating signals to the child process group so vitest sees the
+# original signal (SIGINT for Ctrl-C, etc.) and can run its own shutdown path
+# before the EXIT trap's cleanup escalates to SIGKILL.
+trap 'kill_pgroup "$CHILD_PID" INT; exit 130' INT
+trap 'kill_pgroup "$CHILD_PID" TERM; exit 143' TERM
+trap 'kill_pgroup "$CHILD_PID" HUP; exit 129' HUP
 
 flock --timeout "$TIMEOUT" "$LOCK_FILE" npx vitest "$@" &
 CHILD_PID=$!
@@ -69,7 +72,7 @@ CHILD_PID=$!
 (
   START=$SECONDS
   while true; do
-    sleep 5
+    sleep 1
     if ! kill -0 "$SCRIPT_PID" 2>/dev/null; then
       echo "[test-lock.sh] parent script gone; killing orphaned vitest process group" >&2
       kill_pgroup "$CHILD_PID" KILL
