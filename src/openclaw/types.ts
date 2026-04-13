@@ -35,11 +35,63 @@ export interface OpenClawHttpRouteDefinition {
   handler: GatewayHandler;
 }
 
+export interface OpenClawSubagentRunResult {
+  runId: string;
+  childSessionKey?: string;
+  sessionKey?: string;
+}
+
+export interface OpenClawSubagentWaitResult {
+  status?: string;
+  error?: { kind?: string; message?: string };
+}
+
+export interface OpenClawSubagentRuntime {
+  run(params: Record<string, unknown>): Promise<OpenClawSubagentRunResult>;
+  waitForRun?(params: { runId: string; timeoutMs?: number }): Promise<OpenClawSubagentWaitResult>;
+  deleteSession?(params: { sessionKey: string }): Promise<void>;
+  getSessionMessages?(params: { sessionKey: string; limit?: number }): Promise<{ messages: unknown[] }>;
+}
+
+export interface OpenClawAgentRuntime {
+  runEmbeddedPiAgent?: (params: Record<string, unknown>) => Promise<{
+    meta: {
+      durationMs: number;
+      agentMeta?: {
+        sessionId: string;
+        provider: string;
+        model: string;
+      };
+      aborted?: boolean;
+      error?: {
+        kind: string;
+        message: string;
+      };
+    };
+  }>;
+  resolveAgentWorkspaceDir?: (cfg: Record<string, unknown>, agentId?: string) => string;
+  resolveAgentDir?: (cfg: Record<string, unknown>, agentId?: string) => string;
+  resolveAgentTimeoutMs?: (cfg: Record<string, unknown>, agentId?: string) => number;
+  ensureAgentWorkspace?: (
+    cfgOrParams: Record<string, unknown> | { dir: string },
+    agentId?: string,
+  ) => Promise<{ dir?: string } | void>;
+  session?: {
+    resolveSessionFilePath?: (cfg: Record<string, unknown>, sessionId: string) => string;
+  };
+}
+
+export interface OpenClawRuntime {
+  agent?: OpenClawAgentRuntime;
+  subagent?: OpenClawSubagentRuntime;
+}
+
 // --- API Interface ---
 
 export interface OpenClawApi {
   config?: Record<string, unknown>;
   pluginConfig?: Record<string, unknown>;
+  runtime?: OpenClawRuntime;
   logger?: { info(msg: string): void; warn?(msg: string): void; error(msg: string): void; debug?(msg: string): void };
   log?(level: string, msg: string): void;
   registerService(def: OpenClawServiceDefinition): void;

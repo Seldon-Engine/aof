@@ -15,7 +15,7 @@ import { homedir } from "node:os";
 import { getConfig } from "../config/registry.js";
 import { createLogger } from "../logging/index.js";
 import type { GatewayAdapter, TaskContext, SpawnResult, SessionStatus, AgentRunOutcome } from "../dispatch/executor.js";
-import type { OpenClawApi } from "./types.js";
+import type { OpenClawApi, OpenClawAgentRuntime, OpenClawSubagentRuntime } from "./types.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import { readHeartbeat, markRunArtifactExpired } from "../recovery/run-artifacts.js";
 
@@ -58,6 +58,7 @@ export class OpenClawAdapter implements GatewayAdapter {
   private extensionApi: ExtensionApi | undefined;
   private extensionApiLoadPromise: Promise<ExtensionApi> | undefined;
   private sessionToTask = new Map<string, string>();
+  private sessionToRun = new Map<string, { runId: string; sessionKey: string }>();
 
   constructor(
     private readonly api: OpenClawApi,
@@ -76,18 +77,6 @@ export class OpenClawAdapter implements GatewayAdapter {
   ): Promise<SpawnResult> {
     log.info({ taskId: context.taskId, agent: context.agent }, "spawnSession");
 
-    let ext: ExtensionApi;
-    try {
-      ext = await this.loadExtensionApi();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      log.error({ err }, "failed to load extensionAPI");
-      return {
-        success: false,
-        error: `Failed to load gateway extensionAPI: ${message}`,
-      };
-    }
-
     const config = this.api.config as Record<string, unknown> | undefined;
     if (!config) {
       return {
@@ -104,6 +93,51 @@ export class OpenClawAdapter implements GatewayAdapter {
     // dispatch. For embedded agents, we need the full execution budget.
     // Use the larger of the caller's timeout and our minimum.
     const timeoutMs = Math.max(opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
+    const prompt = this.formatTaskInstruction(context);
+
+    const subagentRuntime = this.api.runtime?.subagent;
+    if (subagentRuntime?.run) {
+      return this.spawnViaSubagentRuntime({
+        subagentRuntime,
+        agentId,
+        sessionId,
+        sessionKey,
+        prompt,
+        timeoutMs,
+        taskId: context.taskId,
+        thinking: context.thinking,
+        onRunComplete: opts?.onRunComplete,
+      });
+    }
+
+    const runtimeAgent = this.api.runtime?.agent;
+    if (this.hasEmbeddedRuntime(runtimeAgent)) {
+      return this.spawnViaRuntimeAgent({
+        runtimeAgent,
+        config,
+        agentId,
+        sessionId,
+        sessionKey,
+        prompt,
+        timeoutMs,
+        runId,
+        taskId: context.taskId,
+        thinking: context.thinking,
+        onRunComplete: opts?.onRunComplete,
+      });
+    }
+
+    let ext: ExtensionApi;
+    try {
+      ext = await this.loadExtensionApi();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.error({ err }, "failed to load extensionAPI");
+      return {
+        success: false,
+        error: `Failed to load gateway extensionAPI: ${message}`,
+      };
+    }
 
     try {
       // Resolve paths synchronously so failures are reported to the scheduler
@@ -111,8 +145,6 @@ export class OpenClawAdapter implements GatewayAdapter {
       const { dir: workspaceDir } = await ext.ensureAgentWorkspace({ dir: workspaceDirRaw });
       const agentDir = ext.resolveAgentDir(config, agentId);
       const sessionFile = ext.resolveSessionFilePath(sessionId);
-
-      const prompt = this.formatTaskInstruction(context);
 
       log.info({ agentId, sessionId }, "launching embedded agent (fire-and-forget)");
 
@@ -166,6 +198,22 @@ export class OpenClawAdapter implements GatewayAdapter {
       return { sessionId, alive: false };
     }
 
+    const runState = this.sessionToRun.get(sessionId);
+    if (runState && this.api.runtime?.subagent?.waitForRun) {
+      try {
+        const result = await this.api.runtime.subagent.waitForRun({ runId: runState.runId, timeoutMs: 1 });
+        const status = result.status?.toLowerCase();
+        if (status === "completed" || status === "succeeded" || status === "done") {
+          return { sessionId, alive: false };
+        }
+        if (status === "failed" || status === "error" || status === "aborted" || status === "cancelled") {
+          return { sessionId, alive: false };
+        }
+      } catch {
+        // Non-blocking status probe; fall back to heartbeat/status file behavior.
+      }
+    }
+
     if (!this.store) {
       // No store available — cannot check heartbeat
       return { sessionId, alive: false };
@@ -197,7 +245,17 @@ export class OpenClawAdapter implements GatewayAdapter {
       await markRunArtifactExpired(this.store, taskId, "force_completed");
     }
 
+    const runState = this.sessionToRun.get(sessionId);
+    if (runState && this.api.runtime?.subagent?.deleteSession) {
+      try {
+        await this.api.runtime.subagent.deleteSession({ sessionKey: runState.sessionKey });
+      } catch (err) {
+        log.warn({ err, sessionId, sessionKey: runState.sessionKey }, "failed to delete subagent session");
+      }
+    }
+
     this.sessionToTask.delete(sessionId);
+    this.sessionToRun.delete(sessionId);
     log.info({ sessionId, taskId }, "force-completed session");
   }
 
@@ -300,6 +358,212 @@ export class OpenClawAdapter implements GatewayAdapter {
         log.error({ err: cbErr, taskId: params.taskId }, "onRunComplete callback failed");
       }
     }
+  }
+
+  private async spawnViaSubagentRuntime(params: {
+    subagentRuntime: OpenClawSubagentRuntime;
+    agentId: string;
+    sessionId: string;
+    sessionKey: string;
+    prompt: string;
+    timeoutMs: number;
+    taskId: string;
+    thinking?: string;
+    onRunComplete?: (outcome: AgentRunOutcome) => void | Promise<void>;
+  }): Promise<SpawnResult> {
+    try {
+      const result = await params.subagentRuntime!.run({
+        sessionKey: params.sessionKey,
+        message: params.prompt,
+        agentId: params.agentId,
+        timeoutMs: params.timeoutMs,
+        deliver: false,
+        ...(params.thinking && { thinking: params.thinking }),
+      });
+
+      this.sessionToTask.set(params.sessionId, params.taskId);
+      this.sessionToRun.set(params.sessionId, {
+        runId: result.runId,
+        sessionKey: result.childSessionKey ?? result.sessionKey ?? params.sessionKey,
+      });
+
+      if (params.subagentRuntime.waitForRun) {
+        void this.watchSubagentRun({
+          sessionId: params.sessionId,
+          taskId: params.taskId,
+          runId: result.runId,
+          waitForRun: params.subagentRuntime.waitForRun.bind(params.subagentRuntime),
+          timeoutMs: params.timeoutMs,
+          onRunComplete: params.onRunComplete,
+        });
+      }
+
+      log.info({ taskId: params.taskId, agentId: params.agentId, runId: result.runId, sessionKey: params.sessionKey }, "launched runtime subagent");
+
+      return {
+        success: true,
+        sessionId: params.sessionId,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.error({ err, taskId: params.taskId }, "runtime subagent spawn failed");
+      return {
+        success: false,
+        error: message,
+        platformLimit: this.parsePlatformLimitError(message),
+      };
+    }
+  }
+
+  private async spawnViaRuntimeAgent(params: {
+    runtimeAgent: OpenClawAgentRuntime;
+    config: Record<string, unknown>;
+    agentId: string;
+    sessionId: string;
+    sessionKey: string;
+    prompt: string;
+    timeoutMs: number;
+    runId: string;
+    taskId: string;
+    thinking?: string;
+    onRunComplete?: (outcome: AgentRunOutcome) => void | Promise<void>;
+  }): Promise<SpawnResult> {
+    try {
+      const workspaceDirRaw = params.runtimeAgent!.resolveAgentWorkspaceDir!(params.config, params.agentId);
+      const ensured = await params.runtimeAgent!.ensureAgentWorkspace!(params.config, params.agentId);
+      const workspaceDir = typeof ensured === "object" && ensured && "dir" in ensured && typeof ensured.dir === "string"
+        ? ensured.dir
+        : workspaceDirRaw;
+      const agentDir = params.runtimeAgent!.resolveAgentDir!(params.config, params.agentId);
+      const sessionFile = params.runtimeAgent!.session?.resolveSessionFilePath?.(params.config, params.sessionId)
+        ?? join(agentDir, "sessions", `${params.sessionId}.jsonl`);
+
+      log.info({ agentId: params.agentId, sessionId: params.sessionId }, "launching runtime embedded agent (fire-and-forget)");
+
+      void this.runRuntimeAgentBackground({
+        runEmbeddedPiAgent: params.runtimeAgent!.runEmbeddedPiAgent!,
+        sessionId: params.sessionId,
+        sessionKey: params.sessionKey,
+        sessionFile,
+        workspaceDir,
+        agentDir,
+        config: params.config,
+        prompt: params.prompt,
+        agentId: params.agentId,
+        timeoutMs: params.timeoutMs,
+        runId: params.runId,
+        taskId: params.taskId,
+        thinking: params.thinking,
+        onRunComplete: params.onRunComplete,
+      });
+
+      this.sessionToTask.set(params.sessionId, params.taskId);
+
+      return {
+        success: true,
+        sessionId: params.sessionId,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.error({ err }, "runtime embedded agent setup failed");
+      return {
+        success: false,
+        error: message,
+        platformLimit: this.parsePlatformLimitError(message),
+      };
+    }
+  }
+
+  private async runRuntimeAgentBackground(params: {
+    runEmbeddedPiAgent: (params: Record<string, unknown>) => Promise<EmbeddedPiRunResult>;
+    sessionId: string;
+    sessionKey: string;
+    sessionFile: string;
+    workspaceDir: string;
+    agentDir: string;
+    config: Record<string, unknown>;
+    prompt: string;
+    agentId: string;
+    timeoutMs: number;
+    runId: string;
+    taskId: string;
+    thinking?: string;
+    onRunComplete?: (outcome: AgentRunOutcome) => void | Promise<void>;
+  }): Promise<void> {
+    return this.runAgentBackground(
+      {
+        runEmbeddedPiAgent: params.runEmbeddedPiAgent,
+      } as ExtensionApi,
+      params,
+    );
+  }
+
+  private async watchSubagentRun(params: {
+    sessionId: string;
+    taskId: string;
+    runId: string;
+    waitForRun: (params: { runId: string; timeoutMs?: number }) => Promise<{ status?: string; error?: { kind?: string; message?: string } }>;
+    timeoutMs: number;
+    onRunComplete?: (outcome: AgentRunOutcome) => void | Promise<void>;
+  }): Promise<void> {
+    const startMs = Date.now();
+    let outcome: AgentRunOutcome;
+
+    try {
+      const result = await params.waitForRun({ runId: params.runId, timeoutMs: params.timeoutMs });
+      const status = result.status?.toLowerCase();
+      const succeeded = status === "completed" || status === "succeeded" || status === "done";
+      const aborted = status === "aborted" || status === "cancelled";
+
+      const failed = status === "failed" || status === "error";
+      outcome = {
+        taskId: params.taskId,
+        sessionId: params.sessionId,
+        success: !failed && !aborted && !result.error,
+        aborted,
+        error: result.error
+          ? { kind: result.error.kind ?? "subagent", message: result.error.message ?? "Subagent run failed" }
+          : failed
+            ? { kind: "subagent", message: `Subagent run ended with status ${result.status}` }
+          : undefined,
+        durationMs: Date.now() - startMs,
+      };
+      if (outcome.error) {
+        log.error({ taskId: params.taskId, runId: params.runId, error: outcome.error }, "subagent run completed with error");
+      } else if (outcome.aborted) {
+        log.warn({ taskId: params.taskId, runId: params.runId }, "subagent run was aborted");
+      } else {
+        log.info({ taskId: params.taskId, runId: params.runId, durationMs: outcome.durationMs }, "subagent run completed");
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      outcome = {
+        taskId: params.taskId,
+        sessionId: params.sessionId,
+        success: false,
+        aborted: false,
+        error: { kind: "subagent_wait", message },
+        durationMs: Date.now() - startMs,
+      };
+      log.error({ err, taskId: params.taskId, runId: params.runId }, "subagent waitForRun failed");
+    }
+
+    if (params.onRunComplete) {
+      try {
+        await params.onRunComplete(outcome);
+      } catch (cbErr) {
+        log.error({ err: cbErr, taskId: params.taskId }, "onRunComplete callback failed");
+      }
+    }
+  }
+
+  private hasEmbeddedRuntime(runtimeAgent: OpenClawAgentRuntime | undefined): runtimeAgent is OpenClawAgentRuntime {
+    return Boolean(
+      runtimeAgent?.runEmbeddedPiAgent
+        && runtimeAgent.resolveAgentWorkspaceDir
+        && runtimeAgent.resolveAgentDir
+        && runtimeAgent.ensureAgentWorkspace,
+    );
   }
 
   private normalizeAgentId(agent: string): string {
