@@ -121,16 +121,21 @@ See: `.planning/milestones/v1.10-ROADMAP.md` for full details
 
 ### Phase 42: Installer mode-exclusivity
 
-**Goal:** Prevent duplicate task polling between plugin-mode AOFService (inside openclaw gateway) and standalone aof-daemon, both scanning ~/.aof/data/. Installer should detect openclaw plugin integration and skip (or gate off) the standalone daemon service.
+**Goal:** Prevent duplicate task polling between plugin-mode AOFService (inside openclaw gateway) and standalone aof-daemon, both scanning ~/.aof/data/. Installer detects openclaw plugin integration (symlink at `~/.openclaw/extensions/aof`, per D-01) and auto-skips the standalone daemon service; `--force-daemon` overrides; upgrade-time convergence uninstalls redundant pre-existing daemons.
 
 **Why:** Today every task in `ready/` is raced between the gateway's in-process AOFService and the daemon's AOFService. Gateway wins fast-path; daemon's polls are wasted at best, HTTP-dispatch brittle at worst. Also the install upgrade race (daemon/plugin keeps writing during preserve→wipe→restore) is much harder to solve while both are default-on.
 
-**Detection signal:** `~/.openclaw/extensions/aof` symlink present AND `openclaw config get plugins.slots.memory == "aof"`.
+**Detection signal:** `~/.openclaw/extensions/aof` symlink OR directory present (per CONTEXT.md D-01, narrowed from ROADMAP's initial two-signal wording).
 
-**Scope:** `scripts/install.sh` + `aof setup` CLI. Add `--no-daemon` or auto-skip. Leave existing pure-standalone installs alone.
+**Scope:** `scripts/install.sh` only (per PATTERNS.md — existing TS uninstaller covers all needed teardown via shell-out). Leave pure-standalone installs byte-identical.
 
-**Requirements:** TBD
-**Plans:** TBD (run `/gsd-discuss-phase 42` or `/gsd-plan-phase 42`)
+**Requirements:** D-01, D-02, D-03, D-04, D-05 (authoritative IDs from `.planning/phases/42-installer-mode-exclusivity/42-CONTEXT.md`)
+
+**Plans:** 1/4 plans executed
+- [x] 42-01-PLAN.md — Wave 0 red-test harness: integration test shelling out to install.sh + uninstallService idempotency unit coverage
+- [ ] 42-02-PLAN.md — Wave 1 detection + default skip (D-01/D-03): `plugin_mode_detected` helper + `install_daemon` gate + 3-way `print_summary`
+- [ ] 42-03-PLAN.md — Wave 2 `--force-daemon` override (D-04): global + parse_args arm + --help line + override warn
+- [ ] 42-04-PLAN.md — Wave 3 upgrade convergence (D-05): plist pre-check + `daemon uninstall` shell-out with `|| warn` fallback
 
 ## Backlog
 
