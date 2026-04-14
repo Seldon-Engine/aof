@@ -657,7 +657,29 @@ LAUNCHER
 
 DAEMON_INSTALLED=""
 
+# plugin_mode_detected — returns 0 if OpenClaw plugin integration is present.
+# Detection signal (D-01): $OPENCLAW_HOME/extensions/aof exists as a symlink
+# OR a directory. The symlink is created by scripts/deploy.sh; a directory
+# indicates a legacy hand-copy install and also counts.
+# Zero-dep, no CLI call, no config read, safe to call multiple times.
+plugin_mode_detected() {
+  ext_link="$OPENCLAW_HOME/extensions/aof"
+  if [ -L "$ext_link" ] || [ -d "$ext_link" ]; then
+    return 0
+  fi
+  return 1
+}
+
 install_daemon() {
+  # Mode-exclusivity gate (Phase 42, D-03).
+  # When plugin-mode is detected, skip the standalone daemon install.
+  # Plan 03 adds --force-daemon override; Plan 04 adds D-05 upgrade convergence.
+  if plugin_mode_detected; then
+    say "Plugin-mode detected — skipping standalone daemon. Scheduler runs in-process via openclaw gateway."
+    return 0
+  fi
+
+  # Existing install path — unchanged from pre-Phase 42.
   if [ -f "$INSTALL_DIR/dist/cli/index.js" ]; then
     say "Installing daemon service..."
     if node "$INSTALL_DIR/dist/cli/index.js" daemon install \
@@ -723,7 +745,9 @@ print_summary() {
     printf "  OpenClaw: not detected (install OpenClaw to use AOF as a platform plugin)\n"
   fi
 
-  if [ -n "$DAEMON_INSTALLED" ]; then
+  if plugin_mode_detected && [ -z "$DAEMON_INSTALLED" ]; then
+    printf "  Daemon: skipped (scheduler runs via OpenClaw plugin)\n"
+  elif [ -n "$DAEMON_INSTALLED" ]; then
     printf "  Daemon: installed and running\n"
   else
     printf "  Daemon: not installed — run 'aof daemon install' to start\n"
@@ -737,7 +761,9 @@ print_summary() {
   printf "  Next steps:\n"
   printf "    1. Restart your shell (or run: source your shell profile)\n"
   printf "    2. Review your org chart: %s/org/org-chart.yaml\n" "$DATA_DIR"
-  if [ -z "$DAEMON_INSTALLED" ]; then
+  if plugin_mode_detected && [ -z "$DAEMON_INSTALLED" ]; then
+    printf "    3. Create your first task: aof task create \"My first task\"\n"
+  elif [ -z "$DAEMON_INSTALLED" ]; then
     printf "    3. Start the daemon:      aof daemon install\n"
     printf "    4. Create your first task: aof task create \"My first task\"\n"
   else
