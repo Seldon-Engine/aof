@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.14.4](https://github.com/d0labs/aof/compare/v1.14.3...v1.14.4) (2026-04-14)
+
+### Features
+
+* **42-02:** add plugin_mode_detected gate to install.sh ([9984a16](https://github.com/d0labs/aof/commit/9984a1676abc414e1dde967f9cd8b548ae231a25))
+* **42-03:** add --force-daemon override to installer ([c53e50d](https://github.com/d0labs/aof/commit/c53e50de724e3322444eeee005678c8384294547))
+* **42-04:** add D-05 upgrade convergence to installer ([140674c](https://github.com/d0labs/aof/commit/140674c17e04dc3ee2c8e16b3880e735fc47f2cf))
+
+### Bug Fixes
+
+* **42-02:** correct integration test tarball path ([bd81148](https://github.com/d0labs/aof/commit/bd81148eb5f6952e3eaea70a9bc4c951f89e0f3b))
+* **42:** guard D-05 success message behind CLI-binary check ([336c52b](https://github.com/d0labs/aof/commit/336c52bbc35b44ace76fc97d29fb753e43156439))
+* harden task dispatch and project-scoped lookup ([e88eadf](https://github.com/d0labs/aof/commit/e88eadffaf35782be162a612ad86cc7475c50393))
+
+### Tests
+
+* **42-01:** add RED integration scaffold for install.sh mode-exclusivity ([f9057f8](https://github.com/d0labs/aof/commit/f9057f86dbbee6ea917b2d4a8f426e953d40ac05))
+* **42-01:** add uninstallService idempotency coverage ([fc31411](https://github.com/d0labs/aof/commit/fc314115b55a8fdf5587db696c7aaf63b6ae02ab))
+* **42:** persist human verification items as UAT ([9614138](https://github.com/d0labs/aof/commit/9614138c2a8b8bcdb23a73805a750876ea8bdf0a))
+
 ## [1.14.3](https://github.com/d0labs/aof/compare/v1.14.2...v1.14.3) (2026-04-14)
 
 ### Bug Fixes
