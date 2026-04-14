@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.14.0](https://github.com/d0labs/aof/compare/v1.13.0...v1.14.0) (2026-04-14)
+
+### Features
+
+* **dispatch:** per-task timeoutMs override in aof_dispatch ([207e2f3](https://github.com/d0labs/aof/commit/207e2f396a09f43b715fc54f065657f2a55e6198))
+
+### Bug Fixes
+
+* **openclaw:** capture sessionKey from hook ctx arg ([34e490e](https://github.com/d0labs/aof/commit/34e490e1532a9ee886e6116918c7f4d02169ec23))
+* **openclaw:** correct resolveSessionFilePath call signature ([a165a4f](https://github.com/d0labs/aof/commit/a165a4fa2853d61b3940bb5edb55ebd0a6ae623f))
+* **openclaw:** spawn via api.runtime.agent.runEmbeddedPiAgent ([1c65ba5](https://github.com/d0labs/aof/commit/1c65ba59f9e018b012b78a78cbd4f961b3402d1e))
+
 ## [1.13.0](https://github.com/d0labs/aof/compare/v1.12.0...v1.13.0) (2026-04-14)
 
 ### Features
