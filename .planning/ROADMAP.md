@@ -117,9 +117,9 @@ See: `.planning/milestones/v1.10-ROADMAP.md` for full details
 
 </details>
 
-## Backlog
+## Active Phases
 
-### Phase 999.1: Installer mode-exclusivity (BACKLOG)
+### Phase 42: Installer mode-exclusivity
 
 **Goal:** Prevent duplicate task polling between plugin-mode AOFService (inside openclaw gateway) and standalone aof-daemon, both scanning ~/.aof/data/. Installer should detect openclaw plugin integration and skip (or gate off) the standalone daemon service.
 
@@ -130,8 +130,9 @@ See: `.planning/milestones/v1.10-ROADMAP.md` for full details
 **Scope:** `scripts/install.sh` + `aof setup` CLI. Add `--no-daemon` or auto-skip. Leave existing pure-standalone installs alone.
 
 **Requirements:** TBD
-**Plans:** 0 plans
-- [ ] TBD (promote with /gsd-review-backlog when ready)
+**Plans:** TBD (run `/gsd-discuss-phase 42` or `/gsd-plan-phase 42`)
+
+## Backlog
 
 ### Phase 999.2: Thin-plugin architecture — daemon as single authority (BACKLOG)
 
@@ -146,7 +147,7 @@ See: `.planning/milestones/v1.10-ROADMAP.md` for full details
 - Session-route / tool-call hooks posted daemon-ward via IPC
 - Migration path for existing installs (handled by 999.1's exclusivity first)
 
-**Depends on:** 999.1 (exclusivity must land first so both architectures can coexist during migration)
+**Depends on:** Phase 42 (exclusivity must land first so both architectures can coexist during migration)
 
 **Requirements:** TBD
 **Plans:** 0 plans
