@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, it, expect, vi } from "vitest";
@@ -6,6 +6,7 @@ import { registerAofPlugin } from "../adapter.js";
 import type { OpenClawApi } from "../types.js";
 import { FilesystemTaskStore } from "../../store/task-store.js";
 import { EventLogger } from "../../events/logger.js";
+import { stringify as stringifyYaml } from "yaml";
 
 vi.mock("../../logging/index.js", () => ({
   createLogger: () => ({ trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn(), child: vi.fn() }),
@@ -157,6 +158,66 @@ describe("OpenClaw adapter", () => {
         channel: "telegram",
       },
     });
+  });
+
+  it("routes project-scoped dispatches into the requested project store", async () => {
+    const tools: Array<{ name: string; execute: (id: string, params: Record<string, unknown>) => Promise<any> }> = [];
+    const tmpDir = await mkdtemp(join(tmpdir(), "aof-openclaw-project-scope-"));
+    const logger = new EventLogger(join(tmpDir, "events"));
+    const projectId = "research-portal-platform";
+    const projectRoot = join(tmpDir, "Projects", projectId);
+
+    await mkdir(projectRoot, { recursive: true });
+    await writeFile(join(projectRoot, "project.yaml"), stringifyYaml({
+      id: projectId,
+      title: "Research Portal Platform",
+      status: "active",
+      type: "research",
+      owner: { team: "research", lead: "lead" },
+      participants: [],
+      routing: {},
+      memory: {},
+      links: {},
+    }), "utf-8");
+
+    const api: OpenClawApi = {
+      registerService: vi.fn(),
+      registerTool: (def) => tools.push(def as any),
+      registerHttpRoute: vi.fn(),
+      on: vi.fn(),
+    };
+
+    const service = {
+      start: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn(),
+      getStatus: vi.fn(() => ({ running: false })),
+      handleSessionEnd: vi.fn(),
+      handleAgentEnd: vi.fn(),
+      handleMessageReceived: vi.fn(),
+    };
+
+    registerAofPlugin(api, {
+      dataDir: tmpDir,
+      logger,
+      service,
+    });
+
+    const dispatchTool = tools.find((tool) => tool.name === "aof_dispatch");
+    const result = await dispatchTool!.execute("project-call-1", {
+      title: "Scoped task",
+      brief: "Should land under the requested project",
+      actor: "main",
+      project: projectId,
+    });
+    const payload = JSON.parse(result.content[0].text);
+
+    const projectStore = new FilesystemTaskStore(projectRoot, { projectId });
+    const inboxStore = new FilesystemTaskStore(join(tmpDir, "Projects", "_inbox"), { projectId: "_inbox" });
+    const task = await projectStore.get(payload.taskId);
+
+    expect(task?.frontmatter.project).toBe(projectId);
+    expect(task?.frontmatter.title).toBe("Scoped task");
+    expect(await inboxStore.get(payload.taskId)).toBeUndefined();
   });
 
   it("auto-captures sessionKey from hook ctx (real openclaw (event, ctx) signature)", async () => {

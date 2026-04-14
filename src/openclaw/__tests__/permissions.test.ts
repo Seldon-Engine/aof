@@ -9,7 +9,7 @@ describe("withPermissions", () => {
   const mockPermissionStore = {} as ITaskStore;
   const mockLogger = {} as EventLogger;
 
-  const resolveProjectStore = vi.fn((projectId?: string) => mockStore);
+  const resolveProjectStore = vi.fn(async (projectId?: string) => mockStore);
   const getStoreForActor = vi.fn(async (actor?: string, baseStore?: ITaskStore) => mockPermissionStore);
 
   it("extracts actor and project from params", async () => {
