@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.14.2](https://github.com/d0labs/aof/compare/v1.14.1...v1.14.2) (2026-04-14)
+
+### Features
+
+* **installer:** --tarball flag for local-build testing ([f236bf1](https://github.com/d0labs/aof/commit/f236bf169cdefb041a0910e859893e1183f9578e))
+
+### Bug Fixes
+
+* **daemon:** idempotent launchd install via kickstart -k ([b742f70](https://github.com/d0labs/aof/commit/b742f7052f9ba6fc0ec4965eea803233bfdbd2c8))
+* **installer:** emit dist-local openclaw.plugin.json in tarball ([3cd7b69](https://github.com/d0labs/aof/commit/3cd7b6928dbb6e48704b9bc3f15e677b862f587d))
+* **snapshot:** exclude non-regular files (sockets, FIFOs, devices) ([afeb63e](https://github.com/d0labs/aof/commit/afeb63e71a006cf520769f47fa63c607d779cdb7))
+
 ## [1.14.1](https://github.com/d0labs/aof/compare/v1.14.0...v1.14.1) (2026-04-14)
 
 ### Bug Fixes
