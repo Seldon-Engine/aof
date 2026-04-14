@@ -55,7 +55,16 @@ const TARBALL = join(
   `aof-v${PKG_VERSION}.tar.gz`,
 );
 
-describe.skipIf(process.platform !== "darwin")("install.sh mode-exclusivity", () => {
+// Skip unless:
+//   - running on darwin (launchctl plist semantics assumed by test), AND
+//   - explicitly opted-in via AOF_INTEGRATION=1 (set by
+//     `npm run test:integration:plugin`). The opt-in keeps the `npm test`
+//     (unit) suite green — the root vitest.config.ts include glob matches
+//     this file, but the describe stays skipped without the flag.
+const SHOULD_RUN =
+  process.platform === "darwin" && process.env.AOF_INTEGRATION === "1";
+
+describe.skipIf(!SHOULD_RUN)("install.sh mode-exclusivity", () => {
   let sandbox: string;
   let fakeHome: string;
   let prefix: string;

@@ -47,7 +47,7 @@
     "test:e2e": "./scripts/test-lock.sh run --config tests/vitest.e2e.config.ts",
     "test:e2e:watch": "vitest --config tests/vitest.e2e.config.ts",
     "test:e2e:verbose": "VERBOSE_TESTS=true ./scripts/test-lock.sh run --config tests/vitest.e2e.config.ts",
-    "test:integration:plugin": "./scripts/test-lock.sh run --config tests/integration/vitest.config.ts",
+    "test:integration:plugin": "AOF_INTEGRATION=1 ./scripts/test-lock.sh run --config tests/integration/vitest.config.ts",
     "test:coverage": "vitest run --coverage",
     "test:all": "npm run test && npm run test:e2e",
     "lint": "node dist/cli/index.js lint",
