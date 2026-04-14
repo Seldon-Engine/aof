@@ -42,6 +42,7 @@ FRESH_INSTALL=""
 CLEAN_INSTALL=""
 ASSUME_YES=""
 FORCE_CLEAN=""
+FORCE_DAEMON=""
 LOCAL_TARBALL=""
 BACKUP_DIR=""
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
@@ -107,6 +108,9 @@ parse_args() {
       --force)
         FORCE_CLEAN="true"
         ;;
+      --force-daemon)
+        FORCE_DAEMON="true"
+        ;;
       --tarball)
         # Skip the GitHub download and use a pre-built tarball instead.
         # Primarily a local-testing hook — lets us exercise install.sh
@@ -131,6 +135,10 @@ parse_args() {
         printf "  --yes, -y               Skip confirmation prompts (requires --clean)\n"
         printf "  --force                 Proceed with --clean even if openclaw-gateway\n"
         printf "                          appears to be running.\n"
+        printf "  --force-daemon          Install the standalone daemon even when\n"
+        printf "                          OpenClaw plugin-mode is detected. Not\n"
+        printf "                          recommended — both AOFService instances\n"
+        printf "                          will poll the same data dir.\n"
         printf "  --tarball <path>        Install from a local tarball instead of\n"
         printf "                          downloading from GitHub. Intended for testing\n"
         printf "                          unreleased builds.\n"
@@ -672,11 +680,15 @@ plugin_mode_detected() {
 
 install_daemon() {
   # Mode-exclusivity gate (Phase 42, D-03).
-  # When plugin-mode is detected, skip the standalone daemon install.
-  # Plan 03 adds --force-daemon override; Plan 04 adds D-05 upgrade convergence.
-  if plugin_mode_detected; then
+  # When plugin-mode is detected, skip the standalone daemon install unless
+  # --force-daemon (D-04) overrides. Plan 04 adds D-05 upgrade convergence.
+  if plugin_mode_detected && [ -z "$FORCE_DAEMON" ]; then
     say "Plugin-mode detected — skipping standalone daemon. Scheduler runs in-process via openclaw gateway."
     return 0
+  fi
+
+  if plugin_mode_detected && [ -n "$FORCE_DAEMON" ]; then
+    warn "--force-daemon set: installing daemon despite plugin-mode detection. Dual-polling will occur."
   fi
 
   # Existing install path — unchanged from pre-Phase 42.
