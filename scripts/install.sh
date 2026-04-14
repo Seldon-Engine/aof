@@ -681,9 +681,21 @@ plugin_mode_detected() {
 install_daemon() {
   # Mode-exclusivity gate (Phase 42, D-03).
   # When plugin-mode is detected, skip the standalone daemon install unless
-  # --force-daemon (D-04) overrides. Plan 04 adds D-05 upgrade convergence.
+  # --force-daemon (D-04) overrides. D-05: if a pre-existing daemon plist
+  # exists, converge to plugin-only by shelling out to `daemon uninstall`.
   if plugin_mode_detected && [ -z "$FORCE_DAEMON" ]; then
-    say "Plugin-mode detected — skipping standalone daemon. Scheduler runs in-process via openclaw gateway."
+    plist="$HOME/Library/LaunchAgents/ai.openclaw.aof.plist"
+    if [ -f "$plist" ]; then
+      # D-05: pre-existing dual-mode install — converge to plugin-only.
+      say "Plugin-mode detected; removing redundant standalone daemon."
+      if [ -f "$INSTALL_DIR/dist/cli/index.js" ]; then
+        node "$INSTALL_DIR/dist/cli/index.js" daemon uninstall \
+          --data-dir "$DATA_DIR" 2>&1 || \
+          warn "Daemon uninstall returned non-zero (continuing — plist may already be gone)"
+      fi
+    else
+      say "Plugin-mode detected — skipping standalone daemon. Scheduler runs in-process via openclaw gateway."
+    fi
     return 0
   fi
 
