@@ -3,6 +3,11 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# Test / release artifacts
+aof-*.tar.gz
+.release-staging/
+coverage/
+
 # OS
 .DS_Store
 
