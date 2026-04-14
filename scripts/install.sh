@@ -56,6 +56,10 @@ cleanup() {
       fi
     done
   fi
+  # Always resume services we paused — even on abort/error — so the user's
+  # gateway is never left down by a partial install. resume_live_writers is
+  # a no-op if PAUSED_SERVICES is empty.
+  [ -n "${PAUSED_SERVICES:-}" ] && resume_live_writers 2>/dev/null || true
 }
 
 trap cleanup EXIT
@@ -340,6 +344,65 @@ download_tarball() {
 #
 # The backup dir lives outside $INSTALL_DIR so a wipe cannot destroy it.
 
+# --- Live-writer management ----------------------------------------------
+#
+# Upgrading while services are writing to $DATA_DIR creates a race: the
+# preserve→wipe→extract→restore cycle moves data out, but any live writer
+# (the gateway's in-process AOF plugin and/or the ai.openclaw.aof daemon)
+# keeps creating files under the now-moved path. The wipe then fails with
+# "Directory not empty" and the install aborts mid-flight.
+#
+# Fix: detect running launchd services that write to $DATA_DIR, boot them
+# out before preserve_data_dir, and restart at the end. We remember which
+# we paused so we only restart what we stopped.
+PAUSED_SERVICES=""
+
+service_is_loaded() {
+  launchctl print "gui/$(id -u)/$1" >/dev/null 2>&1
+}
+
+pause_live_writers() {
+  # Only meaningful on macOS launchd. No-op elsewhere.
+  command -v launchctl >/dev/null 2>&1 || return 0
+
+  # Candidates: both may write to $DATA_DIR via the shared AOFService.
+  for svc in ai.openclaw.gateway ai.openclaw.aof; do
+    if service_is_loaded "$svc"; then
+      launchctl bootout "gui/$(id -u)/$svc" 2>/dev/null || true
+      # Wait up to 5s for the process to actually exit.
+      i=0
+      while service_is_loaded "$svc" && [ "$i" -lt 10 ]; do
+        sleep 0.5
+        i=$((i + 1))
+      done
+      # Force-kill any stragglers. Name the command (not the plist label).
+      case "$svc" in
+        ai.openclaw.gateway)
+          pkill -9 -f "openclaw-gateway" 2>/dev/null || true
+          ;;
+        ai.openclaw.aof)
+          pkill -9 -f "aof-daemon" 2>/dev/null || true
+          ;;
+      esac
+      PAUSED_SERVICES="$PAUSED_SERVICES $svc"
+      say "Paused service: $svc (will restart after install)"
+    fi
+  done
+}
+
+resume_live_writers() {
+  [ -z "$PAUSED_SERVICES" ] && return 0
+  for svc in $PAUSED_SERVICES; do
+    plist="$HOME/Library/LaunchAgents/$svc.plist"
+    if [ -f "$plist" ]; then
+      launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null || true
+      launchctl kickstart "gui/$(id -u)/$svc" 2>/dev/null || true
+      say "Resumed service: $svc"
+    fi
+  done
+  PAUSED_SERVICES=""
+}
+
 # Move $DATA_DIR temporarily to the external backup path. Sets PRESERVED_DATA.
 PRESERVED_DATA=""
 preserve_data_dir() {
@@ -401,6 +464,10 @@ extract_and_install() {
   printf "\nInstalling...\n"
 
   if [ -n "$IS_UPGRADE" ] || [ -n "$CLEAN_INSTALL" ]; then
+    # Stop any live writer (gateway plugin + standalone daemon) before we
+    # move/wipe $DATA_DIR and $INSTALL_DIR; otherwise the scheduler keeps
+    # recreating directories under the moved path and rm -rf fails.
+    pause_live_writers
     # Move user data out of the way, then wipe the install dir so the fresh
     # extract starts from a clean slate. No code zombies survive.
     preserve_data_dir
@@ -446,6 +513,9 @@ extract_and_install() {
 
   # Restore user data into the fresh install
   restore_preserved_data
+
+  # Restart any services we paused. Safe no-op if nothing was paused.
+  resume_live_writers
 
   # Remove install dir from cleanup on success (only clean on fresh install failure)
   if [ -z "$IS_UPGRADE" ] && [ -z "$CLEAN_INSTALL" ]; then
