@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.13.0](https://github.com/d0labs/aof/compare/v1.12.0...v1.13.0) (2026-04-14)
+
+### Features
+
+* **install:** segregate user data from code under ~/.aof/data/ ([28d4849](https://github.com/d0labs/aof/commit/28d4849f5dc08409c1bbc2b7bbc8cb8301694a01))
+
 ## [1.11.0](https://github.com/d0labs/aof/compare/v1.10.4...v1.11.0) (2026-04-12)
 
 ### Features
