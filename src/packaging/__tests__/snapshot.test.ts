@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile, readFile, readdir, access } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { createServer, type Server } from "node:net";
 import { createSnapshot, restoreSnapshot, pruneSnapshots } from "../snapshot.js";
 
 describe("Snapshot Module", () => {
@@ -62,6 +63,31 @@ describe("Snapshot Module", () => {
       expect(aofEntries).toContain("migrations.json");
       // Verify snapshots/ was NOT copied
       expect(aofEntries).not.toContain("snapshots");
+    });
+
+    it("excludes unix socket files — bug-2026-04-14-snapshot-excludes-sockets", async () => {
+      // Regression: a running daemon parks daemon.sock under the data dir.
+      // The snapshot writer used to blindly cp everything, pulling the socket
+      // into the snapshot. Later migrations that copy the snapshot dir failed
+      // with `cp: EINVAL cannot copy a socket file`.
+      await writeFile(join(aofRoot, "config.yaml"), "schemaVersion: 1");
+
+      const sockPath = join(aofRoot, "daemon.sock");
+      const server: Server = createServer();
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(sockPath, () => resolve());
+      });
+
+      try {
+        const snapshotPath = await createSnapshot(aofRoot);
+
+        const entries = await readdir(snapshotPath);
+        expect(entries).toContain("config.yaml");
+        expect(entries).not.toContain("daemon.sock");
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
     });
 
     it("copies nested directory structures correctly", async () => {

@@ -5,10 +5,27 @@
  * directory itself) for atomic rollback on migration failure.
  */
 
-import { cp, mkdir, rm, readdir, access } from "node:fs/promises";
+import { cp, mkdir, rm, readdir, lstat } from "node:fs/promises";
 import { join } from "node:path";
 
 const SNAPSHOT_DIR = ".aof/snapshots";
+
+/**
+ * Filter for cp's recursive walk: copy directories, regular files, and
+ * symlinks; skip sockets, FIFOs, and block/char devices.
+ *
+ * A running daemon parks its unix socket under the data dir; including that
+ * socket in a snapshot makes downstream cp operations fail with EINVAL
+ * ("cannot copy a socket file").
+ */
+async function isCopyable(src: string): Promise<boolean> {
+  try {
+    const stat = await lstat(src);
+    return stat.isDirectory() || stat.isFile() || stat.isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Create a snapshot of the entire data directory.
@@ -26,6 +43,8 @@ export async function createSnapshot(aofRoot: string): Promise<string> {
 
   const entries = await readdir(aofRoot, { withFileTypes: true });
   for (const entry of entries) {
+    if (!(await isCopyable(join(aofRoot, entry.name)))) continue;
+
     const src = join(aofRoot, entry.name);
     const dest = join(snapshotPath, entry.name);
 
@@ -35,10 +54,14 @@ export async function createSnapshot(aofRoot: string): Promise<string> {
       const aofEntries = await readdir(src, { withFileTypes: true });
       for (const ae of aofEntries) {
         if (ae.name === "snapshots") continue;
-        await cp(join(src, ae.name), join(dest, ae.name), { recursive: true });
+        if (!(await isCopyable(join(src, ae.name)))) continue;
+        await cp(join(src, ae.name), join(dest, ae.name), {
+          recursive: true,
+          filter: isCopyable,
+        });
       }
     } else {
-      await cp(src, dest, { recursive: true });
+      await cp(src, dest, { recursive: true, filter: isCopyable });
     }
   }
 
@@ -79,10 +102,15 @@ export async function restoreSnapshot(aofRoot: string, snapshotPath: string): Pr
       const aofEntries = await readdir(src, { withFileTypes: true });
       for (const ae of aofEntries) {
         if (ae.name === "snapshots") continue;
-        await cp(join(src, ae.name), join(aofRoot, ".aof", ae.name), { recursive: true });
+        if (!(await isCopyable(join(src, ae.name)))) continue;
+        await cp(join(src, ae.name), join(aofRoot, ".aof", ae.name), {
+          recursive: true,
+          filter: isCopyable,
+        });
       }
     } else {
-      await cp(src, dest, { recursive: true });
+      if (!(await isCopyable(src))) continue;
+      await cp(src, dest, { recursive: true, filter: isCopyable });
     }
   }
 }
