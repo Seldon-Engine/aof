@@ -31,6 +31,11 @@ export interface TaskContext {
   hopContext?: HopContext;
   /** Arbitrary metadata for callback depth propagation and other cross-session concerns */
   metadata?: Record<string, unknown>;
+  /**
+   * Per-task hard cap on agent run duration in milliseconds. Set by aof_dispatch
+   * via metadata.timeoutMs. Overrides the plugin-level scheduler spawnTimeoutMs.
+   */
+  timeoutMs?: number;
 }
 
 /**

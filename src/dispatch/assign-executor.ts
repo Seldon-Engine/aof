@@ -110,6 +110,11 @@ export async function executeAssignAction(
     // Build task context using post-lease task path (now in-progress/)
     const taskPath =
       leasedTask?.path ?? join(store.tasksDir, "in-progress", `${action.taskId}.md`);
+    const taskMetadata = leasedTask?.frontmatter.metadata ?? task.frontmatter.metadata ?? {};
+    const timeoutMsRaw = (taskMetadata as Record<string, unknown>).timeoutMs;
+    const timeoutMs = typeof timeoutMsRaw === "number" && Number.isFinite(timeoutMsRaw) && timeoutMsRaw > 0
+      ? timeoutMsRaw
+      : undefined;
     const context: TaskContext = {
       taskId: action.taskId,
       taskPath,
@@ -119,6 +124,7 @@ export async function executeAssignAction(
       projectId: store.projectId,
       projectRoot: store.projectRoot,
       taskRelpath: relative(store.projectRoot, taskPath),
+      ...(timeoutMs !== undefined && { timeoutMs }),
     };
 
     // Build context for onRunComplete handler
@@ -133,9 +139,10 @@ export async function executeAssignAction(
       executor,
     };
 
-    // Spawn agent session with correlation ID and fallback completion callback
+    // Spawn agent session with correlation ID and fallback completion callback.
+    // Per-task timeoutMs (from aof_dispatch) overrides scheduler's spawnTimeoutMs.
     const result = await executor.spawnSession(context, {
-      timeoutMs: config.spawnTimeoutMs ?? 30_000,
+      timeoutMs: context.timeoutMs ?? config.spawnTimeoutMs ?? 30_000,
       correlationId,
       onRunComplete: (outcome) => handleRunComplete(runCompleteCtx, outcome),
     });

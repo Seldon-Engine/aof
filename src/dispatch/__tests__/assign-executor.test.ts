@@ -230,6 +230,99 @@ describe("assign-executor callback wiring (GRAN-02)", () => {
   });
 });
 
+describe("assign-executor per-task timeoutMs override", () => {
+  let tmpDir: string;
+  let store: FilesystemTaskStore;
+  let logger: EventLogger;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "aof-assign-timeout-"));
+    store = new FilesystemTaskStore(tmpDir);
+    await store.init();
+    logger = new EventLogger(join(tmpDir, "events"));
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("propagates metadata.timeoutMs into TaskContext and spawnSession opts", async () => {
+    const task = await store.create({
+      title: "Long research",
+      body: "45 minutes",
+      routing: { agent: "researcher" },
+      createdBy: "test",
+      metadata: { timeoutMs: 45 * 60 * 1000 },
+    });
+    await store.transition(task.frontmatter.id, "ready");
+
+    let capturedContext: TaskContext | undefined;
+    let capturedSpawnOpts: { timeoutMs?: number } | undefined;
+    const executor: GatewayAdapter = {
+      spawnSession: vi.fn().mockImplementation(async (context: TaskContext, spawnOpts: any) => {
+        capturedContext = context;
+        capturedSpawnOpts = spawnOpts;
+        return { success: true, sessionId: "s" } as SpawnResult;
+      }),
+    };
+
+    const config: DispatchConfig = {
+      dataDir: store.projectRoot,
+      dryRun: false,
+      executor,
+      maxConcurrentDispatches: 3,
+      defaultLeaseTtlMs: 60_000,
+      spawnTimeoutMs: 30_000, // plugin-level default, should be overridden
+    };
+    const action: SchedulerAction = {
+      type: "assign",
+      taskId: task.frontmatter.id,
+      agent: "researcher",
+    };
+
+    await executeAssignAction(action, store, logger, config, [task], { value: null });
+
+    expect(capturedContext?.timeoutMs).toBe(45 * 60 * 1000);
+    expect(capturedSpawnOpts?.timeoutMs).toBe(45 * 60 * 1000);
+  });
+
+  it("falls back to spawnTimeoutMs when metadata.timeoutMs is absent", async () => {
+    const task = await store.create({
+      title: "Default timeout",
+      body: "Uses plugin config",
+      routing: { agent: "researcher" },
+      createdBy: "test",
+    });
+    await store.transition(task.frontmatter.id, "ready");
+
+    let capturedSpawnOpts: { timeoutMs?: number } | undefined;
+    const executor: GatewayAdapter = {
+      spawnSession: vi.fn().mockImplementation(async (_context: TaskContext, spawnOpts: any) => {
+        capturedSpawnOpts = spawnOpts;
+        return { success: true, sessionId: "s" } as SpawnResult;
+      }),
+    };
+
+    const config: DispatchConfig = {
+      dataDir: store.projectRoot,
+      dryRun: false,
+      executor,
+      maxConcurrentDispatches: 3,
+      defaultLeaseTtlMs: 60_000,
+      spawnTimeoutMs: 90_000,
+    };
+    const action: SchedulerAction = {
+      type: "assign",
+      taskId: task.frontmatter.id,
+      agent: "researcher",
+    };
+
+    await executeAssignAction(action, store, logger, config, [task], { value: null });
+
+    expect(capturedSpawnOpts?.timeoutMs).toBe(90_000);
+  });
+});
+
 describe("assign-executor lockManager integration (BUG-04)", () => {
   let tmpDir: string;
   let store: FilesystemTaskStore;

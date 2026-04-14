@@ -12,6 +12,9 @@ import { createSubscriptionStore, validateSubscriberAgent } from "./subscription
 /**
  * Zod schema for aof_dispatch input (shared between MCP and OpenClaw).
  */
+/** 4 hours — upper bound on per-task agent run duration. */
+export const MAX_DISPATCH_TIMEOUT_MS = 4 * 60 * 60 * 1000;
+
 export const dispatchSchema = z.object({
   title: z.string().min(1),
   brief: z.string().min(1),
@@ -31,6 +34,17 @@ export const dispatchSchema = z.object({
   // (e.g. OpenClaw) may translate `true`/omitted into a concrete delivery
   // record via pre-handler transforms. An explicit object is used verbatim.
   notifyOnCompletion: z.union([z.boolean(), SubscriptionDelivery]).optional(),
+  /**
+   * Per-task hard cap on agent run duration in milliseconds. Research and
+   * long-horizon tasks should opt in (research typically 30-60 min). Default
+   * when omitted is the plugin-level spawnTimeoutMs (5 min floor).
+   */
+  timeoutMs: z
+    .number()
+    .int()
+    .positive()
+    .max(MAX_DISPATCH_TIMEOUT_MS)
+    .optional(),
 });
 
 /**
@@ -70,6 +84,12 @@ export interface AOFDispatchInput {
    * their own pre-handler transforms before this reaches core.
    */
   notifyOnCompletion?: boolean | (Record<string, unknown> & { kind: string });
+  /**
+   * Per-task hard cap on agent run duration in milliseconds. Overrides the
+   * plugin-level spawnTimeoutMs for this task. Bounded by MAX_DISPATCH_TIMEOUT_MS (4h).
+   * When omitted, the plugin's scheduler config governs (5 min floor).
+   */
+  timeoutMs?: number;
 }
 
 /**
@@ -153,6 +173,9 @@ export async function aofDispatch(
   const metadata: Record<string, unknown> = { ...(input.metadata ?? {}) };
   if (input.tags) {
     metadata.tags = input.tags;
+  }
+  if (typeof input.timeoutMs === "number" && Number.isFinite(input.timeoutMs) && input.timeoutMs > 0) {
+    metadata.timeoutMs = Math.min(Math.floor(input.timeoutMs), MAX_DISPATCH_TIMEOUT_MS);
   }
 
   // Create task with TaskStore.create
