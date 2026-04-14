@@ -1,7 +1,7 @@
 ---
 name: aof
 description: AOF agent skill -- minimal seed for simple task operations
-version: 3.0.0
+version: 3.1.0
 ---
 
 # AOF -- Agentic Ops Fabric
@@ -14,7 +14,7 @@ Deterministic orchestration for multi-agent systems. Agents use MCP tools below.
 
 | Tool | Purpose | Returns |
 |------|---------|---------|
-| `aof_dispatch` | Create task and assign to agent/team. Accepts `workflow`, `subscribe`, and `notifyOnCompletion` params. | `{ taskId, status, assignedAgent, filePath, sessionId, subscriptionId, notificationSubscriptionId }` |
+| `aof_dispatch` | Create task and assign to agent/team. Accepts `workflow`, `subscribe`, `notifyOnCompletion`, and `timeoutMs` (ms; 5min default, 4h max — opt in for long-running research tasks) params. | `{ taskId, status, assignedAgent, filePath, sessionId, subscriptionId, notificationSubscriptionId }` |
 | `aof_task_update` | Log work, change status, mark blocked | `{ success, taskId, newStatus, updatedAt }` |
 | `aof_task_complete` | Mark task done with summary and deliverables | `{ success, taskId, finalStatus, completedAt }` |
 | `aof_status_report` | Query task counts filtered by agent/status | `{ total, byStatus, tasks[], summary }` |

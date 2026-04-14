@@ -43,3 +43,12 @@ npm run docs:generate             # Regen CLI docs (pre-commit hook enforces)
 npm run release:patch|minor|major # GitHub-only. NEVER pass --no-npm (skips version bump, not just publish).
 npm run deploy                    # Build + deploy to ~/.aof + symlink plugin
 ```
+
+## Orphan vitest workers
+Vitest uses a tinypool worker pool. When a `npm test` / `npx vitest` invocation is aborted mid-run (timeout, Ctrl-C, tool cancellation), the pool's child `node (vitest N)` processes are frequently leaked — they keep running at 100% CPU, holding ports and file handles. Root cause isn't ours; vitest's pool cleanup on SIGTERM is unreliable under some circumstances.
+
+**After ANY aborted or timed-out test run, immediately:**
+```bash
+ps -eo pid,command | grep -E "node \(vitest" | grep -v grep | awk '{print $1}' | xargs -r kill -9
+```
+Then verify with `ps -eo pid,pcpu,command | grep vitest | grep -v grep` — should be empty. Do this before starting a follow-up test run to avoid pool-contention flakes.

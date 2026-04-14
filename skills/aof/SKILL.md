@@ -4,7 +4,7 @@ description: >
   AOF agent skill — deterministic multi-agent orchestration with tool-based
   task management, org-chart governance, DAG workflows, and structured
   inter-agent protocols.
-version: 3.0.0
+version: 3.1.0
 requires:
   bins: [node]
 ---
@@ -20,7 +20,7 @@ Agents use MCP tools below. CLI (`aof`) is for human operators only (setup, debu
 
 | Tool | Purpose | Returns |
 |------|---------|---------|
-| `aof_dispatch` | Create task and assign to agent/team. Accepts `workflow` (see DAG section), `subscribe`, and `notifyOnCompletion` params. | `{ taskId, status, assignedAgent, filePath, sessionId, subscriptionId, notificationSubscriptionId }` |
+| `aof_dispatch` | Create task and assign to agent/team. Accepts `workflow` (see DAG section), `subscribe`, `notifyOnCompletion`, and `timeoutMs` (per-task run duration, see Timeouts) params. | `{ taskId, status, assignedAgent, filePath, sessionId, subscriptionId, notificationSubscriptionId }` |
 | `aof_task_update` | Log work, change status, mark blocked, append outputs | `{ success, taskId, newStatus, updatedAt }` |
 | `aof_task_complete` | Mark task done with summary and deliverables | `{ success, taskId, finalStatus, completedAt }` |
 | `aof_status_report` | Query task counts filtered by agent/status | `{ total, byStatus, tasks[], summary }` |
@@ -205,6 +205,28 @@ Agent `id` values must match OpenClaw agent names. Run `aof init` to auto-sync f
 ## Completion Protocol
 
 Always call `aof_task_complete` with a brief summary when done. Exiting without this call fails the task and triggers retry.
+
+---
+
+## Timeouts
+
+Default agent run duration is 5 minutes. Long-horizon tasks (research, multi-step analysis, scraping pipelines) should opt in to a larger budget via `aof_dispatch`'s `timeoutMs` parameter.
+
+- **Unit:** milliseconds.
+- **Range:** 1ms to 4h (`14_400_000`). Values above max are rejected at the schema.
+- **Default (omitted):** plugin's `spawnTimeoutMs` config (typically 5 min floor). Most agents should omit unless they know the task is long.
+- **Scope:** hard cap on a single agent run. The lease auto-renews while the agent runs, so a large `timeoutMs` does not require a corresponding lease override.
+
+```json
+{
+  "title": "Competitive landscape analysis",
+  "brief": "Map 100+ target accounts across 5 verticals",
+  "agent": "researcher",
+  "timeoutMs": 2700000
+}
+```
+
+Tasks that hit the timeout are marked as dispatch failures and re-queued per retry policy (default: 3 retries, then deadletter). Pick a timeout slightly larger than your expected worst case.
 
 ---
 
