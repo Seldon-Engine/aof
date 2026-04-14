@@ -42,6 +42,7 @@ FRESH_INSTALL=""
 CLEAN_INSTALL=""
 ASSUME_YES=""
 FORCE_CLEAN=""
+LOCAL_TARBALL=""
 BACKUP_DIR=""
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
 
@@ -106,6 +107,13 @@ parse_args() {
       --force)
         FORCE_CLEAN="true"
         ;;
+      --tarball)
+        # Skip the GitHub download and use a pre-built tarball instead.
+        # Primarily a local-testing hook — lets us exercise install.sh
+        # against unreleased code (e.g. regression fixes waiting on a tag).
+        shift
+        LOCAL_TARBALL="$1"
+        ;;
       --help|-h)
         printf "AOF Installer\n\n"
         printf "Usage: install.sh [OPTIONS]\n\n"
@@ -123,6 +131,9 @@ parse_args() {
         printf "  --yes, -y               Skip confirmation prompts (requires --clean)\n"
         printf "  --force                 Proceed with --clean even if openclaw-gateway\n"
         printf "                          appears to be running.\n"
+        printf "  --tarball <path>        Install from a local tarball instead of\n"
+        printf "                          downloading from GitHub. Intended for testing\n"
+        printf "                          unreleased builds.\n"
         printf "  -h, --help              Show this help\n"
         exit 0
         ;;
@@ -306,6 +317,18 @@ determine_version() {
 # --- Download tarball ---
 
 download_tarball() {
+  # --tarball bypass: use the provided file verbatim, skip network entirely.
+  # We don't register it for cleanup — the caller owns that file.
+  if [ -n "$LOCAL_TARBALL" ]; then
+    if [ ! -f "$LOCAL_TARBALL" ]; then
+      err "--tarball path not found: $LOCAL_TARBALL"
+      exit 1
+    fi
+    TARBALL="$LOCAL_TARBALL"
+    say "Using local tarball: $TARBALL"
+    return 0
+  fi
+
   printf "\nDownloading AOF v%s...\n" "$VERSION"
 
   TARBALL_TMP=$(mktemp "${TMPDIR:-/tmp}/aof-install.XXXXXX")
