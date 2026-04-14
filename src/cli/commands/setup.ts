@@ -6,8 +6,9 @@
  * and OpenClaw plugin wiring.
  */
 
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { readFile, access, mkdir, cp, writeFile, unlink, rm } from "node:fs/promises";
 import type { Command } from "commander";
 import writeFileAtomic from "write-file-atomic";
@@ -32,6 +33,22 @@ import {
   openclawConfigSet,
   openclawConfigUnset,
 } from "../../packaging/openclaw-cli.js";
+
+// --- Path constants ---
+
+/**
+ * Root of the installed AOF package — at runtime `import.meta.url` resolves
+ * under `dist/cli/commands/`, so we climb three levels to reach the package
+ * root that contains `skills/`, `dist/`, and the plist generator output.
+ */
+const PKG_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+
+/**
+ * The OpenClaw-facing plugin directory. deploy.sh (and install.sh) symlink
+ * this to the AOF dist/, so adding it to `plugins.load.paths` is how OpenClaw
+ * discovers the aof plugin.
+ */
+const OPENCLAW_PLUGIN_DIR = join(homedir(), ".openclaw", "extensions", "aof");
 
 // --- Output helpers ---
 
@@ -209,17 +226,15 @@ async function wireOpenClawPluginDirect(dataDir: string, configPath: string): Pr
     deepSet(config, "plugins.entries.aof.config.modules.memory.enabled", true);
     say("AOF configured as memory plugin");
 
-    // 4. Set plugin load paths
+    // 4. Ensure the OpenClaw extension dir is in plugins.load.paths.
+    //    The symlink at ~/.openclaw/extensions/aof → $INSTALL_DIR/dist/ is the
+    //    canonical plugin location — user data (dataDir) does NOT belong here.
     const loadPaths = (deepGet(config, "plugins.load.paths") as string[] | undefined) ?? [];
-    const filtered = loadPaths.filter((p) => {
-      if (p === dataDir) return true;
-      return !(p.endsWith("/.aof") || p.endsWith("/aof"));
-    });
-    if (!filtered.includes(dataDir)) {
-      filtered.push(dataDir);
+    if (!loadPaths.includes(OPENCLAW_PLUGIN_DIR)) {
+      loadPaths.push(OPENCLAW_PLUGIN_DIR);
+      deepSet(config, "plugins.load.paths", loadPaths);
+      say("Plugin load paths updated");
     }
-    deepSet(config, "plugins.load.paths", filtered);
-    say("Plugin load paths updated");
 
     // 5. Set dataDir config
     deepSet(config, "plugins.entries.aof.config.dataDir", dataDir);
@@ -245,13 +260,13 @@ async function wireOpenClawPluginDirect(dataDir: string, configPath: string): Pr
   }
 
   // Deploy skill files (doesn't need CLI)
-  await deploySkillFiles(dataDir);
+  await deploySkillFiles();
 }
 
 /**
  * Deploy SKILL.md and related files to ~/.openclaw/skills/aof/.
  */
-async function deploySkillFiles(dataDir: string): Promise<void> {
+async function deploySkillFiles(): Promise<void> {
   try {
     const skillTargetDir = join(homedir(), ".openclaw", "skills", "aof");
     await rm(skillTargetDir, { recursive: true, force: true });
@@ -264,7 +279,10 @@ async function deploySkillFiles(dataDir: string): Promise<void> {
     ];
 
     for (const { name, required: isRequired } of skillFiles) {
-      const src = join(dataDir, "skills", "aof", name);
+      // Skills ship with the package (under PKG_ROOT/skills/aof/), NOT under
+      // dataDir (user state). The old path was a stale artifact from the
+      // pre-v1.13 layout when code and data shared a root.
+      const src = join(PKG_ROOT, "skills", "aof", name);
       try {
         await access(src);
         await cp(src, join(skillTargetDir, name));
@@ -330,22 +348,22 @@ async function wireOpenClawPlugin(dataDir: string, openclawPath?: string): Promi
     return;
   }
 
-  // Set plugin load paths first — the allow-list validator needs the load path
-  // to exist before registerAofPlugin() adds "aof" to plugins.allow
+  // Ensure the OpenClaw extension dir is in plugins.load.paths before
+  // registerAofPlugin runs — the allow-list validator needs to resolve
+  // "aof" against a load path that contains the plugin manifest.
+  //
+  // The symlink ~/.openclaw/extensions/aof → $INSTALL_DIR/dist/ IS that path.
+  // dataDir (user data) is not a plugin directory and was erroneously being
+  // pushed here, which caused OpenClaw to reject the write with
+  // "plugins.slots.memory: plugin not found: aof".
   try {
     const existingPaths = (await openclawConfigGet("plugins.load.paths")) as string[] | undefined;
     const paths = Array.isArray(existingPaths) ? [...existingPaths] : [];
-
-    // Remove old AOF paths and add current dataDir
-    const filtered = paths.filter((p) => {
-      if (p === dataDir) return true;
-      return !(p.endsWith("/.aof") || p.endsWith("/aof"));
-    });
-    if (!filtered.includes(dataDir)) {
-      filtered.push(dataDir);
+    if (!paths.includes(OPENCLAW_PLUGIN_DIR)) {
+      paths.push(OPENCLAW_PLUGIN_DIR);
+      await openclawConfigSet("plugins.load.paths", paths);
+      say("Plugin load paths updated");
     }
-    await openclawConfigSet("plugins.load.paths", filtered);
-    say("Plugin load paths updated");
   } catch (e) {
     warn(`Failed to update plugin load paths: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -423,7 +441,7 @@ async function wireOpenClawPlugin(dataDir: string, openclawPath?: string): Promi
   }
 
   // Deploy skill files to ~/.openclaw/skills/aof/
-  await deploySkillFiles(dataDir);
+  await deploySkillFiles();
 }
 
 // --- Main setup function ---
