@@ -46,14 +46,14 @@ const REPO_ROOT = process.cwd();
 // package.json version rather than a hardcoded "0.0.0-test" string. The
 // tarball is still "local / test-only" because the sandbox $HOME scopes all
 // filesystem effects — no real launchd registration occurs.
+//
+// Path note: build-tarball.mjs writes `aof-<version>.tar.gz` to the repo root
+// (not `.release-staging/aof-v<version>.tar.gz` as an earlier Plan 01 draft
+// assumed). Matching the actual output keeps the beforeAll preflight coherent.
 const PKG_VERSION: string = JSON.parse(
   readFileSync(join(REPO_ROOT, "package.json"), "utf-8"),
 ).version;
-const TARBALL = join(
-  REPO_ROOT,
-  ".release-staging",
-  `aof-v${PKG_VERSION}.tar.gz`,
-);
+const TARBALL = join(REPO_ROOT, `aof-${PKG_VERSION}.tar.gz`);
 
 // Skip unless:
 //   - running on darwin (launchctl plist semantics assumed by test), AND
