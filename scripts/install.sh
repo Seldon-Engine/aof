@@ -687,11 +687,13 @@ install_daemon() {
     plist="$HOME/Library/LaunchAgents/ai.openclaw.aof.plist"
     if [ -f "$plist" ]; then
       # D-05: pre-existing dual-mode install — converge to plugin-only.
-      say "Plugin-mode detected; removing redundant standalone daemon."
       if [ -f "$INSTALL_DIR/dist/cli/index.js" ]; then
+        say "Plugin-mode detected; removing redundant standalone daemon."
         node "$INSTALL_DIR/dist/cli/index.js" daemon uninstall \
           --data-dir "$DATA_DIR" 2>&1 || \
           warn "Daemon uninstall returned non-zero (continuing — plist may already be gone)"
+      else
+        warn "CLI binary not found at $INSTALL_DIR/dist/cli/index.js; leaving existing $plist in place (launchd will continue to spawn the daemon)."
       fi
     else
       say "Plugin-mode detected — skipping standalone daemon. Scheduler runs in-process via openclaw gateway."
