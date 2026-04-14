@@ -5,7 +5,9 @@ import {
   generateLaunchdPlist,
   generateSystemdUnit,
   getServiceFilePath,
+  launchctlInstallIdempotent,
   AOF_SERVICE_LABEL,
+  type LaunchctlOps,
   type ServiceFileConfig,
 } from "../service-file.js";
 
@@ -220,5 +222,134 @@ describe("getServiceFilePath", () => {
 
   it("throws for unsupported platforms", () => {
     expect(() => getServiceFilePath("freebsd" as NodeJS.Platform)).toThrow(/Unsupported platform/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// launchctlInstallIdempotent — bug-2026-04-14-daemon-install-use-kickstart
+// ---------------------------------------------------------------------------
+
+describe("launchctlInstallIdempotent", () => {
+  /**
+   * Construct a mock `LaunchctlOps` with a scripted `isLoaded` sequence so we
+   * can simulate service state transitions across the steps of the install.
+   */
+  function makeOps(loadedSequence: boolean[]): {
+    ops: LaunchctlOps;
+    calls: string[];
+  } {
+    const calls: string[] = [];
+    let i = 0;
+    const ops: LaunchctlOps = {
+      isLoaded: () => {
+        const v = loadedSequence[Math.min(i++, loadedSequence.length - 1)] ?? false;
+        calls.push(`isLoaded=${v}`);
+        return v;
+      },
+      exec: (cmd) => {
+        calls.push(cmd);
+      },
+      sleep: async () => {
+        calls.push("sleep");
+      },
+    };
+    return { ops, calls };
+  }
+
+  it("bootstraps + kickstarts when service is not loaded", async () => {
+    // Sequence: bootout probe skipped (no isLoaded before bootout), then the
+    // bootout throws nothing in mock, wait loop asks isLoaded → false (exits
+    // immediately), post-wait isLoaded → false → bootstrap, then kickstart.
+    const { ops, calls } = makeOps([false, false]);
+
+    await launchctlInstallIdempotent("/tmp/aof.plist", {
+      label: "ai.openclaw.aof",
+      uid: 501,
+      ops,
+    });
+
+    expect(calls).toEqual([
+      "launchctl bootout gui/501/ai.openclaw.aof",
+      "isLoaded=false",
+      "isLoaded=false",
+      "launchctl bootstrap gui/501 /tmp/aof.plist",
+      "launchctl kickstart -k gui/501/ai.openclaw.aof",
+    ]);
+  });
+
+  it("bootstraps after bootout settles when service was loaded", async () => {
+    // bootout runs (no probe before), wait-loop sees loaded=true once, sleeps,
+    // then loaded=false; post-wait probe returns false → bootstrap + kickstart.
+    const { ops, calls } = makeOps([true, false, false]);
+
+    await launchctlInstallIdempotent("/tmp/aof.plist", {
+      label: "ai.openclaw.aof",
+      uid: 501,
+      ops,
+    });
+
+    expect(calls).toEqual([
+      "launchctl bootout gui/501/ai.openclaw.aof",
+      "isLoaded=true",
+      "sleep",
+      "isLoaded=false",
+      "isLoaded=false",
+      "launchctl bootstrap gui/501 /tmp/aof.plist",
+      "launchctl kickstart -k gui/501/ai.openclaw.aof",
+    ]);
+  });
+
+  it("skips bootstrap when bootout is a silent no-op (EIO guard)", async () => {
+    // Regression: bootout didn't actually unload (e.g. re-bootstrapped by the
+    // OS). Wait-loop times out with service still loaded. bootstrap MUST be
+    // skipped to avoid `launchctl bootstrap: 5: Input/output error`.
+    // kickstart -k still runs — it restarts the already-loaded service.
+    const loadedForever = Array(20).fill(true);
+    const { ops, calls } = makeOps(loadedForever);
+
+    await launchctlInstallIdempotent("/tmp/aof.plist", {
+      label: "ai.openclaw.aof",
+      uid: 501,
+      ops,
+    });
+
+    const execs = calls.filter((c) => c.startsWith("launchctl"));
+    // Expect: bootout, kickstart. NO bootstrap.
+    expect(execs).toEqual([
+      "launchctl bootout gui/501/ai.openclaw.aof",
+      "launchctl kickstart -k gui/501/ai.openclaw.aof",
+    ]);
+    expect(execs.some((c) => c.includes("bootstrap"))).toBe(false);
+
+    // Wait loop should have slept 10 times (5s cap at 500ms each).
+    expect(calls.filter((c) => c === "sleep").length).toBe(10);
+  });
+
+  it("swallows errors from the best-effort bootout", async () => {
+    const calls: string[] = [];
+    const ops: LaunchctlOps = {
+      isLoaded: () => {
+        calls.push("isLoaded=false");
+        return false;
+      },
+      exec: (cmd) => {
+        if (cmd.includes("bootout")) {
+          throw new Error("not loaded");
+        }
+        calls.push(cmd);
+      },
+      sleep: async () => {},
+    };
+
+    await expect(
+      launchctlInstallIdempotent("/tmp/aof.plist", { label: "ai.openclaw.aof", uid: 501, ops }),
+    ).resolves.toBeUndefined();
+
+    expect(calls).toEqual([
+      "isLoaded=false",
+      "isLoaded=false",
+      "launchctl bootstrap gui/501 /tmp/aof.plist",
+      "launchctl kickstart -k gui/501/ai.openclaw.aof",
+    ]);
   });
 });

@@ -245,6 +245,87 @@ WantedBy=default.target
 }
 
 // ---------------------------------------------------------------------------
+// launchctl orchestration (extracted for testability)
+// ---------------------------------------------------------------------------
+
+/**
+ * Injection surface for the idempotent launchd install sequence.
+ *
+ * Kept tiny: one probe (isLoaded), one command runner (exec), one sleep.
+ * Tests pass a mock; production uses the execSync-backed defaults.
+ */
+export interface LaunchctlOps {
+  isLoaded(service: string): boolean;
+  exec(cmd: string): void;
+  sleep(ms: number): Promise<void>;
+}
+
+export const defaultLaunchctlOps: LaunchctlOps = {
+  isLoaded(service) {
+    try {
+      execSync(`launchctl print ${service}`, { stdio: "ignore" });
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  exec(cmd) {
+    execSync(cmd, { stdio: "ignore" });
+  },
+  sleep(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+  },
+};
+
+/**
+ * Install (or refresh) a launchd service idempotently.
+ *
+ * `launchctl bootstrap` returns EIO (code 5) when the service is already
+ * loaded. The prior implementation did an unconditional `bootout` followed by
+ * `bootstrap`; when `bootout` silently no-op'd (e.g. service still winding
+ * down from a concurrent start), `bootstrap` hit the loaded-state EIO and
+ * crashed the upgrade.
+ *
+ * Sequence:
+ *   1. Best-effort `bootout` so any plist change can take effect.
+ *   2. Wait up to 5s for the service to actually leave loaded state.
+ *   3. `bootstrap` ONLY if still not loaded (guards against the EIO race).
+ *   4. `kickstart -k` unconditionally — start if stopped, restart if running.
+ */
+export async function launchctlInstallIdempotent(
+  plistPath: string,
+  opts: { label?: string; uid?: number; ops?: LaunchctlOps } = {},
+): Promise<void> {
+  const label = opts.label ?? AOF_SERVICE_LABEL;
+  const uid = opts.uid ?? process.getuid?.() ?? 0;
+  const ops = opts.ops ?? defaultLaunchctlOps;
+  const domain = `gui/${uid}`;
+  const service = `${domain}/${label}`;
+
+  // 1. Best-effort unload so bootstrap reloads any plist change.
+  try {
+    ops.exec(`launchctl bootout ${service}`);
+  } catch {
+    // bootout throws when service isn't loaded — fine, fall through.
+  }
+
+  // 2. bootout is asynchronous; wait up to 5s for the unload to settle.
+  for (let i = 0; i < 10 && ops.isLoaded(service); i++) {
+    await ops.sleep(500);
+  }
+
+  // 3. Bootstrap only if the service is actually not loaded. Skipping this
+  //    when loaded is the core idempotency fix — it avoids the EIO.
+  if (!ops.isLoaded(service)) {
+    ops.exec(`launchctl bootstrap ${domain} ${plistPath}`);
+  }
+
+  // 4. Always (re)start. kickstart -k kills and restarts; a no-op on a
+  //    freshly bootstrapped service, a restart on an already-running one.
+  ops.exec(`launchctl kickstart -k ${service}`);
+}
+
+// ---------------------------------------------------------------------------
 // Install / Uninstall
 // ---------------------------------------------------------------------------
 
@@ -271,13 +352,7 @@ export async function installService(config: ServiceFileConfig): Promise<Install
     const content = generateLaunchdPlist(config);
     writeFileSync(servicePath, content, "utf-8");
 
-    // Unload first if already loaded (ignore errors)
-    try {
-      execSync(`launchctl bootout gui/$(id -u)/${AOF_SERVICE_LABEL} 2>/dev/null`, { stdio: "ignore" });
-    } catch {
-      // Not loaded yet — fine
-    }
-    execSync(`launchctl bootstrap gui/$(id -u) ${servicePath}`);
+    await launchctlInstallIdempotent(servicePath);
   } else if (platform === "linux") {
     const content = generateSystemdUnit(config);
     writeFileSync(servicePath, content, "utf-8");

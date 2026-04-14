@@ -395,8 +395,14 @@ resume_live_writers() {
   for svc in $PAUSED_SERVICES; do
     plist="$HOME/Library/LaunchAgents/$svc.plist"
     if [ -f "$plist" ]; then
-      launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null || true
-      launchctl kickstart "gui/$(id -u)/$svc" 2>/dev/null || true
+      # launchctl bootstrap returns EIO if the service is already loaded
+      # (e.g. re-bootstrapped by the OS between pause and resume). Guard
+      # with an explicit load check to keep resume idempotent.
+      if ! service_is_loaded "$svc"; then
+        launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null || true
+      fi
+      # -k kicks a running service; also works as plain start if stopped.
+      launchctl kickstart -k "gui/$(id -u)/$svc" 2>/dev/null || true
       say "Resumed service: $svc"
     fi
   done
