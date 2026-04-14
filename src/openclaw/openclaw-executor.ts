@@ -75,7 +75,7 @@ export class OpenClawAdapter implements GatewayAdapter {
       const ensured = await runtimeAgent.ensureAgentWorkspace({ dir: workspaceDirRaw });
       const workspaceDir = ensured?.dir ?? workspaceDirRaw;
       const agentDir = runtimeAgent.resolveAgentDir(config, agentId);
-      const sessionFile = runtimeAgent.session?.resolveSessionFilePath?.(config, sessionId)
+      const sessionFile = runtimeAgent.session?.resolveSessionFilePath?.(sessionId)
         ?? `${agentDir}/sessions/${sessionId}.jsonl`;
 
       log.info({ agentId, sessionId }, "launching embedded agent (fire-and-forget)");

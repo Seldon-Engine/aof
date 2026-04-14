@@ -53,7 +53,7 @@ export interface OpenClawAgentRuntime {
   resolveAgentTimeoutMs?: (cfg: Record<string, unknown>, agentId?: string) => number;
   ensureAgentWorkspace?: (params?: { dir?: string; ensureBootstrapFiles?: boolean }) => Promise<{ dir: string } | void>;
   session?: {
-    resolveSessionFilePath?: (cfg: Record<string, unknown>, sessionId: string) => string;
+    resolveSessionFilePath?: (sessionId: string) => string;
   };
 }
 
