@@ -9,8 +9,8 @@ import { homedir } from "node:os";
 import { access } from "node:fs/promises";
 import { getConfig } from "../config/registry.js";
 
-/** Default AOF vault root — the runtime deployment directory. */
-export const DEFAULT_AOF_ROOT = resolve(homedir(), ".aof");
+/** Default AOF vault root — the user-data directory, segregated from code. */
+export const DEFAULT_AOF_ROOT = resolve(homedir(), ".aof", "data");
 
 export interface ProjectResolution {
   projectId: string;

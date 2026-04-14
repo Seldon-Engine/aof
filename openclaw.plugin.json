@@ -11,7 +11,7 @@
     "properties": {
       "dataDir": {
         "type": "string",
-        "description": "AOF state directory (default: ~/.openclaw/aof)"
+        "description": "AOF user-data directory (default: ~/.aof/data). Lives under the AOF install root but in a dedicated subdirectory that the installer preserves across upgrades and --clean runs."
       },
       "pollIntervalMs": {
         "type": "number",

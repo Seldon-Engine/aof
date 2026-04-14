@@ -1010,7 +1010,7 @@ Run post-installation setup (wizard, migrations, plugin wiring)
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--auto` | Fully automatic mode, no prompts | `false` |
-| `--data-dir <path>` | AOF root directory | `"/Users/xavier/.aof"` |
+| `--data-dir <path>` | AOF user-data directory | `"/Users/xavier/.aof/data"` |
 | `--upgrade` | Existing installation detected, run upgrade flow | `false` |
 | `--legacy` | Legacy installation detected at ~/.openclaw/aof/ | `false` |
 | `--openclaw-path <path>` | Explicit OpenClaw config path |  |

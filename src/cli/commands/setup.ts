@@ -11,6 +11,7 @@ import { homedir } from "node:os";
 import { readFile, access, mkdir, cp, writeFile, unlink, rm } from "node:fs/promises";
 import type { Command } from "commander";
 import writeFileAtomic from "write-file-atomic";
+import { VERSION } from "../../version.js";
 import { runWizard, ensureScaffold } from "../../packaging/wizard.js";
 import { normalizePath } from "../../config/paths.js";
 import { runMigrations } from "../../packaging/migrations.js";
@@ -20,6 +21,7 @@ import { migration001 } from "../../packaging/migrations/001-default-workflow-te
 import { migration003 } from "../../packaging/migrations/003-version-metadata.js";
 import { migration004 } from "../../packaging/migrations/004-scaffold-repair.js";
 import { migration005 } from "../../packaging/migrations/005-path-reconciliation.js";
+import { migration006 } from "../../packaging/migrations/006-data-code-separation.js";
 import {
   detectOpenClaw,
   isAofPluginRegistered,
@@ -62,7 +64,7 @@ export interface SetupOptions {
  * Returns all registered migrations in order.
  */
 function getAllMigrations(): Migration[] {
-  return [migration001, migration003, migration004, migration005];
+  return [migration001, migration003, migration004, migration005, migration006];
 }
 
 // --- Helpers ---
@@ -81,16 +83,22 @@ async function readVersionFile(dataDir: string): Promise<string> {
 }
 
 /**
- * Read the version from package.json in the install directory.
+ * Read the target version — what we're upgrading TO. Historically this came
+ * from `${dataDir}/package.json` because dataDir WAS the install dir. Under
+ * the new single-roof split, the data dir no longer contains a package.json,
+ * so we fall back to the compiled-in VERSION (which always reflects the code
+ * that's actually running). Behavior for legacy mixed-layout users is
+ * preserved: the dataDir lookup still wins when a package.json is present.
  */
 async function readPackageVersion(dataDir: string): Promise<string> {
   try {
     const content = await readFile(join(dataDir, "package.json"), "utf-8");
     const pkg = JSON.parse(content) as { version?: string };
-    return pkg.version ?? "0.0.0";
+    if (pkg.version) return pkg.version;
   } catch {
-    return "0.0.0";
+    // fall through
   }
+  return VERSION;
 }
 
 /**
@@ -529,7 +537,7 @@ export function registerSetupCommand(program: Command): void {
     .command("setup")
     .description("Run post-installation setup (wizard, migrations, plugin wiring)")
     .option("--auto", "Fully automatic mode, no prompts", false)
-    .option("--data-dir <path>", "AOF root directory", join(homedir(), ".aof"))
+    .option("--data-dir <path>", "AOF user-data directory", join(homedir(), ".aof", "data"))
     .option("--upgrade", "Existing installation detected, run upgrade flow", false)
     .option("--legacy", "Legacy installation detected at ~/.openclaw/aof/", false)
     .option("--openclaw-path <path>", "Explicit OpenClaw config path")

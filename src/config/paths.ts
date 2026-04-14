@@ -24,9 +24,23 @@ export function normalizePath(p: string): string {
 
 /**
  * Canonical default when nothing is configured.
- * Must match DEFAULT_AOF_ROOT in projects/resolver.ts — both resolve to ~/.aof.
+ *
+ * User data lives under ~/.aof/data/ — a dedicated subdirectory of the AOF
+ * install root. The installer knows to preserve this subdirectory during
+ * upgrades and --clean operations; everything else under ~/.aof/ is
+ * installer-owned and can be wiped freely.
+ *
+ * Must match DEFAULT_AOF_ROOT in projects/resolver.ts, DEFAULT_DATA_DIR in
+ * plugin.ts, and the Zod default in config/registry.ts.
  */
-export const DEFAULT_DATA_DIR = join(homedir(), ".aof");
+export const DEFAULT_DATA_DIR = join(homedir(), ".aof", "data");
+
+/**
+ * Canonical install location for AOF compiled code, CLI launchers, and npm
+ * dependencies. The installer may wipe everything under this path *except*
+ * DEFAULT_DATA_DIR (which sits inside it).
+ */
+export const DEFAULT_CODE_DIR = join(homedir(), ".aof");
 
 /**
  * Resolve the effective data directory.

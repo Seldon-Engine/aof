@@ -19,7 +19,7 @@ import { homedir } from "node:os";
 export const AofConfigSchema = z.object({
   core: z
     .object({
-      dataDir: z.string().default("~/.aof"),
+      dataDir: z.string().default("~/.aof/data"),
       logLevel: z
         .enum(["debug", "info", "warn", "error", "silent"])
         .default("info"),
