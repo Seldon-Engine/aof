@@ -1,7 +1,7 @@
 # AOF Code Map
 
 Agentic Ops Fabric — deterministic orchestration for multi-agent systems.  
-TypeScript ESM | Node >= 22 | ~42K LOC source | 269 source files, 244 test files
+TypeScript ESM | Node >= 22 | ~44K LOC source | 277 source files, 246 test files
 
 ---
 
@@ -10,13 +10,16 @@ TypeScript ESM | Node >= 22 | ~42K LOC source | 269 source files, 244 test files
 AOF has two runtime entry points that converge on the same core:
 
 ```
-Plugin Mode (OpenClaw gateway)              Standalone Mode (CLI daemon)
-src/plugin.ts                               src/daemon/index.ts
-  -> registerAofPlugin()                      -> startAofDaemon()
-  -> OpenClawAdapter (in-process dispatch)    -> StandaloneAdapter (HTTP dispatch)
-  -> AOFService.start()                       -> AOFService.start()
-           \                                       /
-            +------> poll() -> dispatch pipeline --+
+Plugin Mode (OpenClaw gateway)                     Standalone Mode (CLI daemon)
+src/plugin.ts                                      src/daemon/index.ts
+  -> registerAofPlugin()                             -> startAofDaemon()
+  -> OpenClawAdapter                                 -> StandaloneAdapter (HTTP dispatch)
+     (api.runtime.agent.runEmbeddedPiAgent,
+      OpenClaw ≥ 2026.2 — no HTTP, no gateway-
+      request scope; safe from a background poller)
+  -> AOFService.start()                              -> AOFService.start()
+           \                                              /
+            +-----------> poll() -> dispatch pipeline ---+
 ```
 
 These paths never cross. Plugin mode never loads `daemon.ts`; standalone mode never calls `registerAofPlugin`. Both resolve to a `GatewayAdapter` and pass it to `AOFService`.
@@ -60,6 +63,52 @@ Full layering rules are in `ARCHITECTURE.md`.
 
 ---
 
+## Installation Layout
+
+AOF separates user data from code so the installer can wipe the code tree on upgrade without touching task state:
+
+```
+~/.aof/                   Code tree (installer-owned — wiped freely on upgrade)
+├── bin/aof               CLI launcher
+├── dist/…                Compiled JS + openclaw.plugin.json
+├── node_modules/…        Pinned dependencies
+└── data/                 User data — NEVER wiped
+    ├── tasks/…           Markdown task files (status dirs)
+    ├── events/*.jsonl    Event log
+    ├── artifacts/…       Run artifacts, heartbeats
+    ├── memory.db         SQLite vector + FTS store
+    └── projects.json     Multi-project manifest
+```
+
+Canonical resolution lives in `src/config/paths.ts`:
+
+```
+DEFAULT_CODE_DIR   ~/.aof            (install root)
+DEFAULT_DATA_DIR   ~/.aof/data       (preserved across upgrades)
+resolveDataDir()   explicit arg > AOF_DATA_DIR env > getConfig().core.dataDir > default
+```
+
+`scripts/install.sh` preserves `DATA_DIR` via a stop-services → move-out → wipe-code → extract-tarball → restore-data cycle. Migration 006 (`006-data-code-separation.ts`) relocates legacy mixed-layout installs (where `tasks/` lived directly under `~/.aof/`) on first run after upgrade.
+
+### Installer Mode-Exclusivity (Phase 42)
+
+When the OpenClaw plugin symlink is present (`~/.openclaw/extensions/aof`), the plugin runs AOFService in-process inside the gateway. Running the standalone daemon concurrently causes duplicate polling against the same `DATA_DIR`. The installer prevents this:
+
+```
+install.sh
+├── plugin_mode_detected()   [ -L "$ext_link" ] || [ -d "$ext_link" ]
+├── install_daemon()
+│   ├── if plugin_mode_detected && ! $FORCE_DAEMON
+│   │   ├── if plist exists → aof daemon uninstall (D-05 convergence)
+│   │   └── else → skip with "Plugin-mode detected" message
+│   └── else → proceed with normal launchd/systemd install
+└── flags: --force-daemon (override), --tarball PATH (local build), --data-dir, --prefix
+```
+
+Daemon install is idempotent via `launchctl kickstart -k` (macOS) instead of bootstrap+unload. Integration coverage in `tests/integration/install-mode-exclusivity.test.ts` (darwin-only, gated by `AOF_INTEGRATION=1`).
+
+---
+
 ## Core Patterns
 
 ### Config Singleton
@@ -73,6 +122,8 @@ src/config/registry.ts
 ```
 
 Usage: `import { getConfig } from '../config/registry.js'`. Never read `process.env` directly elsewhere (one documented exception: `AOF_CALLBACK_DEPTH` cross-process mutation in `dispatch/callback-delivery.ts`).
+
+Filesystem paths resolve through `src/config/paths.ts` (`resolveDataDir`, `normalizePath`, `DEFAULT_DATA_DIR`, `DEFAULT_CODE_DIR`, plus well-known-path helpers like `eventsDir`, `memoryDbPath`, `daemonSocketPath`) — never hardcode `~/.aof/...` subpaths in domain modules.
 
 ### Zod-First Schemas
 
@@ -154,7 +205,11 @@ GatewayAdapter (interface)
   forceCompleteSession(sessionId)  -> void
 
 Implementations:
-  OpenClawAdapter    — in-process via gateway extensionAPI.runEmbeddedPiAgent()
+  OpenClawAdapter    — in-process via api.runtime.agent.runEmbeddedPiAgent
+                       (OpenClaw ≥ 2026.2). Captures session context
+                       (sessionKey/sessionId/replyTarget/channel) via
+                       ToolInvocationContext so task notifications can
+                       route back to the caller session.
   StandaloneAdapter  — HTTP POST to external OpenClaw gateway
   MockAdapter        — configurable test double (auto-complete, fail modes)
 ```
@@ -187,6 +242,8 @@ Action handlers are extracted into:
 - `lifecycle-handlers.ts` — assign, deadletter, expire-lease, promote, requeue
 - `recovery-handlers.ts` — spawn failure recovery
 - `alert-handlers.ts` — alert dispatch
+
+Per-task spawn timeouts: the `aof_dispatch` tool accepts an optional `timeoutMs` (Zod-validated, capped at `MAX_DISPATCH_TIMEOUT_MS = 4h` in `tools/project-tools.ts`). Stored in task metadata and consumed by `assign-executor.ts` at spawn time, overriding the plugin-level `spawnTimeoutMs` default.
 
 ### DAG Workflow Engine
 
@@ -269,10 +326,42 @@ Installation and update management:
 - `installer.ts` — install/update with backup and health checks
 - `updater.ts` — version-aware updates
 - `wizard.ts` — interactive setup wizard
-- `migrations.ts` — numbered migration framework (001-005)
+- `migrations.ts` — numbered migration framework
+- `migrations/` — numbered migration files (001 workflow template, 003 version metadata, 004 scaffold repair, 005 path reconciliation, 006 data-code separation)
 - `ejector.ts` — remove AOF cleanly
-- `snapshot.ts` — backup/restore
+- `snapshot.ts` — backup/restore (excludes non-regular files: sockets, FIFOs, devices)
 - `channels.ts` — update channel management
+
+Shell-side entry point `scripts/install.sh` owns:
+- Preserve-wipe-restore upgrade cycle (stops services first to avoid write races)
+- Plugin-mode detection + daemon skip gate (Phase 42)
+- `--tarball PATH` flag for local-build testing (bypasses GitHub release fetch)
+- `launchctl kickstart -k` for idempotent macOS daemon installs
+- Tarball build: `scripts/build-tarball.mjs` emits `dist/openclaw.plugin.json` so plugin-mode loads regardless of install root
+
+### OpenClaw Notification Delivery (`src/openclaw/`)
+
+Plugin-owned subscription-delivery subsystem that routes task state changes back to the originating chat session (added PR #4, refactored PR #5):
+
+```
+adapter.ts                      -> registerAofPlugin(): tool registration +
+                                   session-capture hook wiring
+openclaw-executor.ts            -> OpenClawAdapter / OpenClawExecutor
+                                   (prefers api.runtime.agent.runEmbeddedPiAgent;
+                                   falls back to legacy HTTP if runtime.agent absent)
+tool-invocation-context.ts      -> captures OpenClawNotificationRecipient
+                                   (sessionKey, sessionId, replyTarget, channel,
+                                   threadId) from the current tool invocation
+openclaw-chat-delivery.ts       -> "openclaw-chat" subscription delivery kind;
+                                   EventLogger callback fires on task status
+                                   transitions (blocked/review/done/cancelled/
+                                   deadletter); per-status dedupe stored on
+                                   the subscription
+matrix-notifier.ts              -> message-tool adapter invoked by chat-delivery
+permissions.ts                  -> permission-aware wrapper
+```
+
+All OpenClaw-specific idioms (sessionKey/replyTarget/channel) stay inside `src/openclaw/`; they are translated into the core-agnostic `SubscriptionDelivery` payload before crossing into AOF core.
 
 ---
 
@@ -288,11 +377,19 @@ src/testing/metrics-reader.ts   -> getMetricValue(): read prom-client metrics
 ```
 
 Test tiers:
-- **Unit tests** (`src/**/__tests__/*.test.ts`): ~3,017 tests, 10s timeout
-- **E2E tests** (`tests/e2e/suites/*.test.ts`): 224 tests, sequential, single fork, 60s timeout
-- **Integration tests** (`tests/integration/`): plugin integration tests
+- **Unit tests** (`src/**/__tests__/*.test.ts`): ~3,048 tests, 10s timeout. Root `vitest.config.ts` excludes `tests/integration/` and `tests/e2e/` from the unit run.
+- **E2E tests** (`tests/e2e/suites/*.test.ts`): ~224 tests, sequential, single fork, 60s timeout
+- **Integration tests** (`tests/integration/`): `plugin-load`, `dispatch-pipeline`, `gateway-dispatch`, `dep-cascade`, `notification-engine`, `sdlc-workflow`, `install-mode-exclusivity` (darwin-only, gated by `AOF_INTEGRATION=1`). Run via `npm run test:integration:plugin`.
 
 Naming convention for regression tests: `bug-NNN-description.test.ts`
+
+### Test-lock watchdog (`scripts/test-lock.sh`)
+
+Vitest's tinypool can leak child workers when runs are aborted (SIGTERM cleanup is unreliable). `test-lock.sh` wraps test invocations with a process-group watchdog that kills orphaned vitest workers on parent death. Manual cleanup rule after any aborted run (see CLAUDE.md):
+
+```bash
+ps -eo pid,command | grep -E "node \(vitest" | grep -v grep | awk '{print $1}' | xargs -r kill -9
+```
 
 ---
 
@@ -338,11 +435,13 @@ MCP and OpenClaw adapters automatically pick up registry tools. Tools that need 
 | `cli/commands/memory.ts` | 607 | CLI command module, many subcommands |
 | `cli/commands/daemon.ts` | 599 | CLI command module |
 | `dispatch/dag-evaluator.ts` | 588 | Complex DAG state machine |
-| `cli/commands/setup.ts` | 561 | Interactive setup wizard |
+| `cli/commands/setup.ts` | 587 | Interactive setup wizard |
 | `protocol/router.ts` | 550 | 8 handler methods, could extract |
 | `schemas/workflow-dag.ts` | 538 | Complex schema + validation |
 | `store/task-store.ts` | 533 | Core store, already extracted helpers |
 | `dispatch/scheduler.ts` | 531 | Core scheduler, already extracted helpers |
+| `service/aof-service.ts` | 505 | AOFService orchestration (both modes) |
+| `packaging/wizard.ts` | 493 | Install wizard |
 
 ---
 
