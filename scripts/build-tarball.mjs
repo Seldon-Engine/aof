@@ -71,6 +71,17 @@ delete pkg.scripts?.prepare;
 delete pkg['simple-git-hooks'];
 writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
 
+// OpenClaw's plugin loader resolves the manifest relative to the symlink
+// target (~/.openclaw/extensions/aof → $INSTALL_DIR/dist/). The root-level
+// manifest points to "dist/plugin.js" which is wrong from inside dist/.
+// Write a dist-local copy with main=plugin.js. Mirrors scripts/deploy.sh.
+const distManifest = JSON.parse(readFileSync(join(staging, 'openclaw.plugin.json'), 'utf8'));
+distManifest.main = 'plugin.js';
+writeFileSync(
+  join(staging, 'dist', 'openclaw.plugin.json'),
+  JSON.stringify(distManifest, null, 2) + '\n',
+);
+
 const tarball = `aof-${version}.tar.gz`;
 execSync(`tar -czf ${tarball} -C ${staging} .`);
 execSync(`rm -rf ${staging}`);

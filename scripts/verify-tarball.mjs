@@ -91,6 +91,7 @@ try {
     "package.json",
     "dist/cli/index.js",
     "openclaw.plugin.json",
+    "dist/openclaw.plugin.json",
   ];
 
   for (const file of requiredFiles) {
@@ -159,6 +160,33 @@ try {
     process.exit(1);
   }
   console.log(`PASS: openclaw.plugin.json version match (${pluginJson.version})`);
+
+  // --- Step 7b: dist-local openclaw.plugin.json ---
+  // OpenClaw's plugin loader resolves manifests relative to the symlink target
+  // (~/.openclaw/extensions/aof → $INSTALL_DIR/dist/). Without a dist-local
+  // manifest, fresh installs fail with "plugins.entries.aof: plugin not found".
+
+  const distPluginRaw = readFileSync(
+    join(extractDir, "dist", "openclaw.plugin.json"),
+    "utf-8",
+  );
+  const distPluginJson = JSON.parse(distPluginRaw);
+
+  if (distPluginJson.main !== "plugin.js") {
+    console.log(
+      `FAIL: dist/openclaw.plugin.json main="${distPluginJson.main}", expected "plugin.js"`,
+    );
+    cleanup();
+    process.exit(1);
+  }
+  if (distPluginJson.version !== pkgVersion) {
+    console.log(
+      `FAIL: dist/openclaw.plugin.json version mismatch: plugin=${distPluginJson.version}, package.json=${pkgVersion}`,
+    );
+    cleanup();
+    process.exit(1);
+  }
+  console.log(`PASS: dist/openclaw.plugin.json main=plugin.js version=${pkgVersion}`);
 
   // --- Step 8: SKILL.md present ---
 
