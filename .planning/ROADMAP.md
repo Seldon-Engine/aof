@@ -116,3 +116,38 @@ See: `.planning/milestones/v1.8-ROADMAP.md` for full details
 See: `.planning/milestones/v1.10-ROADMAP.md` for full details
 
 </details>
+
+## Backlog
+
+### Phase 999.1: Installer mode-exclusivity (BACKLOG)
+
+**Goal:** Prevent duplicate task polling between plugin-mode AOFService (inside openclaw gateway) and standalone aof-daemon, both scanning ~/.aof/data/. Installer should detect openclaw plugin integration and skip (or gate off) the standalone daemon service.
+
+**Why:** Today every task in `ready/` is raced between the gateway's in-process AOFService and the daemon's AOFService. Gateway wins fast-path; daemon's polls are wasted at best, HTTP-dispatch brittle at worst. Also the install upgrade race (daemon/plugin keeps writing during preserve→wipe→restore) is much harder to solve while both are default-on.
+
+**Detection signal:** `~/.openclaw/extensions/aof` symlink present AND `openclaw config get plugins.slots.memory == "aof"`.
+
+**Scope:** `scripts/install.sh` + `aof setup` CLI. Add `--no-daemon` or auto-skip. Leave existing pure-standalone installs alone.
+
+**Requirements:** TBD
+**Plans:** 0 plans
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
+### Phase 999.2: Thin-plugin architecture — daemon as single authority (BACKLOG)
+
+**Goal:** Restructure so the aof-daemon owns the single scheduler / task store authority, and the openclaw plugin becomes a thin bridge (tool host + agent-spawn callback). Plugin IPC-calls daemon; daemon IPC-calls plugin back for spawns that need `runtime.agent.runEmbeddedPiAgent`. Single-writer model enables multi-platform plugin fan-out (openclaw, slack, cli, other gateways) all dispatching through one daemon.
+
+**Why:** User's original mental model. Eliminates the "two parallel AOFService instances share a filesystem" problem structurally, not just by config. Enables orchestrating tasks across multiple hosting plugins from one central scheduler.
+
+**Scope (large):**
+- Remove module-level `schedulerService` singleton from `src/openclaw/adapter.ts`
+- Plugin tool handlers switch from direct-store to daemon IPC
+- New `PluginBridgeAdapter` on daemon side replaces `StandaloneAdapter` (or extends it): calls back into the gateway process (via openclaw `registerGatewayMethod`) to request a spawn instead of HTTP
+- Session-route / tool-call hooks posted daemon-ward via IPC
+- Migration path for existing installs (handled by 999.1's exclusivity first)
+
+**Depends on:** 999.1 (exclusivity must land first so both architectures can coexist during migration)
+
+**Requirements:** TBD
+**Plans:** 0 plans
+- [ ] TBD (promote with /gsd-review-backlog when ready)
