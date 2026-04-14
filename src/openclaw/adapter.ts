@@ -222,29 +222,38 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
   }
 
   // --- Event hooks ---
-  api.on("session_end", (event) => {
-    invocationContextStore.clearSessionRoute(event);
+  // OpenClaw fires lifecycle hooks as (event, ctx). Session identifiers
+  // (sessionKey, sessionId, agentId) live on ctx, not on event. Merging so
+  // downstream extractors can find the session route.
+  const withCtx = (event: unknown, ctx: unknown): unknown =>
+    event && typeof event === "object" && ctx && typeof ctx === "object"
+      ? { ...(event as Record<string, unknown>), ...(ctx as Record<string, unknown>) }
+      : event;
+
+  api.on("session_end", (event, ctx) => {
+    invocationContextStore.clearSessionRoute(withCtx(event, ctx));
     void service.handleSessionEnd();
   });
   api.on("before_compaction", () => {
     invocationContextStore.clearAll();
     void service.handleSessionEnd();
   });
-  api.on("agent_end", (event) => {
-    void service.handleAgentEnd(event);
+  api.on("agent_end", (event, ctx) => {
+    void service.handleAgentEnd(withCtx(event, ctx));
   });
-  api.on("message_received", (event) => {
-    invocationContextStore.captureMessageRoute(event);
-    void service.handleMessageReceived(event);
+  api.on("message_received", (event, ctx) => {
+    const merged = withCtx(event, ctx);
+    invocationContextStore.captureMessageRoute(merged);
+    void service.handleMessageReceived(merged);
   });
-  api.on("message_sent", (event) => {
-    invocationContextStore.captureMessageRoute(event);
+  api.on("message_sent", (event, ctx) => {
+    invocationContextStore.captureMessageRoute(withCtx(event, ctx));
   });
-  api.on("before_tool_call", (event) => {
-    invocationContextStore.captureToolCall(event);
+  api.on("before_tool_call", (event, ctx) => {
+    invocationContextStore.captureToolCall(withCtx(event, ctx));
   });
-  api.on("after_tool_call", (event) => {
-    invocationContextStore.clearToolCall(event);
+  api.on("after_tool_call", (event, ctx) => {
+    invocationContextStore.clearToolCall(withCtx(event, ctx));
   });
 
   // --- Tools: shared registry loop (eliminates copy-pasted execute blocks) ---

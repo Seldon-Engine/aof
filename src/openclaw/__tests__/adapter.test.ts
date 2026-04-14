@@ -159,6 +159,70 @@ describe("OpenClaw adapter", () => {
     });
   });
 
+  it("auto-captures sessionKey from hook ctx (real openclaw (event, ctx) signature)", async () => {
+    // Regression: openclaw fires hooks as (event, ctx); session identifiers live
+    // on ctx. Previously the adapter ignored ctx, so sessionKey was never captured
+    // and aof_dispatch created no subscription. See: task 008, 2026-04-14.
+    const tools: Array<{ name: string; execute: (id: string, params: Record<string, unknown>) => Promise<any> }> = [];
+    const events: Record<string, (...args: unknown[]) => void> = {};
+    const tmpDir = await mkdtemp(join(tmpdir(), "aof-openclaw-adapter-ctx-"));
+    const store = new FilesystemTaskStore(tmpDir);
+    const logger = new EventLogger(join(tmpDir, "events"));
+    await store.init();
+
+    const api: OpenClawApi = {
+      registerService: vi.fn(),
+      registerTool: (def) => tools.push(def as any),
+      registerHttpRoute: vi.fn(),
+      on: (event, handler) => {
+        events[event] = handler;
+      },
+    };
+
+    registerAofPlugin(api, {
+      dataDir: tmpDir,
+      store,
+      logger,
+      messageTool: { send: vi.fn(async () => undefined) },
+    });
+
+    // Real openclaw call shape: event carries toolName/params/toolCallId,
+    // ctx carries sessionKey/sessionId/agentId.
+    events["message_received"]?.(
+      { from: "user", content: "hi" },
+      {
+        sessionKey: "agent:main:telegram:group:42",
+        channelId: "telegram",
+      },
+    );
+    events["before_tool_call"]?.(
+      { toolName: "aof_dispatch", params: {}, toolCallId: "ctx-call-1" },
+      {
+        toolName: "aof_dispatch",
+        sessionKey: "agent:main:telegram:group:42",
+        agentId: "main",
+      },
+    );
+
+    const dispatchTool = tools.find((tool) => tool.name === "aof_dispatch");
+    const result = await dispatchTool!.execute("ctx-call-1", {
+      title: "Ctx task",
+      brief: "Verify notification subscription is created from ctx-captured session",
+      actor: "main",
+    });
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload.notificationSubscriptionId).toBeDefined();
+
+    const task = await store.get(payload.taskId);
+    const subsPath = join(tmpDir, "tasks", task!.frontmatter.status, task!.frontmatter.id, "subscriptions.json");
+    const subsFile = JSON.parse(await readFile(subsPath, "utf-8"));
+    expect(subsFile.subscriptions).toHaveLength(1);
+    expect(subsFile.subscriptions[0].delivery).toMatchObject({
+      kind: "openclaw-chat",
+      sessionKey: "agent:main:telegram:group:42",
+    });
+  });
+
   it("respects an explicit notifyOnCompletion target over auto-capture (cron/CLI path)", async () => {
     const tools: Array<{ name: string; execute: (id: string, params: Record<string, unknown>) => Promise<any> }> = [];
     const tmpDir = await mkdtemp(join(tmpdir(), "aof-openclaw-adapter-explicit-"));
