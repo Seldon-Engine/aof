@@ -488,32 +488,37 @@ describe("install.sh mode-exclusivity", () => {
 
 **No `[ASSUMED]` claims remain unverified — every claim above was cross-checked against in-tree source during this research session.**
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Where should the `--detect-mode` CLI subcommand go, if anywhere?**
    - What we know: No consumer exists today. Detection can be pure-shell.
    - What's unclear: Will Phase 999.2 (thin-plugin IPC) want a TS-side `aof doctor` / `aof status --mode` readout that reuses the same detection? If yes, putting the logic in TS now and shelling out from bash would avoid duplication later.
    - Recommendation: Land the shell function only. Revisit if Phase 999.2 surfaces a concrete consumer. One-liner in bash does not justify a TS helper prospectively.
+   - **Resolution:** Shell function only in install.sh. No `aof setup --detect-mode` subcommand this phase — no consumer, and requires `dist/` to be present before the gate can run.
 
 2. **Should `--force-daemon` warn or fail when used WITHOUT plugin-mode detected?**
    - What we know: It's a no-op when plugin is absent — daemon would install anyway.
    - What's unclear: Silent no-op vs. loud warn. Users may set it defensively in CI without knowing whether plugin is present.
    - Recommendation: Silent when plugin absent; warn ONLY when plugin IS present and flag overrides the skip. This keeps the warn semantically accurate ("you overrode an actual skip") and avoids spam.
+   - **Resolution:** Silent no-op when plugin absent. Warn only when override actually overrides (plugin detected AND `--force-daemon` set). Matches "leave pure-standalone untouched" guarantee.
 
 3. **Tarball-based integration test: build-on-every-run vs. fixture?**
    - What we know: `build-tarball.mjs <version>` produces `.release-staging/aof-v<version>.tar.gz`. Takes ~10-20s locally.
    - What's unclear: Whether CI budget supports building a tarball per test run, and whether a cached fixture would drift from source.
    - Recommendation: Build in a Vitest `beforeAll` (once per test file). Tag the test as integration, not unit — slow-path OK. If CI cost is too high, gate behind `AOF_INSTALLER_TEST=1`.
+   - **Resolution:** `beforeAll` on-demand build gated by `existsSync` — if `.release-staging/*.tar.gz` exists (CI pre-step) reuse it; otherwise run `scripts/build-tarball.mjs`. Keeps test self-contained without forcing every local run to rebuild.
 
 4. **Linux (systemd) coverage in Phase 42 tests?**
    - What we know: CLAUDE.md flags that plugin/standalone paths must BOTH stay green. The plist is macOS-specific; systemd unit path is `~/.config/systemd/user/ai.openclaw.aof.service`.
    - What's unclear: Whether we run the integration test on Linux CI at all today, or whether it's macOS-only.
    - Recommendation: Planner should examine `.github/workflows/` to determine CI matrix. If Linux-CI exists, the plist-absent path needs a `.service` analog. If macOS-only, document the gap explicitly and defer Linux-mode convergence to a follow-up.
+   - **Resolution:** macOS-only for Phase 42 via `describe.skipIf(process.platform !== "darwin")`. Linux convergence deferred — document the gap explicitly in the integration test file header comment. Extending to systemd is a future phase if Linux users report dual-mode race.
 
 5. **Openclaw-config reads in the installer (D-02 applicability)?**
    - What we know: Detection doesn't need any config read. `install.sh:820-910` already does config WRITES using a node heredoc.
    - What's unclear: Does any NEW code path in Phase 42 need to READ openclaw.json? Based on scope, no.
    - Recommendation: D-02 is latent — cited for completeness, but no Phase 42 code needs to act on it. If planning surfaces a new read, apply the `wireOpenClawPluginDirect` pattern.
+   - **Resolution:** D-02 is latent for Phase 42. The detection path (D-01) is symlink-only and never reads `openclaw.json`. D-02 pattern (`wireOpenClawPluginDirect` at `src/cli/commands/setup.ts:174-264`) applies only if a future phase surfaces a new openclaw-config read in the installer.
 
 ## Environment Availability
 
