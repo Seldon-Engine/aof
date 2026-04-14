@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.14.1](https://github.com/d0labs/aof/compare/v1.14.0...v1.14.1) (2026-04-14)
+
+### Bug Fixes
+
+* **installer:** stop running services before preserve-wipe-restore ([7a73d8c](https://github.com/d0labs/aof/commit/7a73d8c06783e8b258a073e6e46a1afae6b2b3cb))
+
 ## [1.14.0](https://github.com/d0labs/aof/compare/v1.13.0...v1.14.0) (2026-04-14)
 
 ### Features
