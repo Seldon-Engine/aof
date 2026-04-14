@@ -20,27 +20,33 @@ vi.mock("../../logging/index.js", () => ({
 
 const mockRunEmbeddedPiAgent = vi.fn();
 const mockEnsureAgentWorkspace = vi.fn(async (p: { dir: string }) => ({ dir: p.dir }));
-const mockExtApi = {
-  runEmbeddedPiAgent: mockRunEmbeddedPiAgent,
-  resolveAgentWorkspaceDir: vi.fn(() => "/tmp/ws"),
-  resolveAgentDir: vi.fn(() => "/tmp/agent"),
-  ensureAgentWorkspace: mockEnsureAgentWorkspace,
-  resolveSessionFilePath: vi.fn((id: string) => `/tmp/s/${id}.jsonl`),
-};
+
+function buildApi(): OpenClawApi {
+  return {
+    config: { agents: {} },
+    runtime: {
+      agent: {
+        runEmbeddedPiAgent: mockRunEmbeddedPiAgent,
+        resolveAgentWorkspaceDir: vi.fn(() => "/tmp/ws"),
+        resolveAgentDir: vi.fn(() => "/tmp/agent"),
+        ensureAgentWorkspace: mockEnsureAgentWorkspace,
+        session: { resolveSessionFilePath: vi.fn((_: unknown, id: string) => `/tmp/s/${id}.jsonl`) },
+      },
+    },
+  } as unknown as OpenClawApi;
+}
 
 describe("OpenClawAdapter - Platform Limit Detection", () => {
   let executor: OpenClawAdapter;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    const mockApi = { config: { agents: {} } } as unknown as OpenClawApi;
-    executor = new OpenClawAdapter(mockApi);
-    (executor as any).extensionApi = mockExtApi;
+    mockRunEmbeddedPiAgent.mockReset();
+    mockEnsureAgentWorkspace.mockReset().mockImplementation(async (p: { dir: string }) => ({ dir: p.dir }));
+    executor = new OpenClawAdapter(buildApi());
   });
 
-  it("should parse platform limit from setup-stage error", async () => {
-    // Fire-and-forget: only setup-stage errors surface in spawnSession return.
-    // Mock ensureAgentWorkspace to throw with a platform limit message.
+  it("parses platform limit from setup-stage error (ensureAgentWorkspace throws)", async () => {
     mockEnsureAgentWorkspace.mockRejectedValueOnce(
       new Error("sessions_spawn has reached max active children for this session (3/2)"),
     );
@@ -50,7 +56,7 @@ describe("OpenClawAdapter - Platform Limit Detection", () => {
       taskPath: "/path/to/task.md",
       agent: "agent:test:main",
       priority: "medium",
-      routing: { agent: "agent:test:main" },
+      routing: { role: "test" },
     });
 
     expect(result.success).toBe(false);
@@ -58,8 +64,7 @@ describe("OpenClawAdapter - Platform Limit Detection", () => {
     expect(result.error).toContain("max active children");
   });
 
-  it("should return undefined platformLimit for non-platform-limit errors", async () => {
-    // Setup-stage error without platform limit message
+  it("returns undefined platformLimit for non-platform-limit setup errors", async () => {
     mockEnsureAgentWorkspace.mockRejectedValueOnce(new Error("Agent not found"));
 
     const result = await executor.spawnSession({
@@ -75,7 +80,7 @@ describe("OpenClawAdapter - Platform Limit Detection", () => {
     expect(result.error).toContain("Agent not found");
   });
 
-  it("should handle different number formats in platform limit", async () => {
+  it("handles different number formats in the platform-limit message", async () => {
     mockEnsureAgentWorkspace.mockRejectedValueOnce(
       new Error("max active children for this session (10/5)"),
     );
@@ -92,9 +97,7 @@ describe("OpenClawAdapter - Platform Limit Detection", () => {
     expect(result.platformLimit).toBe(5);
   });
 
-  it("should log platform limit from background agent result (fire-and-forget)", async () => {
-    // When runEmbeddedPiAgent returns a meta.error with platform limit,
-    // the error is logged in the background — spawnSession still returns success.
+  it("logs platform-limit error from the background agent result (fire-and-forget)", async () => {
     mockPlatLogFns.warn.mockClear();
     mockRunEmbeddedPiAgent.mockResolvedValueOnce({
       meta: {
@@ -114,7 +117,7 @@ describe("OpenClawAdapter - Platform Limit Detection", () => {
       routing: {},
     });
 
-    // Fire-and-forget: spawn succeeds; error logged in background
+    // Fire-and-forget: spawn succeeds; error is logged in background
     expect(result.success).toBe(true);
 
     await vi.waitFor(() => expect(mockPlatLogFns.warn).toHaveBeenCalledWith(

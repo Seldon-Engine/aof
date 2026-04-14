@@ -1,6 +1,6 @@
 import type { GatewayHandler } from "../gateway/handlers.js";
 
-// --- Real OpenClaw Plugin API types (matched against extensionAPI.js) ---
+// --- Real OpenClaw Plugin API types (matched against plugin-sdk runtime types) ---
 
 export interface ToolResult {
   content: Array<{ type: string; text: string }>;
@@ -35,47 +35,23 @@ export interface OpenClawHttpRouteDefinition {
   handler: GatewayHandler;
 }
 
-export interface OpenClawSubagentRunResult {
-  runId: string;
-  childSessionKey?: string;
-  sessionKey?: string;
-}
-
-export interface OpenClawSubagentWaitResult {
-  status?: string;
-  error?: { kind?: string; message?: string };
-}
-
-export interface OpenClawSubagentRuntime {
-  run(params: Record<string, unknown>): Promise<OpenClawSubagentRunResult>;
-  waitForRun?(params: { runId: string; timeoutMs?: number }): Promise<OpenClawSubagentWaitResult>;
-  deleteSession?(params: { sessionKey: string }): Promise<void>;
-  getSessionMessages?(params: { sessionKey: string; limit?: number }): Promise<{ messages: unknown[] }>;
-}
-
+/**
+ * Subset of the openclaw `api.runtime.agent` surface we consume.
+ * Canonical definition lives in openclaw's
+ * plugin-sdk/src/plugins/runtime/types-core.ts (PluginRuntimeCore.agent).
+ */
 export interface OpenClawAgentRuntime {
   runEmbeddedPiAgent?: (params: Record<string, unknown>) => Promise<{
     meta: {
       durationMs: number;
-      agentMeta?: {
-        sessionId: string;
-        provider: string;
-        model: string;
-      };
       aborted?: boolean;
-      error?: {
-        kind: string;
-        message: string;
-      };
+      error?: { kind: string; message: string };
     };
   }>;
   resolveAgentWorkspaceDir?: (cfg: Record<string, unknown>, agentId?: string) => string;
   resolveAgentDir?: (cfg: Record<string, unknown>, agentId?: string) => string;
   resolveAgentTimeoutMs?: (cfg: Record<string, unknown>, agentId?: string) => number;
-  ensureAgentWorkspace?: (
-    cfgOrParams: Record<string, unknown> | { dir: string },
-    agentId?: string,
-  ) => Promise<{ dir?: string } | void>;
+  ensureAgentWorkspace?: (params?: { dir?: string; ensureBootstrapFiles?: boolean }) => Promise<{ dir: string } | void>;
   session?: {
     resolveSessionFilePath?: (cfg: Record<string, unknown>, sessionId: string) => string;
   };
@@ -83,7 +59,6 @@ export interface OpenClawAgentRuntime {
 
 export interface OpenClawRuntime {
   agent?: OpenClawAgentRuntime;
-  subagent?: OpenClawSubagentRuntime;
 }
 
 // --- API Interface ---
