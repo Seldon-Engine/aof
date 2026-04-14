@@ -143,6 +143,26 @@ export class FilesystemTaskStore implements ITaskStore {
     await mkdir(join(baseDir, "subtasks"), { recursive: true });
   }
 
+  private async readTaskAtPath(filePath: string): Promise<Task | undefined> {
+    try {
+      const raw = await readFile(filePath, "utf-8");
+      return parseTaskFile(raw, filePath);
+    } catch (err) {
+      try {
+        await stat(filePath);
+        const errorMessage = (err as Error).message;
+        storeLog.error({ filePath, error: errorMessage }, "parse error in task file");
+        if (this.logger) {
+          await this.logger.logValidationFailed(basename(filePath), errorMessage);
+        }
+      } catch {
+        // File doesn't exist.
+      }
+
+      return undefined;
+    }
+  }
+
   /** Create a new task. Returns the created Task. */
   /** Create a new task. Returns the created Task. */
   async create(opts: {
@@ -159,9 +179,6 @@ export class FilesystemTaskStore implements ITaskStore {
     contextTier?: "seed" | "full";
     callbackDepth?: number;
   }): Promise<Task> {
-    const now = new Date();
-    const nowIso = now.toISOString();
-    const id = await this.nextTaskId(now);
     const body = opts.body ?? "";
     const status: TaskStatus = "backlog";
 
@@ -180,88 +197,107 @@ export class FilesystemTaskStore implements ITaskStore {
       };
     }
 
-    const frontmatter = TaskFrontmatter.parse({
-      schemaVersion: 1,
-      id,
-      project: this.projectId,
-      title: opts.title,
-      status,
-      priority: opts.priority ?? "normal",
-      routing: {
-        role: opts.routing?.role,
-        team: opts.routing?.team,
-        agent: opts.routing?.agent,
-        tags: opts.routing?.tags ?? [],
-      },
-      sla: opts.sla,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-      lastTransitionAt: nowIso,
-      createdBy: opts.createdBy,
-      parentId: opts.parentId,
-      dependsOn: opts.dependsOn ?? [],
-      metadata: opts.metadata ?? {},
-      contextTier: opts.contextTier,
-      ...(opts.callbackDepth !== undefined ? { callbackDepth: opts.callbackDepth } : {}),
-      contentHash: contentHash(body),
-      ...(resolvedWorkflow ? { workflow: resolvedWorkflow } : {}),
-    });
+    await mkdir(this.statusDir(status), { recursive: true });
 
-    const task: Task = { frontmatter, body };
-    const filePath = this.taskPath(id, status);
-    await writeFileAtomic(filePath, serializeTask(task));
-    await this.ensureTaskDirs(id, status);
-    task.path = filePath;
+    for (let attempt = 0; attempt < 1000; attempt++) {
+      const now = new Date();
+      const nowIso = now.toISOString();
+      const id = await this.nextTaskId(now);
+      const frontmatter = TaskFrontmatter.parse({
+        schemaVersion: 1,
+        id,
+        project: this.projectId,
+        title: opts.title,
+        status,
+        priority: opts.priority ?? "normal",
+        routing: {
+          role: opts.routing?.role,
+          team: opts.routing?.team,
+          agent: opts.routing?.agent,
+          tags: opts.routing?.tags ?? [],
+        },
+        sla: opts.sla,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        lastTransitionAt: nowIso,
+        createdBy: opts.createdBy,
+        parentId: opts.parentId,
+        dependsOn: opts.dependsOn ?? [],
+        metadata: opts.metadata ?? {},
+        contextTier: opts.contextTier,
+        ...(opts.callbackDepth !== undefined ? { callbackDepth: opts.callbackDepth } : {}),
+        contentHash: contentHash(body),
+        ...(resolvedWorkflow ? { workflow: resolvedWorkflow } : {}),
+      });
 
-    return task;
+      const task: Task = { frontmatter, body };
+      const filePath = this.taskPath(id, status);
+
+      try {
+        await writeFile(filePath, serializeTask(task), { encoding: "utf-8", flag: "wx" });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+          continue;
+        }
+        throw error;
+      }
+
+      await this.ensureTaskDirs(id, status);
+      task.path = filePath;
+
+      return task;
+    }
+
+    throw new Error("Failed to allocate a unique task ID after 1000 attempts");
   }
 
   /** Find a task by ID across all status directories. */
   async get(id: string): Promise<Task | undefined> {
+    const matches: Task[] = [];
+
     for (const status of STATUS_DIRS) {
       const filePath = this.taskPath(id, status);
-      try {
-        const raw = await readFile(filePath, "utf-8");
-        const task = parseTaskFile(raw, filePath);
-
-        return task;
-      } catch (err) {
-        // Check if it's a parse error (file exists but is malformed)
-        try {
-          await stat(filePath);
-          // File exists, so this is a parse error
-          const errorMessage = (err as Error).message;
-          storeLog.error({ filePath, error: errorMessage }, "parse error in task file");
-          if (this.logger) {
-            await this.logger.logValidationFailed(basename(filePath), errorMessage);
-          }
-        } catch {
-          // File doesn't exist, try next status directory
-        }
+      const task = await this.readTaskAtPath(filePath);
+      if (task) {
+        matches.push(task);
       }
     }
-    return undefined;
+
+    if (matches.length > 1) {
+      const statuses = matches.map(task => task.frontmatter.status).join(", ");
+      throw new Error(`Duplicate task ID detected: ${id} exists in multiple statuses (${statuses})`);
+    }
+
+    return matches[0];
   }
 
   /** Find a task by ID prefix (for CLI convenience). */
   async getByPrefix(prefix: string): Promise<Task | undefined> {
+    const matches: Task[] = [];
+
     for (const status of STATUS_DIRS) {
       const dir = this.statusDir(status);
       try {
         const entries = await readdir(dir);
-        const match = entries.find((f) => f.startsWith(prefix) && f.endsWith(".md"));
-        if (match) {
-          const filePath = join(dir, match);
-          const raw = await readFile(filePath, "utf-8");
-          const task = parseTaskFile(raw, filePath);
+        for (const entry of entries) {
+          if (!entry.startsWith(prefix) || !entry.endsWith(".md")) continue;
 
-          return task;
+          const task = await this.readTaskAtPath(join(dir, entry));
+          if (task) {
+            matches.push(task);
+          }
         }
       } catch {
         // Directory might not exist
       }
     }
-    return undefined;
+
+    if (matches.length > 1) {
+      const ids = matches.map(task => task.frontmatter.id).join(", ");
+      throw new Error(`Ambiguous task prefix: ${prefix} matches multiple tasks (${ids})`);
+    }
+
+    return matches[0];
   }
 
   /** List all tasks, optionally filtered. */

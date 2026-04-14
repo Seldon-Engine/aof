@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createTestHarness, type TestHarness } from "../../testing/index.js";
 import { aofTaskUpdate, aofTaskComplete, aofStatusReport } from "../aof-tools.js";
+import { serializeTask } from "../../store/task-store.js";
 import type { ToolResponseEnvelope } from "../envelope.js";
 
 describe("AOF tool handlers", () => {
@@ -69,6 +70,46 @@ describe("AOF tool handlers", () => {
 
     const lastEvent = await readLastEvent();
     expect(lastEvent.type).toBe("task.completed");
+  });
+
+  it("rejects update and completion when duplicate task cards exist for the same ID", async () => {
+    const task = await harness.store.create({ title: "Duplicate logical task", createdBy: "main" });
+    await harness.store.transition(task.frontmatter.id, "ready");
+
+    const duplicateDone = {
+      frontmatter: {
+        ...task.frontmatter,
+        status: "done" as const,
+      },
+      body: task.body,
+    };
+
+    await writeFile(
+      join(harness.tmpDir, "tasks", "done", `${task.frontmatter.id}.md`),
+      serializeTask(duplicateDone),
+      "utf-8",
+    );
+
+    await expect(
+      aofTaskUpdate(
+        { store: harness.store, logger: harness.logger },
+        {
+          taskId: task.frontmatter.id,
+          status: "in-progress",
+          actor: "swe-backend",
+        },
+      ),
+    ).rejects.toThrow(/Duplicate task ID detected/i);
+
+    await expect(
+      aofTaskComplete(
+        { store: harness.store, logger: harness.logger },
+        {
+          taskId: task.frontmatter.id,
+          actor: "swe-backend",
+        },
+      ),
+    ).rejects.toThrow(/Duplicate task ID detected/i);
   });
 
   it("reports task status counts", async () => {

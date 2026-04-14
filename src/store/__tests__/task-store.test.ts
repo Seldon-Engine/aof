@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { FilesystemTaskStore, parseTaskFile, serializeTask } from "../task-store.js";
@@ -109,6 +109,43 @@ describe("TaskStore", () => {
     const num1 = parseInt(task1.frontmatter.id.slice(-3), 10);
     const num2 = parseInt(task2.frontmatter.id.slice(-3), 10);
     expect(num2).toBe(num1 + 1);
+  });
+
+  it("allocates unique task ids for concurrent creates", async () => {
+    const tasks = await Promise.all(
+      Array.from({ length: 8 }, (_, index) =>
+        store.create({
+          title: `Concurrent Task ${index + 1}`,
+          createdBy: "main",
+        }),
+      ),
+    );
+
+    const ids = tasks.map(task => task.frontmatter.id);
+    expect(new Set(ids).size).toBe(tasks.length);
+
+    const persisted = await store.list();
+    expect(persisted).toHaveLength(tasks.length);
+  });
+
+  it("rejects duplicate task ids that exist in multiple statuses", async () => {
+    const task = await store.create({ title: "Duplicate ID", createdBy: "main" });
+    const duplicate = {
+      frontmatter: {
+        ...task.frontmatter,
+        status: "done" as const,
+      },
+      body: task.body,
+    };
+
+    await mkdir(join(tmpDir, "tasks", "done"), { recursive: true });
+    await writeFile(
+      join(tmpDir, "tasks", "done", `${task.frontmatter.id}.md`),
+      serializeTask(duplicate),
+      "utf-8",
+    );
+
+    await expect(store.get(task.frontmatter.id)).rejects.toThrow(/Duplicate task ID detected/i);
   });
 
   it("creates companion directories for task artifacts", async () => {

@@ -12,7 +12,7 @@ import type { EventLogger } from "../events/logger.js";
 import type { ToolResult } from "./types.js";
 
 type ToolHandler = (ctx: ToolContext, input: Record<string, unknown>) => Promise<unknown>;
-type ResolveProjectStore = (projectId?: string) => ITaskStore;
+type ResolveProjectStore = (projectId?: string) => Promise<ITaskStore>;
 type GetStoreForActor = (actor?: string, baseStore?: ITaskStore) => Promise<ITaskStore>;
 
 /**
@@ -36,13 +36,13 @@ export function withPermissions(
     const actor = params.actor as string | undefined;
     const projectId = params.project as string | undefined;
 
-    const projectStore = resolveProjectStore(projectId);
+    const projectStore = await resolveProjectStore(projectId);
     const permissionStore = await getStoreForActor(actor, projectStore);
 
     const ctx: ToolContext = {
       store: permissionStore,
       logger,
-      projectId,
+      projectId: projectId ?? permissionStore.projectId,
       orgChartPath,
     };
 

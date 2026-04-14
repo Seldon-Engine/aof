@@ -25,6 +25,7 @@ import type { OpenClawApi } from "./types.js";
 import { createMetricsHandler, createStatusHandler } from "../gateway/handlers.js";
 import { toolRegistry } from "../tools/tool-registry.js";
 import { withPermissions } from "./permissions.js";
+import { createProjectStore } from "../projects/store-factory.js";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
 export interface AOFPluginOptions {
@@ -69,10 +70,32 @@ function resolveAdapter(api: OpenClawApi, store: ITaskStore): GatewayAdapter {
 }
 
 export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOFService {
-  const store = opts.store ?? new FilesystemTaskStore(opts.dataDir);
+  const vaultRoot = opts.dataDir;
+  const projectStores = opts.projectStores ?? new Map<string, ITaskStore>();
+  const store = opts.store ?? projectStores.get("_inbox") ?? new FilesystemTaskStore(join(vaultRoot, "Projects", "_inbox"), {
+    projectId: "_inbox",
+  });
   const logger = opts.logger ?? new EventLogger(join(opts.dataDir, "events"));
   const metrics = opts.metrics ?? new AOFMetrics();
   const invocationContextStore = new OpenClawToolInvocationContextStore();
+
+  if (!opts.store && !projectStores.has("_inbox")) {
+    projectStores.set("_inbox", store);
+  }
+
+  const initializedStores = new WeakSet<ITaskStore>();
+  const ensureStoreInitialized = async (candidate: ITaskStore): Promise<ITaskStore> => {
+    if (initializedStores.has(candidate)) {
+      return candidate;
+    }
+
+    if ("init" in candidate && typeof candidate.init === "function") {
+      await candidate.init();
+    }
+
+    initializedStores.add(candidate);
+    return candidate;
+  };
 
   // Load org chart for permission enforcement
   let orgChartPromise: Promise<OrgChart | undefined> | undefined;
@@ -92,11 +115,24 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
   /**
    * Resolve the correct project-scoped store for a given project ID.
    */
-  const resolveProjectStore = (projectId?: string): ITaskStore => {
-    if (projectId && opts.projectStores?.has(projectId)) {
-      return opts.projectStores.get(projectId)!;
+  const resolveProjectStore = async (projectId?: string): Promise<ITaskStore> => {
+    if (!projectId) {
+      return ensureStoreInitialized(store);
     }
-    return store;
+
+    const cached = projectStores.get(projectId);
+    if (cached) {
+      return ensureStoreInitialized(cached);
+    }
+
+    const resolution = await createProjectStore({
+      projectId,
+      vaultRoot,
+      logger,
+    });
+    projectStores.set(projectId, resolution.store);
+
+    return ensureStoreInitialized(resolution.store);
   };
 
   /**
@@ -121,7 +157,7 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
   const resolveStoreForTask = async (taskId: string): Promise<ITaskStore | undefined> => {
     const candidates = new Set<ITaskStore>([
       store,
-      ...(opts.projectStores?.values() ?? []),
+      ...projectStores.values(),
     ]);
 
     for (const candidate of candidates) {
@@ -153,6 +189,7 @@ export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOF
       { store, logger, metrics, engine, executor },
       {
         dataDir: opts.dataDir,
+        vaultRoot,
         dryRun: opts.dryRun ?? false,
         pollIntervalMs: opts.pollIntervalMs,
         defaultLeaseTtlMs: opts.defaultLeaseTtlMs,

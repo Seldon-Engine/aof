@@ -190,6 +190,24 @@ describe("BUG-003: AOF tool persistence", () => {
     expect(statusResult.tasks).toHaveLength(3);
   });
 
+  it("concurrent dispatches persist as distinct tasks", async () => {
+    const results = await Promise.all(
+      Array.from({ length: 6 }, (_, index) =>
+        aofDispatch({ store: harness.store, logger: harness.logger }, {
+          title: `Concurrent Task ${index + 1}`,
+          brief: `Parallel dispatch ${index + 1}`,
+          actor: "test-actor",
+        }),
+      ),
+    );
+
+    const taskIds = results.map(result => result.taskId);
+    expect(new Set(taskIds).size).toBe(results.length);
+
+    const statusResult = await aofStatusReport({ store: harness.store, logger: harness.logger }, {});
+    expect(statusResult.total).toBe(results.length);
+  });
+
   it("rejects malformed notifyOnCompletion deliveries before persisting task state", async () => {
     await expect(
       aofDispatch(
