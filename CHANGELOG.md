@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.14.3](https://github.com/d0labs/aof/compare/v1.14.2...v1.14.3) (2026-04-14)
+
+### Bug Fixes
+
+* **setup:** correct plugin load path + SKILL.md source location ([19b63cf](https://github.com/d0labs/aof/commit/19b63cf0cbd777e7b93eefd53f3f12278ed5a0cb))
+
 ## [1.14.2](https://github.com/d0labs/aof/compare/v1.14.1...v1.14.2) (2026-04-14)
 
 ### Features
