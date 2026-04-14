@@ -131,10 +131,10 @@ See: `.planning/milestones/v1.10-ROADMAP.md` for full details
 
 **Requirements:** D-01, D-02, D-03, D-04, D-05 (authoritative IDs from `.planning/phases/42-installer-mode-exclusivity/42-CONTEXT.md`)
 
-**Plans:** 2/4 plans executed
+**Plans:** 3/4 plans executed
 - [x] 42-01-PLAN.md — Wave 0 red-test harness: integration test shelling out to install.sh + uninstallService idempotency unit coverage
 - [x] 42-02-PLAN.md — Wave 1 detection + default skip (D-01/D-03): `plugin_mode_detected` helper + `install_daemon` gate + 3-way `print_summary`
-- [ ] 42-03-PLAN.md — Wave 2 `--force-daemon` override (D-04): global + parse_args arm + --help line + override warn
+- [x] 42-03-PLAN.md — Wave 2 `--force-daemon` override (D-04): global + parse_args arm + --help line + override warn
 - [ ] 42-04-PLAN.md — Wave 3 upgrade convergence (D-05): plist pre-check + `daemon uninstall` shell-out with `|| warn` fallback
 
 ## Backlog
