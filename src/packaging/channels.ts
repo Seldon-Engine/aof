@@ -124,6 +124,18 @@ export async function checkForUpdates(
     config = { channel: DEFAULT_CHANNEL };
   }
 
+  // Normalize channel: historical channel.json files (and files written by
+  // updateVersionConfig pre-v1.14.9) may lack a `channel` field entirely,
+  // or carry an unknown value. Without this guard,
+  // `fetchReleaseManifest(undefined, …)` silently falls into the list-
+  // endpoint branch and tries to parse an array of releases as a single
+  // release object → `Cannot read properties of undefined (reading
+  // 'replace')`. Snap to DEFAULT_CHANNEL whenever the stored value isn't
+  // one of the supported channels.
+  if (!VALID_CHANNELS.includes(config.channel as Channel)) {
+    config.channel = DEFAULT_CHANNEL;
+  }
+
   // Check if we should skip (interval not elapsed)
   if (!opts?.force && config.lastCheck && config.updatePolicy?.autoCheckIntervalMs) {
     const lastCheck = new Date(config.lastCheck).getTime();
@@ -215,6 +227,16 @@ async function fetchReleaseManifest(
   channel: Channel,
   timeoutMs: number
 ): Promise<VersionManifest> {
+  // Defense in depth: callers should already have normalized `channel`
+  // via getChannel() / checkForUpdates(), but an unknown value reaching
+  // here would pick the list endpoint and crash in parseReleaseData.
+  // Fail loudly instead of silently hitting the wrong URL.
+  if (!VALID_CHANNELS.includes(channel)) {
+    throw new Error(
+      `fetchReleaseManifest: invalid channel "${String(channel)}" — expected one of ${VALID_CHANNELS.join(", ")}`,
+    );
+  }
+
   const url =
     channel === "stable"
       ? `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`

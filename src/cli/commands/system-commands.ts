@@ -59,7 +59,7 @@ export function registerDepsCommands(program: Command): void {
   deps
     .command("update")
     .description("Update dependencies")
-    .option("--preserve <paths...>", "Paths to preserve during update", ["config", "data", "bin", "node_modules"])
+    .option("--preserve <paths...>", "Paths to preserve during update", ["config", "data", "bin", "node_modules", ".aof"])
     .option("--no-lockfile", "Skip lockfile (use npm install instead of npm ci)")
     .action(async (opts: { preserve: string[]; lockfile: boolean }) => {
       const root = program.opts()["root"] as string;
@@ -279,7 +279,7 @@ export function registerUpdateCommand(program: Command): void {
           const result = await rollbackUpdate({
             aofRoot: root,
             backupPath: opts.backup,
-            preservePaths: ["config", "data", "bin", "node_modules"],
+            preservePaths: ["config", "data", "bin", "node_modules", ".aof"],
           });
 
           console.log(`✅ Rollback successful!`);
@@ -332,7 +332,7 @@ export function registerUpdateCommand(program: Command): void {
           aofRoot: root,
           targetVersion: updateCheck.latestVersion!,
           downloadUrl,
-          preservePaths: ["config", "data", "bin", "node_modules"],
+          preservePaths: ["config", "data", "bin", "node_modules", ".aof"],
           healthCheck: async (installRoot: string) => {
             // Basic health check: verify key directories exist
             const { access } = await import("node:fs/promises");

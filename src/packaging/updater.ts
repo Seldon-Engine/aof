@@ -62,7 +62,7 @@ export async function selfUpdate(opts: UpdateOptions): Promise<UpdateResult> {
     aofRoot,
     targetVersion,
     downloadUrl,
-    preservePaths = ["config", "data", "bin", "node_modules"],
+    preservePaths = ["config", "data", "bin", "node_modules", ".aof"],
     healthCheck,
     hooks,
     timeoutMs = 30000,
@@ -270,6 +270,15 @@ async function updateVersionConfig(aofRoot: string, version: string): Promise<vo
     config = JSON.parse(content);
   } catch {
     // New config
+  }
+
+  // Ensure the `channel` field is present. Pre-v1.14.9 installs (and any
+  // channel.json that was ever written by an older updateVersionConfig)
+  // lack this field, which breaks subsequent `aof update` calls because
+  // checkForUpdates would pass `undefined` down to the release-manifest
+  // fetcher and hit the wrong GitHub endpoint. Seed `stable` when absent.
+  if (typeof config.channel !== "string" || !config.channel) {
+    config.channel = "stable";
   }
 
   config.version = version;
