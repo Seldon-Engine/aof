@@ -1,40 +1,44 @@
 ---
-status: partial
+status: deferred
 phase: 42-installer-mode-exclusivity
 source: [42-VERIFICATION.md]
 started: 2026-04-14T20:44:41Z
-updated: 2026-04-14T20:44:41Z
+updated: 2026-04-15T00:00:00Z
 ---
 
 ## Current Test
 
-[awaiting human testing]
+[deferred — user skipped human UAT on 2026-04-15 to advance the milestone]
 
 ## Tests
 
 ### 1. Real-launchd D-05 convergence on a live macOS host
 expected: Running `scripts/install.sh` against a host that has both the openclaw plugin symlink AND a running `ai.openclaw.aof` launchd agent removes the daemon (launchctl bootout + plist removal + sock/pid cleanup) and leaves the system with the plugin only. `launchctl list | grep openclaw.aof` is empty after install; `aof daemon status` reports standalone daemon absent.
-result: [pending]
+result: skipped
+reason: deferred — integration-test coverage substitutes for real-launchd run; promoted Phase 43 scoping takes priority
 
 ### 2. End-to-end curl | sh upgrade path with released tarball
 expected: On a real host with a pre-existing Phase-41 (or earlier) dual-mode install, running the published `curl -fsSL https://.../install.sh | sh` converges to plugin-only: daemon plist gone, plugin still functional via openclaw gateway, task polling no longer duplicated between plugin and daemon.
-result: [pending]
+result: skipped
+reason: deferred — will be exercised by next release's smoke test
 
 ### 3. Pure-standalone upgrade byte-identical
 expected: On a host WITHOUT the openclaw plugin symlink, running the installer behaves identically to pre-42 releases: daemon plist installed, launchd service registered, `Daemon: installed and running` summary line printed. No `Plugin-mode detected` output.
-result: [pending]
+result: skipped
+reason: deferred — no bare host available, covered by integration test fixture
 
 ### 4. `--force-daemon` override on a plugin host
 expected: On a host WITH the plugin symlink, running `install.sh --force-daemon` bypasses both the D-01/D-03 skip AND the D-05 convergence. Daemon plist is installed; `--force-daemon set (override)` warning appears in stdout; `launchctl list | grep openclaw.aof` shows the service loaded.
-result: [pending]
+result: skipped
+reason: deferred — integration test covers flag parsing path
 
 ## Summary
 
 total: 4
 passed: 0
 issues: 0
-pending: 4
-skipped: 0
+pending: 0
+skipped: 4
 blocked: 0
 
 ## Gaps
