@@ -224,6 +224,10 @@ export async function rollbackUpdate(opts: RollbackOptions): Promise<RollbackRes
   // Clean up backup
   await rm(backupPath, { recursive: true, force: true });
 
+  if (restoredVersion !== "unknown") {
+    await updateVersionConfig(aofRoot, restoredVersion);
+  }
+
   return {
     success: true,
     restoredVersion,
@@ -258,6 +262,7 @@ async function getVersionFromBackup(backupPath: string): Promise<string> {
 
 async function updateVersionConfig(aofRoot: string, version: string): Promise<void> {
   const configPath = join(aofRoot, ".aof", "channel.json");
+  const versionFilePath = join(aofRoot, ".version");
 
   let config: Record<string, unknown> = {};
   try {
@@ -272,6 +277,7 @@ async function updateVersionConfig(aofRoot: string, version: string): Promise<vo
 
   await mkdir(join(aofRoot, ".aof"), { recursive: true });
   await writeFile(configPath, JSON.stringify(config, null, 2));
+  await writeFile(versionFilePath, version, "utf-8");
 }
 
 async function createBackup(aofRoot: string, paths: string[]): Promise<string> {

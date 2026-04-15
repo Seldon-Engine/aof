@@ -59,6 +59,7 @@ describe("Self-Update Engine", () => {
         version: "1.0.0",
       }, null, 2),
     );
+    await writeFile(join(aofRoot, ".version"), "1.0.0", "utf-8");
 
     // Create sample config/data files
     await writeFile(join(aofRoot, "config", "settings.json"), JSON.stringify({ test: true }));
@@ -100,6 +101,7 @@ describe("Self-Update Engine", () => {
         await readFile(join(aofRoot, ".aof", "channel.json"), "utf-8"),
       );
       expect(config.version).toBe("1.1.0");
+      expect(await readFile(join(aofRoot, ".version"), "utf-8")).toBe("1.1.0");
     });
 
     it("preserves config and data during update", async () => {
@@ -194,6 +196,7 @@ describe("Self-Update Engine", () => {
         await readFile(join(aofRoot, ".aof", "channel.json"), "utf-8"),
       );
       expect(config.version).toBe("1.0.0");
+      expect(await readFile(join(aofRoot, ".version"), "utf-8")).toBe("1.0.0");
     });
 
     it("rolls back on health check failure", async () => {
