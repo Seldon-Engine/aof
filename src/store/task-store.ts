@@ -26,6 +26,7 @@ import { lintTasks } from "./task-validation.js";
 import { getTaskInputs as getInputs, getTaskOutputs as getOutputs, writeTaskOutput as writeOutput } from "./task-file-ops.js";
 import { blockTask, unblockTask, cancelTask } from "./task-lifecycle.js";
 import { updateTask, type UpdatePatch, transitionTask, type TransitionOpts } from "./task-mutations.js";
+import { TaskLocks } from "./task-lock.js";
 const FRONTMATTER_FENCE = "---";
 
 /** All valid status directories per BRD. */
@@ -73,6 +74,14 @@ export class FilesystemTaskStore implements ITaskStore {
   readonly tasksDir: string;
   private readonly hooks?: TaskStoreHooks;
   private readonly logger?: import("../events/logger.js").EventLogger;
+  /**
+   * Per-task mutex for status-changing filesystem operations.
+   * See src/store/task-lock.ts for the rationale: the "duplicate task
+   * ID detected" race when two async code paths concurrently transition
+   * the same task. Serializing them lets the second contender re-read
+   * fresh state and make the correct follow-up call.
+   */
+  private readonly locks = new TaskLocks();
 
   constructor(projectRoot: string, opts: TaskStoreOptions = {}) {
     this.projectRoot = resolve(projectRoot);
@@ -377,13 +386,20 @@ export class FilesystemTaskStore implements ITaskStore {
   /**
    * Transition a task to a new status.
    * This is the core operation: atomic rename between status directories.
+   *
+   * Guarded by a per-task mutex: concurrent transitions serialize so
+   * the late contender re-reads fresh state and either no-ops (already
+   * in target), throws `Invalid transition`, or performs a valid
+   * follow-up transition. Without the lock, two racing transitions
+   * leave the same task file in two status directories at once
+   * (see task-lock.ts for the write+rename race detail).
    */
   async transition(
     id: string,
     newStatus: TaskStatus,
     opts?: TransitionOpts,
   ): Promise<Task> {
-    return transitionTask(
+    return this.locks.run(id, () => transitionTask(
       id,
       newStatus,
       opts,
@@ -392,16 +408,20 @@ export class FilesystemTaskStore implements ITaskStore {
       this.taskDir.bind(this),
       this.logger as any,
       this.hooks,
-    );
+    ));
   }
 
   /**
    * Cancel a task.
    * Transitions to "cancelled" status, clears any active lease,
    * stores cancellation reason in metadata, and emits task.cancelled event.
+   *
+   * Shares the per-task mutex with transition(): cancelling while a
+   * transition is in-flight would otherwise produce the same
+   * duplicate-file race.
    */
   async cancel(id: string, reason?: string): Promise<Task> {
-    return cancelTask(
+    return this.locks.run(id, () => cancelTask(
       id,
       reason,
       this.get.bind(this),
@@ -409,7 +429,7 @@ export class FilesystemTaskStore implements ITaskStore {
       this.taskDir.bind(this),
       this.logger,
       this.hooks,
-    );
+    ));
   }
 
   /** Update task body content (recalculates content hash). */
