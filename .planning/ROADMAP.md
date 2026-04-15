@@ -157,3 +157,22 @@ See: `.planning/milestones/v1.10-ROADMAP.md` for full details
 **Requirements:** TBD
 **Plans:** 0 plans
 - [ ] TBD (promote with /gsd-review-backlog when ready)
+
+### Phase 999.3: Scheduler action pre-condition envelope — session-end handler dedupe (BACKLOG)
+
+**Goal:** Add an `expected` pre-condition envelope to `SchedulerAction` so every state-mutating handler re-verifies its dispatch-time assumptions on entry and no-ops (with a log record) if the world has moved. Eliminates the race where two independent handlers respond to the same underlying session-end signal.
+
+**Why:** Production incident on 2026-04-15 (TASK-2026-04-15-010) surfaced concurrent transitions from two unrelated handlers — `completion-enforcement` (assign-helpers.ts, reacting to Promise.race timeout) and `stale-heartbeat` (recovery-handlers.ts, reacting to heartbeat TTL). Both observed the task at `in-progress` and called `store.transition(...)` within the same event-loop tick, leaving the task file in two status directories. Fix A (v1.14.8 per-task mutex) contains the filesystem outcome by serializing the rename; Fix C addresses the design root cause so handlers don't execute at all when their premise is stale.
+
+**Scope (medium):**
+- Phase 1 (narrow — can ship standalone): `handleStaleHeartbeat` re-reads task status on entry and skips when status is no longer `in-progress` or lease agent differs. Single-handler patch with targeted regression test. ~20 LOC handler + ~50 LOC test. Safe to land as v1.14.10.
+- Phase 2 (general): Add `action.expected: { status?, leaseAgent?, lastTransitionAtBefore? }` to `SchedulerAction`. Populate in `scheduler.ts` when queuing actions. Each of the four state-mutating handlers (`handleStaleHeartbeat`, `handleExpireLease`, `handleAssign`, `handleSlaViolation`/`handlePromote`) early-returns on mismatch with a structured skip log. Backwards-compatible type change (all fields optional). ~100 LOC + ~200 LOC tests. Ships as v1.15.0 minor.
+- Phase 3 (deferred): Action-level idempotency tokens `actionId = hash(type, taskId, lastTransitionAt)` + per-task ring buffer of recently-completed actions. Guards against handler retries during scheduler crashes. Only valuable once persistent action queues exist; premature today.
+
+**Depends on:** Fix A (v1.14.8) — already shipped. Independent of Phase 42 / 999.2.
+
+**Requirements:** TBD (derive from .planning/fix-c-scheduler-ownership.md during /gsd-discuss-phase)
+**Plans:** 0 plans
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
+**Reference:** Full design doc at `.planning/fix-c-scheduler-ownership.md` (commit 693379a).
