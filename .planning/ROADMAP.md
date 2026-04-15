@@ -137,9 +137,7 @@ See: `.planning/milestones/v1.10-ROADMAP.md` for full details
 - [x] 42-03-PLAN.md — Wave 2 `--force-daemon` override (D-04): global + parse_args arm + --help line + override warn
 - [x] 42-04-PLAN.md — Wave 3 upgrade convergence (D-05): plist pre-check + `daemon uninstall` shell-out with `|| warn` fallback
 
-## Backlog
-
-### Phase 999.2: Thin-plugin architecture — daemon as single authority (BACKLOG)
+### Phase 43: Thin-plugin architecture — daemon as single authority
 
 **Goal:** Restructure so the aof-daemon owns the single scheduler / task store authority, and the openclaw plugin becomes a thin bridge (tool host + agent-spawn callback). Plugin IPC-calls daemon; daemon IPC-calls plugin back for spawns that need `runtime.agent.runEmbeddedPiAgent`. Single-writer model enables multi-platform plugin fan-out (openclaw, slack, cli, other gateways) all dispatching through one daemon.
 
@@ -150,13 +148,15 @@ See: `.planning/milestones/v1.10-ROADMAP.md` for full details
 - Plugin tool handlers switch from direct-store to daemon IPC
 - New `PluginBridgeAdapter` on daemon side replaces `StandaloneAdapter` (or extends it): calls back into the gateway process (via openclaw `registerGatewayMethod`) to request a spawn instead of HTTP
 - Session-route / tool-call hooks posted daemon-ward via IPC
-- Migration path for existing installs (handled by 999.1's exclusivity first)
+- Migration path for existing installs (handled by Phase 42's exclusivity first)
 
 **Depends on:** Phase 42 (exclusivity must land first so both architectures can coexist during migration)
 
 **Requirements:** TBD
 **Plans:** 0 plans
-- [ ] TBD (promote with /gsd-review-backlog when ready)
+- [ ] TBD (run /gsd-discuss-phase 43 to scope)
+
+## Backlog
 
 ### Phase 999.3: Scheduler action pre-condition envelope — session-end handler dedupe (BACKLOG)
 
