@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.14.6](https://github.com/d0labs/aof/compare/v1.14.5...v1.14.6) (2026-04-15)
+
+### Bug Fixes
+
+* **updater:** route install/update to code root, not data root ([cb1ff6d](https://github.com/d0labs/aof/commit/cb1ff6d9c1945c8871549cf27dfdf6b6434b2067))
+
 ## [1.14.5](https://github.com/d0labs/aof/compare/v1.14.4...v1.14.5) (2026-04-15)
 
 ### Bug Fixes
