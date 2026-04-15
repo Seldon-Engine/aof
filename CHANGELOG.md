@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.14.7](https://github.com/d0labs/aof/compare/v1.14.6...v1.14.7) (2026-04-15)
+
+### Bug Fixes
+
+* **projects:** auto-bootstrap projects on first store access ([c9aa268](https://github.com/d0labs/aof/commit/c9aa268abe6cad0b1ae77cdb9f4db4873b2497de))
+
 ## [1.14.6](https://github.com/d0labs/aof/compare/v1.14.5...v1.14.6) (2026-04-15)
 
 ### Bug Fixes
