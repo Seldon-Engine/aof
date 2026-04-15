@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.14.5](https://github.com/d0labs/aof/compare/v1.14.4...v1.14.5) (2026-04-15)
+
+### Bug Fixes
+
+* correct self-update release asset lookup ([724e58b](https://github.com/d0labs/aof/commit/724e58b4cf8550ba14063590e817a9c7e8fce995))
+
 ## [1.14.4](https://github.com/d0labs/aof/compare/v1.14.3...v1.14.4) (2026-04-14)
 
 ### Features
