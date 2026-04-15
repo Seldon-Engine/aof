@@ -62,7 +62,7 @@ export async function selfUpdate(opts: UpdateOptions): Promise<UpdateResult> {
     aofRoot,
     targetVersion,
     downloadUrl,
-    preservePaths = ["config", "data", "tasks", "events"],
+    preservePaths = ["config", "data", "bin", "node_modules"],
     healthCheck,
     hooks,
     timeoutMs = 30000,

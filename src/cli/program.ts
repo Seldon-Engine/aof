@@ -36,8 +36,22 @@ import { registerViewCommands } from "./commands/views.js";
 import { registerSystemCommands } from "./commands/system.js";
 import { registerSetupCommand } from "./commands/setup.js";
 import { registerTraceCommand } from "./commands/trace.js";
-import { normalizePath } from "../config/paths.js";
+import { DEFAULT_CODE_DIR, normalizePath } from "../config/paths.js";
 import { getConfig } from "../config/registry.js";
+
+/**
+ * Commands that operate on the AOF *install* directory (code, deps, bin
+ * shims) rather than the user *data* directory. These default `--root` to
+ * `DEFAULT_CODE_DIR` (~/.aof) so that the self-updater and dependency
+ * installer act on the code tree instead of accidentally extracting into
+ * `~/.aof/data/` — which is where user state lives.
+ *
+ * Covers both top-level `aof install` / `aof update` and the nested
+ * `aof deps update` (Commander's `actionCommand.name()` is the leaf name,
+ * which is "update" for `deps update` as well — that's the intended
+ * behavior: both use the code root).
+ */
+const CODE_ROOT_COMMANDS = new Set(["install", "update"]);
 
 const program = new Command()
   .name("aof")
@@ -45,11 +59,17 @@ const program = new Command()
   .description("Agentic Ops Fabric — deterministic orchestration for multi-agent systems")
   .option("--root <path>", "AOF root directory");
 
-// Default --root to config registry value and normalize to absolute path
-program.hook("preAction", (thisCommand) => {
+// Default --root to a command-appropriate location and normalize to absolute path.
+// Install/update commands use the code root; all others use the data root.
+program.hook("preAction", (thisCommand, actionCommand) => {
   const opts = thisCommand.opts();
   if (!opts["root"]) {
-    opts["root"] = getConfig().core.dataDir;
+    const useCodeRoot =
+      actionCommand !== undefined &&
+      CODE_ROOT_COMMANDS.has(actionCommand.name());
+    opts["root"] = useCodeRoot
+      ? DEFAULT_CODE_DIR
+      : getConfig().core.dataDir;
   }
   opts["root"] = normalizePath(opts["root"] as string);
 });
