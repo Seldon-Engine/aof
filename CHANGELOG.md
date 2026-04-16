@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.14.10](https://github.com/d0labs/aof/compare/v1.14.9...v1.14.10) (2026-04-16)
+
+### Bug Fixes
+
+* **store:** self-heal duplicate task files instead of throwing forever ([472cd1e](https://github.com/d0labs/aof/commit/472cd1ed8aa56027e264b47be17b98c76af695a1))
+
+### Tests
+
+* **42:** defer human UAT — integration tests cover, advancing to Phase 43 ([a4af36c](https://github.com/d0labs/aof/commit/a4af36c3266a25597cce7a6029208d913dbf0fca))
+
 ## [1.14.7](https://github.com/d0labs/aof/compare/v1.14.6...v1.14.7) (2026-04-15)
 
 ### Bug Fixes
