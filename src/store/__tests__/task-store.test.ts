@@ -128,7 +128,10 @@ describe("TaskStore", () => {
     expect(persisted).toHaveLength(tasks.length);
   });
 
-  it("rejects duplicate task ids that exist in multiple statuses", async () => {
+  it("self-heals duplicate task ids that exist in multiple statuses (keeps most-recent, removes stale)", async () => {
+    // See src/store/__tests__/task-store-duplicate-recovery.test.ts for the
+    // full recovery semantics. This guards the top-level contract: get()
+    // must not throw on duplicates — throwing jams the dispatch chain.
     const task = await store.create({ title: "Duplicate ID", createdBy: "main" });
     const duplicate = {
       frontmatter: {
@@ -139,13 +142,20 @@ describe("TaskStore", () => {
     };
 
     await mkdir(join(tmpDir, "tasks", "done"), { recursive: true });
-    await writeFile(
-      join(tmpDir, "tasks", "done", `${task.frontmatter.id}.md`),
-      serializeTask(duplicate),
-      "utf-8",
-    );
+    const donePath = join(tmpDir, "tasks", "done", `${task.frontmatter.id}.md`);
+    await writeFile(donePath, serializeTask(duplicate), "utf-8");
+    // Make the done/ copy the most-recent so it wins.
+    const { utimes } = await import("node:fs/promises");
+    await utimes(donePath, 2_000_000, 2_000_000);
+    await utimes(task.path!, 1_000_000, 1_000_000);
 
-    await expect(store.get(task.frontmatter.id)).rejects.toThrow(/Duplicate task ID detected/i);
+    const found = await store.get(task.frontmatter.id);
+    expect(found).toBeDefined();
+    expect(found!.frontmatter.status).toBe("done");
+
+    // Second get() is stable — stale copy was removed.
+    const again = await store.get(task.frontmatter.id);
+    expect(again!.frontmatter.status).toBe("done");
   });
 
   it("creates companion directories for task artifacts", async () => {

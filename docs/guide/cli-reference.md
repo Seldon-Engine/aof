@@ -914,7 +914,7 @@ Update dependencies
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--preserve <paths...>` | Paths to preserve during update | `["config","data","tasks","events"]` |
+| `--preserve <paths...>` | Paths to preserve during update | `["config","data","bin","node_modules",".aof"]` |
 | `--no-lockfile` | Skip lockfile (use npm install instead of npm ci) |  |
 
 ---

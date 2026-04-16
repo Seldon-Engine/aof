@@ -72,44 +72,53 @@ describe("AOF tool handlers", () => {
     expect(lastEvent.type).toBe("task.completed");
   });
 
-  it("rejects update and completion when duplicate task cards exist for the same ID", async () => {
+  it("tool handlers self-heal duplicate task cards and proceed against the canonical copy", async () => {
+    // Prior behavior was to throw "Duplicate task ID detected" and jam
+    // the caller. After recovery (task-store.ts get()), the stale copy
+    // is removed and tools operate against the most-recent copy.
     const task = await harness.store.create({ title: "Duplicate logical task", createdBy: "main" });
     await harness.store.transition(task.frontmatter.id, "ready");
 
-    const duplicateDone = {
+    // Plant a stale done/ copy (older mtime) — the ready/ copy must win.
+    const staleDone = {
       frontmatter: {
         ...task.frontmatter,
         status: "done" as const,
       },
       body: task.body,
     };
+    const stalePath = join(harness.tmpDir, "tasks", "done", `${task.frontmatter.id}.md`);
+    await writeFile(stalePath, serializeTask(staleDone), "utf-8");
+    const { utimes, stat } = await import("node:fs/promises");
+    const readyPath = join(harness.tmpDir, "tasks", "ready", `${task.frontmatter.id}.md`);
+    await utimes(stalePath, 1_000_000, 1_000_000);
+    await utimes(readyPath, 2_000_000, 2_000_000);
 
-    await writeFile(
-      join(harness.tmpDir, "tasks", "done", `${task.frontmatter.id}.md`),
-      serializeTask(duplicateDone),
-      "utf-8",
+    // Update proceeds against ready/ (canonical), drives task to in-progress.
+    const updated = await aofTaskUpdate(
+      { store: harness.store, logger: harness.logger },
+      {
+        taskId: task.frontmatter.id,
+        status: "in-progress",
+        actor: "swe-backend",
+      },
     );
+    expect(updated.status).toBe("in-progress");
 
-    await expect(
-      aofTaskUpdate(
-        { store: harness.store, logger: harness.logger },
-        {
-          taskId: task.frontmatter.id,
-          status: "in-progress",
-          actor: "swe-backend",
-        },
-      ),
-    ).rejects.toThrow(/Duplicate task ID detected/i);
+    // Stale done/ copy has been removed by self-heal.
+    const staleStillThere = await stat(stalePath).then(() => true).catch(() => false);
+    expect(staleStillThere).toBe(false);
 
-    await expect(
-      aofTaskComplete(
-        { store: harness.store, logger: harness.logger },
-        {
-          taskId: task.frontmatter.id,
-          actor: "swe-backend",
-        },
-      ),
-    ).rejects.toThrow(/Duplicate task ID detected/i);
+    // Completion proceeds cleanly on the single canonical copy.
+    const completed = await aofTaskComplete(
+      { store: harness.store, logger: harness.logger },
+      {
+        taskId: task.frontmatter.id,
+        actor: "swe-backend",
+        summary: "All done",
+      },
+    );
+    expect(completed.status).toBe("done");
   });
 
   it("reports task status counts", async () => {

@@ -260,24 +260,51 @@ export class FilesystemTaskStore implements ITaskStore {
     throw new Error("Failed to allocate a unique task ID after 1000 attempts");
   }
 
-  /** Find a task by ID across all status directories. */
+  /**
+   * Find a task by ID across all status directories.
+   *
+   * If the same id surfaces in more than one status directory (a state
+   * that v1.14.8's per-task mutex prevents intra-process, but that
+   * pre-fix installs, multi-process hosts, and external sync can still
+   * produce), self-heal: keep the most-recently-written copy as
+   * canonical and remove the stales. The previous behavior was to throw
+   * forever, which jammed the dispatch chain in an infinite retry loop.
+   * The `mtime`-wins heuristic reflects that the last completed
+   * transition always writes after any phantom siblings.
+   */
   async get(id: string): Promise<Task | undefined> {
-    const matches: Task[] = [];
+    const matches: Array<{ task: Task; filePath: string; mtimeMs: number }> = [];
 
     for (const status of STATUS_DIRS) {
       const filePath = this.taskPath(id, status);
       const task = await this.readTaskAtPath(filePath);
       if (task) {
-        matches.push(task);
+        const st = await stat(filePath).catch(() => undefined);
+        matches.push({ task, filePath, mtimeMs: st?.mtimeMs ?? 0 });
       }
     }
 
-    if (matches.length > 1) {
-      const statuses = matches.map(task => task.frontmatter.status).join(", ");
-      throw new Error(`Duplicate task ID detected: ${id} exists in multiple statuses (${statuses})`);
-    }
+    if (matches.length <= 1) return matches[0]?.task;
 
-    return matches[0];
+    matches.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    const winner = matches[0]!;
+    const stale = matches.slice(1);
+    const statuses = matches.map(m => m.task.frontmatter.status).join(", ");
+    storeLog.error(
+      {
+        taskId: id,
+        statuses,
+        winner: winner.task.frontmatter.status,
+        discarded: stale.map(s => s.task.frontmatter.status),
+      },
+      "duplicate task ID detected — self-healing by removing stale copies (most-recent mtime wins)",
+    );
+    for (const s of stale) {
+      await rm(s.filePath, { force: true }).catch((err) => {
+        storeLog.warn({ taskId: id, filePath: s.filePath, err }, "duplicate removal failed");
+      });
+    }
+    return winner.task;
   }
 
   /** Find a task by ID prefix (for CLI convenience). */
