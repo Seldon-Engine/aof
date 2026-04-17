@@ -38,6 +38,7 @@ export const AofConfigSchema = z.object({
     .object({
       pollIntervalMs: z.coerce.number().positive().default(30_000),
       socketPath: z.string().optional(),
+      mode: z.enum(["plugin-bridge", "standalone"]).default("standalone"),
     })
     .default({}),
   openclaw: z
@@ -88,6 +89,7 @@ const KNOWN_AOF_VARS = new Set([
   "AOF_MAX_DISPATCHES_PER_POLL",
   "AOF_DAEMON_POLL_INTERVAL_MS",
   "AOF_DAEMON_SOCKET",
+  "AOF_DAEMON_MODE",
   "AOF_VAULT_ROOT",
   "AOF_CALLBACK_DEPTH",
 ]);
@@ -124,6 +126,7 @@ function readEnvInput(): Record<string, unknown> {
     daemon: stripUndefined({
       pollIntervalMs: env["AOF_DAEMON_POLL_INTERVAL_MS"],
       socketPath: env["AOF_DAEMON_SOCKET"],
+      mode: env["AOF_DAEMON_MODE"],
     }),
     openclaw: stripUndefined({
       gatewayUrl: env["OPENCLAW_GATEWAY_URL"],

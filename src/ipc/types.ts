@@ -1,0 +1,56 @@
+/**
+ * Non-Zod types for the IPC module.
+ *
+ * `IpcDeps` is the dependency bag injected into every route handler by
+ * `attachIpcRoutes`. The Wave 2 fields (`spawnQueue`, `pluginRegistry`,
+ * `deliverSpawnResult`) are declared optional here so Wave 1 daemon wiring
+ * compiles without them; Wave 2 will mark them required.
+ *
+ * @module ipc/types
+ */
+
+import type { IncomingMessage, ServerResponse } from "node:http";
+import type { ITaskStore } from "../store/interfaces.js";
+import type { EventLogger } from "../events/logger.js";
+import type { AOFService } from "../service/aof-service.js";
+import type { ToolRegistry } from "../tools/tool-registry.js";
+import type { createLogger } from "../logging/index.js";
+import type { SpawnResultPost } from "./schemas.js";
+
+/** Resolves the daemon-side ITaskStore for a given (actor, projectId). */
+export type ResolveStoreFn = (opts: {
+  actor?: string;
+  projectId?: string;
+}) => Promise<ITaskStore>;
+
+/** Dependency bag every IPC route handler receives. */
+export interface IpcDeps {
+  /** Shared tool registry — dispatched by /v1/tool/invoke. */
+  toolRegistry: ToolRegistry;
+  /** Returns a permission-aware, project-scoped store for the caller. */
+  resolveStore: ResolveStoreFn;
+  /** Event logger for persisted audit events. */
+  logger: EventLogger;
+  /** AOFService handle — session-event routes trigger poll via this. */
+  service: AOFService;
+  /** Structured logger for this IPC module's operational diagnostics. */
+  log: ReturnType<typeof createLogger>;
+
+  /** Wave 2 — spawn queue for long-poll dispatch. */
+  spawnQueue?: unknown;
+  /** Wave 2 — plugin registry tracking active long-poll handles. */
+  pluginRegistry?: unknown;
+  /** Wave 2 — delivers a plugin-posted spawn result back into the dispatch pipeline. */
+  deliverSpawnResult?: (
+    id: string,
+    taskId: string,
+    result: SpawnResultPost,
+  ) => Promise<void>;
+}
+
+/** Signature of an IPC route handler. */
+export type RouteHandler = (
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: IpcDeps,
+) => Promise<void>;

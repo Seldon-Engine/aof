@@ -1,87 +1,93 @@
 /**
- * Phase 43 — Wave 0 RED test
+ * Socket permission tests — Wave 0 RED anchor turned GREEN.
  *
- * Covers decision D-08: Unix socket filesystem permissions are the ONLY auth
- * model. `daemon.sock` MUST be created with mode 0600 (owner read/write only).
- * Cross-uid access is the explicit non-goal; same-uid is the trust boundary.
- *
- * RED anchor: imports `createHealthServer` (which EXISTS today) but asserts
- * a mode Node's default `createServer().listen(path)` does NOT set (default
- * 0755). The test fails until Wave 1 adds `chmod(socketPath, 0o600)` (or
- * equivalent umask bracket) inside `createHealthServer`.
+ * T-43-01 (threat register, 43-03-PLAN.md): daemon.sock must be created with
+ * mode 0600 so only the invoking user can connect. This test asserts the
+ * invariant under `startAofDaemon`, not just the raw server helper, so we
+ * detect regressions in any wrapper code that might chmod the socket later.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { createHealthServer, type DaemonStateProvider, type StatusContextProvider } from "../server.js";
-import type { ITaskStore } from "../../store/interfaces.js";
-import type { Server } from "node:http";
-import { mkdtemp, rm } from "node:fs/promises";
-import { statSync } from "node:fs";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdtemp, rm, mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { FilesystemTaskStore } from "../../store/task-store.js";
+import type { ITaskStore } from "../../store/interfaces.js";
+import { EventLogger } from "../../events/logger.js";
+import { startAofDaemon } from "../daemon.js";
+import type { PollResult } from "../../dispatch/scheduler.js";
 
-describe.skipIf(process.platform === "win32")(
-  "daemon.sock filesystem permissions (D-08)",
-  () => {
-    let server: Server;
-    let tmpDir: string;
-    let socketPath: string;
-    let mockStateProvider: DaemonStateProvider;
-    let mockContextProvider: StatusContextProvider;
-    let mockStore: ITaskStore;
+vi.mock("../../logging/index.js", () => ({
+  createLogger: () => ({
+    trace: vi.fn(),
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    fatal: vi.fn(),
+    child: vi.fn(),
+  }),
+}));
 
-    beforeEach(async () => {
-      tmpDir = await mkdtemp(join(tmpdir(), "aof-socket-perms-"));
-      socketPath = join(tmpDir, "daemon.sock");
-
-      mockStateProvider = () => ({
-        lastPollAt: Date.now(),
-        lastEventAt: Date.now(),
-        uptime: 60_000,
-      });
-      mockContextProvider = () => ({
-        version: "0.1.0",
-        dataDir: "/tmp/aof",
-        pollIntervalMs: 30_000,
-        providersConfigured: 2,
-        schedulerRunning: true,
-        eventLoggerOk: true,
-      });
-      mockStore = {
-        countByStatus: async () => ({
-          backlog: 0,
-          ready: 0,
-          "in-progress": 0,
-          blocked: 0,
-          review: 0,
-          done: 0,
-          deadletter: 0,
-        }),
-      } as unknown as ITaskStore;
-    });
-
-    afterEach(async () => {
-      if (server) {
-        await new Promise<void>((resolve) => server.close(() => resolve()));
-      }
-      await rm(tmpDir, { recursive: true, force: true });
-    });
-
-    it("D-08: createHealthServer creates socket with mode 0600 (owner-only)", async () => {
-      server = createHealthServer(mockStateProvider, mockStore, socketPath, mockContextProvider);
-      await new Promise<void>((resolve) => server.on("listening", resolve));
-
-      const mode = statSync(socketPath).mode & 0o777;
-      expect(mode).toBe(0o600);
-    });
-
-    it("D-08: mode remains 0600 after a GET request (no perms drift)", async () => {
-      server = createHealthServer(mockStateProvider, mockStore, socketPath, mockContextProvider);
-      await new Promise<void>((resolve) => server.on("listening", resolve));
-
-      // Touch the socket via a connect cycle — ensure perms don't change on use.
-      const modeAfter = statSync(socketPath).mode & 0o777;
-      expect(modeAfter).toBe(0o600);
-    });
+const makePollResult = (): PollResult => ({
+  scannedAt: new Date().toISOString(),
+  durationMs: 1,
+  dryRun: true,
+  actions: [],
+  stats: {
+    total: 0,
+    backlog: 0,
+    ready: 0,
+    inProgress: 0,
+    blocked: 0,
+    review: 0,
+    done: 0,
+    cancelled: 0,
+    deadletter: 0,
   },
-);
+});
+
+describe("daemon.sock permissions", () => {
+  let tmpDir: string;
+  let store: ITaskStore;
+  let logger: EventLogger;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "aof-sockperm-"));
+    store = new FilesystemTaskStore(tmpDir);
+    await store.init();
+    const eDir = join(tmpDir, "events");
+    await mkdir(eDir, { recursive: true });
+    logger = new EventLogger(eDir);
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("creates daemon.sock with mode 0600 (owner rw only)", async () => {
+    const socketPath = join(tmpDir, "daemon.sock");
+    const poller = vi.fn(async () => makePollResult());
+
+    const { service, healthServer } = await startAofDaemon({
+      dataDir: tmpDir,
+      pollIntervalMs: 60_000,
+      dryRun: true,
+      store,
+      logger,
+      poller,
+      enableHealthServer: true,
+      socketPath,
+    });
+
+    try {
+      const info = await stat(socketPath);
+      // Mask off non-permission bits; only the lower 9 bits are mode.
+      const mode = info.mode & 0o777;
+      expect(mode).toBe(0o600);
+    } finally {
+      if (healthServer) healthServer.close();
+      await service.stop();
+    }
+  });
+});

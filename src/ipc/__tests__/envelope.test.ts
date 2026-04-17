@@ -1,12 +1,15 @@
 /**
- * Phase 43 — Wave 0 RED test
+ * Envelope Zod schema tests — Wave 0 anchor for Phase 43 Plan 03.
  *
- * Covers decisions:
- * - D-06: single invokeTool envelope + error kind shape
- * - D-13: pluginId reserved, defaults to "openclaw"
- *
- * RED anchor: imports from "../schemas.js", which does NOT yet exist. Wave 1
- * lands `src/ipc/schemas.ts` exporting the Zod schemas referenced below.
+ * Each test asserts a wire-contract invariant that both sides of the
+ * plugin↔daemon IPC rely on:
+ *   - InvokeToolRequest is `.strict()` (unknown envelope fields rejected).
+ *   - `pluginId` defaults to "openclaw" when omitted (D-13).
+ *   - `callbackDepth` is clamped to a non-negative integer, defaults to 0.
+ *   - InvokeToolResponse is a `result | error` union — never both.
+ *   - IpcError.kind is constrained to the documented set.
+ *   - SpawnRequest carries a nonnegative `callbackDepth` (Open Q5).
+ *   - Session-event envelopes are `.passthrough()` so gateway extras survive.
  */
 
 import { describe, it, expect } from "vitest";
@@ -20,176 +23,221 @@ import {
   SessionEndEvent,
   AgentEndEvent,
   BeforeCompactionEvent,
-} from "../schemas.js"; // INTENTIONALLY MISSING — Wave 1 creates this module (D-06).
+  MessageReceivedEvent,
+} from "../schemas.js";
 
-describe("IPC envelope schemas (D-06, D-13)", () => {
+describe("IPC envelope schemas", () => {
   describe("InvokeToolRequest", () => {
-    it("D-13: pluginId defaults to 'openclaw' when omitted", () => {
+    it("parses a minimal well-formed envelope and applies defaults", () => {
       const parsed = InvokeToolRequest.parse({
-        name: "aof_dispatch",
+        name: "aof_status_report",
         params: {},
-        toolCallId: "t1",
+        toolCallId: "call-1",
       });
       expect(parsed.pluginId).toBe("openclaw");
+      expect(parsed.callbackDepth).toBe(0);
+      expect(parsed.name).toBe("aof_status_report");
     });
 
-    it("D-13: pluginId accepts explicit forward-compat values (e.g. 'slack')", () => {
+    it("rejects unknown top-level fields (strict mode)", () => {
+      const result = InvokeToolRequest.safeParse({
+        name: "aof_status_report",
+        params: {},
+        toolCallId: "call-1",
+        unexpectedField: 42,
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects missing required fields", () => {
+      expect(
+        InvokeToolRequest.safeParse({ params: {}, toolCallId: "c" }).success,
+      ).toBe(false); // missing name
+      expect(
+        InvokeToolRequest.safeParse({ name: "aof_status_report", toolCallId: "c" })
+          .success,
+      ).toBe(false); // missing params
+      expect(
+        InvokeToolRequest.safeParse({ name: "aof_status_report", params: {} })
+          .success,
+      ).toBe(false); // missing toolCallId
+    });
+
+    it("rejects negative callbackDepth (T-43-07 clamp)", () => {
+      const result = InvokeToolRequest.safeParse({
+        name: "aof_status_report",
+        params: {},
+        toolCallId: "call-1",
+        callbackDepth: -1,
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("accepts callbackDepth=0 and positive integers", () => {
+      expect(
+        InvokeToolRequest.safeParse({
+          name: "aof_status_report",
+          params: {},
+          toolCallId: "c",
+          callbackDepth: 0,
+        }).success,
+      ).toBe(true);
+      expect(
+        InvokeToolRequest.safeParse({
+          name: "aof_status_report",
+          params: {},
+          toolCallId: "c",
+          callbackDepth: 5,
+        }).success,
+      ).toBe(true);
+    });
+
+    it("preserves arbitrary params payload", () => {
       const parsed = InvokeToolRequest.parse({
         name: "aof_dispatch",
-        params: {},
-        toolCallId: "t1",
+        params: { taskTitle: "t", agent: "swe", nested: { a: 1 } },
+        toolCallId: "call-1",
+      });
+      expect(parsed.params.taskTitle).toBe("t");
+      expect(parsed.params.agent).toBe("swe");
+      expect((parsed.params.nested as Record<string, unknown>).a).toBe(1);
+    });
+
+    it("accepts explicit pluginId override (multi-plugin reservation)", () => {
+      const parsed = InvokeToolRequest.parse({
         pluginId: "slack",
+        name: "aof_status_report",
+        params: {},
+        toolCallId: "call-1",
       });
       expect(parsed.pluginId).toBe("slack");
-    });
-
-    it("D-06: rejects payloads missing required fields", () => {
-      const result = InvokeToolRequest.safeParse({});
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        const paths = result.error.issues.map((i) => i.path.join("."));
-        expect(paths).toEqual(expect.arrayContaining(["name", "params", "toolCallId"]));
-      }
-    });
-
-    it("D-06: callbackDepth defaults to 0 and accepts explicit integer", () => {
-      const zero = InvokeToolRequest.parse({
-        name: "aof_dispatch",
-        params: {},
-        toolCallId: "t1",
-      });
-      expect(zero.callbackDepth).toBe(0);
-
-      const two = InvokeToolRequest.parse({
-        name: "aof_dispatch",
-        params: {},
-        toolCallId: "t1",
-        callbackDepth: 2,
-      });
-      expect(two.callbackDepth).toBe(2);
-    });
-
-    it("D-06: params passes through as record<string, unknown>", () => {
-      const parsed = InvokeToolRequest.parse({
-        name: "aof_dispatch",
-        params: { title: "X", brief: "Y", nested: { z: 1 } },
-        toolCallId: "t1",
-      });
-      expect(parsed.params).toEqual({ title: "X", brief: "Y", nested: { z: 1 } });
     });
   });
 
   describe("InvokeToolResponse", () => {
-    it("D-06: accepts `{ result }` shape", () => {
-      const parsed = InvokeToolResponse.parse({ result: { ok: true } });
-      expect(parsed).toEqual({ result: { ok: true } });
+    it("accepts a result envelope", () => {
+      const r = InvokeToolResponse.parse({ result: { ok: true } });
+      expect("result" in r).toBe(true);
     });
 
-    it("D-06: accepts `{ error }` envelope with canonical IpcErrorKind", () => {
-      const parsed = InvokeToolResponse.parse({
+    it("accepts an error envelope", () => {
+      const r = InvokeToolResponse.parse({
         error: { kind: "validation", message: "bad" },
       });
-      expect(parsed).toEqual({ error: { kind: "validation", message: "bad" } });
+      expect("error" in r).toBe(true);
+    });
+
+    it("rejects an unknown-shape payload", () => {
+      expect(InvokeToolResponse.safeParse({}).success).toBe(false);
+      expect(InvokeToolResponse.safeParse({ other: 1 }).success).toBe(false);
     });
   });
 
-  describe("IpcError + IpcErrorKind", () => {
-    it("D-06: IpcErrorKind enumerates exactly the canonical set", () => {
-      // Every canonical kind must parse.
-      const kinds = [
+  describe("IpcError / IpcErrorKind", () => {
+    it("enumerates the documented error kinds", () => {
+      const kinds: IpcErrorKind[] = [
         "validation",
         "not-found",
         "permission",
         "timeout",
         "internal",
         "unavailable",
-      ] as const;
-      for (const kind of kinds) {
-        expect(IpcErrorKind.parse(kind)).toBe(kind);
+      ];
+      for (const k of kinds) {
+        expect(IpcErrorKind.safeParse(k).success).toBe(true);
       }
     });
 
-    it("D-06: IpcErrorKind rejects unknown kinds", () => {
-      const result = IpcErrorKind.safeParse("bogus");
-      expect(result.success).toBe(false);
+    it("rejects unknown error kinds", () => {
+      expect(IpcErrorKind.safeParse("boom").success).toBe(false);
     });
 
-    it("D-06: IpcError accepts optional `details`", () => {
-      const parsed = IpcError.parse({
+    it("accepts optional details payload", () => {
+      const e = IpcError.parse({
         kind: "validation",
-        message: "bad params",
-        details: { issues: [{ path: ["x"], message: "required" }] },
+        message: "bad",
+        details: { field: "name" },
       });
-      expect(parsed.kind).toBe("validation");
-      expect(parsed.details).toBeDefined();
+      expect(e.details?.field).toBe("name");
     });
   });
 
-  describe("SpawnRequest (D-09)", () => {
-    it("accepts minimal required fields", () => {
+  describe("SpawnRequest", () => {
+    it("parses a minimal SpawnRequest and applies callbackDepth default", () => {
       const parsed = SpawnRequest.parse({
-        id: "spawn-1",
-        taskId: "task-1",
-        taskPath: "/tmp/tasks/ready/task-1",
+        id: "s-1",
+        taskId: "t-1",
+        taskPath: "tasks/ready/t-1",
         agent: "swe-backend",
         priority: "normal",
         routing: {},
       });
-      expect(parsed.id).toBe("spawn-1");
-      expect(parsed.agent).toBe("swe-backend");
+      expect(parsed.callbackDepth).toBe(0);
     });
 
-    it("rejects payload missing required field `taskId`", () => {
+    it("rejects negative callbackDepth on SpawnRequest", () => {
       const result = SpawnRequest.safeParse({
-        id: "spawn-1",
-        taskPath: "/tmp/tasks/ready/task-1",
+        id: "s-1",
+        taskId: "t-1",
+        taskPath: "tasks/ready/t-1",
         agent: "swe-backend",
         priority: "normal",
         routing: {},
+        callbackDepth: -3,
       });
       expect(result.success).toBe(false);
     });
   });
 
-  describe("SpawnResultPost (D-09)", () => {
-    it("accepts success outcome", () => {
+  describe("SpawnResultPost", () => {
+    it("parses a successful result", () => {
       const parsed = SpawnResultPost.parse({
-        sessionId: "s1",
+        sessionId: "sess-1",
         success: true,
         aborted: false,
-        durationMs: 100,
+        durationMs: 1234,
       });
       expect(parsed.success).toBe(true);
     });
 
-    it("accepts failure outcome with structured error", () => {
+    it("accepts an optional error payload", () => {
       const parsed = SpawnResultPost.parse({
-        sessionId: "s1",
+        sessionId: "sess-1",
         success: false,
         aborted: false,
-        error: { kind: "exception", message: "boom" },
+        error: { kind: "timeout", message: "exceeded" },
         durationMs: 42,
       });
-      expect(parsed.error).toEqual({ kind: "exception", message: "boom" });
+      expect(parsed.error?.kind).toBe("timeout");
     });
   });
 
-  describe("Session lifecycle events (D-07)", () => {
-    it("SessionEndEvent parses a minimal payload", () => {
-      // Exact field set is Wave 1 implementation detail; the test just
-      // anchors the export name for the RED→GREEN contract.
-      const parsed = SessionEndEvent.parse({ sessionId: "s1", agentId: "a1" });
-      expect(parsed).toBeDefined();
+  describe("Session-event envelopes (A1: 4 forwarded)", () => {
+    it("SessionEndEvent passthrough preserves extras", () => {
+      const parsed = SessionEndEvent.parse({
+        sessionId: "s",
+        customGatewayField: "kept",
+      });
+      // passthrough: custom fields survive
+      expect((parsed as Record<string, unknown>).customGatewayField).toBe("kept");
     });
 
-    it("AgentEndEvent parses a minimal payload", () => {
-      const parsed = AgentEndEvent.parse({ agentId: "a1" });
-      expect(parsed).toBeDefined();
+    it("AgentEndEvent is the same passthrough shape", () => {
+      const parsed = AgentEndEvent.parse({ agentId: "swe-backend", extra: 1 });
+      expect((parsed as Record<string, unknown>).extra).toBe(1);
     });
 
-    it("BeforeCompactionEvent parses a minimal payload", () => {
-      const parsed = BeforeCompactionEvent.parse({});
-      expect(parsed).toBeDefined();
+    it("BeforeCompactionEvent accepts empty body", () => {
+      expect(BeforeCompactionEvent.safeParse({}).success).toBe(true);
+    });
+
+    it("MessageReceivedEvent passes through protocol envelopes", () => {
+      const parsed = MessageReceivedEvent.parse({
+        sessionKey: "abc",
+        from: "swe-backend",
+        content: "ack",
+      });
+      expect((parsed as Record<string, unknown>).from).toBe("swe-backend");
     });
   });
 });
