@@ -40,6 +40,14 @@ import {
   aofTaskSubscribe,
   aofTaskUnsubscribe,
 } from "./subscription-tools.js";
+import {
+  projectCreateSchema,
+  projectListSchema,
+  projectAddParticipantSchema,
+  aofProjectCreate,
+  aofProjectList,
+  aofProjectAddParticipant,
+} from "./project-management-tools.js";
 
 /**
  * A tool definition that pairs a Zod schema with a framework-agnostic handler.
@@ -142,5 +150,23 @@ export const toolRegistry: ToolRegistry = {
     description: "Cancel a task outcome subscription",
     schema: taskUnsubscribeInputSchema,
     handler: async (ctx, input) => aofTaskUnsubscribe(ctx, input),
+  },
+
+  aof_project_create: {
+    description: "Create a new project with standard directory structure and manifest.",
+    schema: projectCreateSchema,
+    handler: async (ctx, input) => aofProjectCreate(ctx, input),
+  },
+
+  aof_project_list: {
+    description: "List all projects on this AOF instance.",
+    schema: projectListSchema,
+    handler: async (ctx, input) => aofProjectList(ctx, input),
+  },
+
+  aof_project_add_participant: {
+    description: "Add an agent to a project's participant list.",
+    schema: projectAddParticipantSchema,
+    handler: async (ctx, input) => aofProjectAddParticipant(ctx, input),
   },
 };
