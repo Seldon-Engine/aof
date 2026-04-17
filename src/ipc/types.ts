@@ -16,6 +16,8 @@ import type { AOFService } from "../service/aof-service.js";
 import type { ToolRegistry } from "../tools/tool-registry.js";
 import type { createLogger } from "../logging/index.js";
 import type { SpawnResultPost } from "./schemas.js";
+import type { SpawnQueue } from "./spawn-queue.js";
+import type { PluginRegistry } from "./plugin-registry.js";
 
 /** Resolves the daemon-side ITaskStore for a given (actor, projectId). */
 export type ResolveStoreFn = (opts: {
@@ -37,13 +39,18 @@ export interface IpcDeps {
   log: ReturnType<typeof createLogger>;
 
   /** Wave 2 — spawn queue for long-poll dispatch. */
-  spawnQueue?: unknown;
+  spawnQueue?: SpawnQueue;
   /** Wave 2 — plugin registry tracking active long-poll handles. */
-  pluginRegistry?: unknown;
-  /** Wave 2 — delivers a plugin-posted spawn result back into the dispatch pipeline. */
+  pluginRegistry?: PluginRegistry;
+  /**
+   * Wave 2 — delivers a plugin-posted spawn result back into the dispatch pipeline.
+   *
+   * The daemon (43-05) wires this to `pluginBridgeAdapter.deliverResult(id, result)`.
+   * The adapter owns the `spawnId → { taskId, onRunComplete }` map so the IPC route
+   * can stay free of dispatch-pipeline bookkeeping.
+   */
   deliverSpawnResult?: (
     id: string,
-    taskId: string,
     result: SpawnResultPost,
   ) => Promise<void>;
 }

@@ -22,6 +22,8 @@ import {
   handleBeforeCompaction,
   handleMessageReceived,
 } from "./routes/session-events.js";
+import { handleSpawnWait } from "./routes/spawn-wait.js";
+import { handleSpawnResult } from "./routes/spawn-result.js";
 
 export function attachIpcRoutes(server: Server, deps: IpcDeps): void {
   // Long-poll safety (Pitfall 1): Node default keepAliveTimeout is 5s, which
@@ -37,8 +39,21 @@ export function attachIpcRoutes(server: Server, deps: IpcDeps): void {
     "/v1/event/agent-end": handleAgentEnd,
     "/v1/event/before-compaction": handleBeforeCompaction,
     "/v1/event/message-received": handleMessageReceived,
-    // Wave 2 extends: GET /v1/spawns/wait, POST /v1/spawns/{id}/result.
+    "/v1/spawns/wait": handleSpawnWait,
+    // `/v1/spawns/{id}/result` is matched via regex below (parametric path).
   };
+
+  /**
+   * Parametric routes whose URL contains a path segment that can't be used as
+   * a map key. Each entry's regex must match the full URL; the handler parses
+   * the id out of `req.url` itself (single source of truth).
+   */
+  const patternRoutes: Array<{
+    re: RegExp;
+    handler: import("./types.js").RouteHandler;
+  }> = [
+    { re: /^\/v1\/spawns\/[^/]+\/result$/, handler: handleSpawnResult },
+  ];
 
   server.on("request", (req, res) => {
     // Let /healthz, /status, etc. fall through to the existing handler.
@@ -50,6 +65,13 @@ export function attachIpcRoutes(server: Server, deps: IpcDeps): void {
         if (handler) {
           await handler(req, res, deps);
           return;
+        }
+
+        for (const { re, handler: h } of patternRoutes) {
+          if (re.test(req.url!)) {
+            await h(req, res, deps);
+            return;
+          }
         }
 
         if (!res.headersSent) {
