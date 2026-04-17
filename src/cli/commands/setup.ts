@@ -23,6 +23,7 @@ import { migration003 } from "../../packaging/migrations/003-version-metadata.js
 import { migration004 } from "../../packaging/migrations/004-scaffold-repair.js";
 import { migration005 } from "../../packaging/migrations/005-path-reconciliation.js";
 import { migration006 } from "../../packaging/migrations/006-data-code-separation.js";
+import { migration007 } from "../../packaging/migrations/007-daemon-required.js";
 import {
   detectOpenClaw,
   isAofPluginRegistered,
@@ -81,7 +82,7 @@ export interface SetupOptions {
  * Returns all registered migrations in order.
  */
 function getAllMigrations(): Migration[] {
-  return [migration001, migration003, migration004, migration005, migration006];
+  return [migration001, migration003, migration004, migration005, migration006, migration007];
 }
 
 // --- Helpers ---
