@@ -250,4 +250,47 @@ describe("aof_dispatch", () => {
       expect(result.context!.manifest.taskId).toBe(task.frontmatter.id);
     });
   });
+
+  describe("Per-task timeoutMs", () => {
+    it("forwards task.frontmatter.metadata.timeoutMs to spawnSession opts", async () => {
+      const task = await store.create({
+        title: "Long task",
+        body: "Task body",
+        routing: { agent: "test-agent" },
+        metadata: { timeoutMs: 14_400_000 },
+        createdBy: "test",
+      });
+      await store.transition(task.frontmatter.id, "ready");
+
+      await aofDispatch({
+        taskId: task.frontmatter.id,
+        store,
+        executor,
+      });
+
+      expect(executor.spawned).toHaveLength(1);
+      expect(executor.spawned[0]!.opts?.timeoutMs).toBe(14_400_000);
+      expect(executor.spawned[0]!.context.timeoutMs).toBe(14_400_000);
+    });
+
+    it("omits opts.timeoutMs when metadata.timeoutMs is absent", async () => {
+      const task = await store.create({
+        title: "Regular task",
+        body: "Task body",
+        routing: { agent: "test-agent" },
+        createdBy: "test",
+      });
+      await store.transition(task.frontmatter.id, "ready");
+
+      await aofDispatch({
+        taskId: task.frontmatter.id,
+        store,
+        executor,
+      });
+
+      expect(executor.spawned).toHaveLength(1);
+      expect(executor.spawned[0]!.opts).toBeUndefined();
+      expect(executor.spawned[0]!.context.timeoutMs).toBeUndefined();
+    });
+  });
 });

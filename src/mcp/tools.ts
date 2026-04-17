@@ -19,6 +19,7 @@ import { appendSection, formatTimestamp, normalizePriority, resolveTask, type Ao
 import { WorkflowDefinition, validateDAG, type WorkflowDefinition as WorkflowDefinitionType } from "../schemas/workflow-dag.js";
 import { toolRegistry } from "../tools/tool-registry.js";
 import { createSubscriptionStore, validateSubscriberAgent } from "../tools/subscription-tools.js";
+import { MAX_DISPATCH_TIMEOUT_MS } from "../tools/project-tools.js";
 
 // --- MCP-specific schemas (not in shared registry) ---
 
@@ -35,6 +36,9 @@ const mcpDispatchInputSchema = z.object({
   workflow: z.union([z.string(), WorkflowDefinition, z.literal(false)]).optional(),
   contextTier: z.enum(["seed", "full"]).optional(),
   subscribe: z.enum(["completion", "all"]).optional(),
+  // Per-task hard cap on agent run duration in milliseconds. Mirrors the
+  // shared dispatchSchema field so MCP clients aren't silently stripped.
+  timeoutMs: z.number().int().positive().max(MAX_DISPATCH_TIMEOUT_MS).optional(),
 });
 
 const mcpTaskUpdateInputSchema = z.object({
@@ -90,6 +94,9 @@ export async function handleAofDispatch(ctx: AofMcpContext, input: z.infer<typeo
   if (input.type) metadata.type = input.type;
   if (input.inputs) metadata.inputs = input.inputs;
   if (input.checklist) metadata.checklist = input.checklist;
+  if (typeof input.timeoutMs === "number" && Number.isFinite(input.timeoutMs) && input.timeoutMs > 0) {
+    metadata.timeoutMs = Math.min(Math.floor(input.timeoutMs), MAX_DISPATCH_TIMEOUT_MS);
+  }
 
   let body = input.brief.trim();
   if (input.checklist?.length) {

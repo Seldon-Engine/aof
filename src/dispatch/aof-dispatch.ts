@@ -64,14 +64,26 @@ export async function aofDispatch(opts: AofDispatchOptions): Promise<DispatchRes
 
   // Step 4: Spawn agent session
   const taskPath = task.path ?? `tasks/${task.frontmatter.status}/${taskId}.md`;
-  
-  const executorResult = await executor.spawnSession({
-    taskId,
-    taskPath,
-    agent: targetAgent,
-    priority: task.frontmatter.priority,
-    routing: task.frontmatter.routing,
-  });
+
+  // Per-task timeoutMs (from aof_dispatch) overrides the executor's default.
+  // Mirrors the read pattern used by assign-executor and dispatchDAGHop.
+  const taskMeta = task.frontmatter.metadata ?? {};
+  const tmRaw = (taskMeta as Record<string, unknown>).timeoutMs;
+  const perTaskTimeoutMs = typeof tmRaw === "number" && Number.isFinite(tmRaw) && tmRaw > 0
+    ? tmRaw
+    : undefined;
+
+  const executorResult = await executor.spawnSession(
+    {
+      taskId,
+      taskPath,
+      agent: targetAgent,
+      priority: task.frontmatter.priority,
+      routing: task.frontmatter.routing,
+      ...(perTaskTimeoutMs !== undefined && { timeoutMs: perTaskTimeoutMs }),
+    },
+    perTaskTimeoutMs !== undefined ? { timeoutMs: perTaskTimeoutMs } : undefined,
+  );
 
   // Step 5: Build result
   const result: DispatchResult = {

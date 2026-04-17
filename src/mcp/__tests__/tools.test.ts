@@ -767,4 +767,39 @@ describe("mcp tools", () => {
       }),
     ).rejects.toThrow(/not found in org chart/);
   });
+
+  it("persists per-task timeoutMs from aof_dispatch to task metadata", async () => {
+    const ctx = await createAofMcpContext({
+      dataDir,
+      store,
+      logger: new EventLogger(join(dataDir, "events")),
+    });
+
+    const result = await handleAofDispatch(ctx, {
+      title: "Long task",
+      brief: "Needs 4h budget",
+      assignedAgent: "swe-backend",
+      timeoutMs: 14_400_000,
+    });
+
+    const created = await store.get(result.taskId);
+    expect(created?.frontmatter.metadata?.timeoutMs).toBe(14_400_000);
+  });
+
+  it("omits metadata.timeoutMs when not provided", async () => {
+    const ctx = await createAofMcpContext({
+      dataDir,
+      store,
+      logger: new EventLogger(join(dataDir, "events")),
+    });
+
+    const result = await handleAofDispatch(ctx, {
+      title: "Normal task",
+      brief: "No override",
+      assignedAgent: "swe-backend",
+    });
+
+    const created = await store.get(result.taskId);
+    expect(created?.frontmatter.metadata?.timeoutMs).toBeUndefined();
+  });
 });
