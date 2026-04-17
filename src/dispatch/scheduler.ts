@@ -483,7 +483,7 @@ export async function poll(
           executor: config.executor,
           dryRun: config.dryRun,
           defaultLeaseTtlMs: config.defaultLeaseTtlMs,
-          spawnTimeoutMs: config.spawnTimeoutMs ?? 30_000,
+          spawnTimeoutMs: config.spawnTimeoutMs ?? 300_000,
           maxConcurrentDispatches: effectiveConcurrencyLimit ?? config.maxConcurrentDispatches ?? 3,
           currentInProgress: stats.inProgress,
         });

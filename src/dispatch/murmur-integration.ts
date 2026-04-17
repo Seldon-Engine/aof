@@ -67,7 +67,7 @@ export async function evaluateMurmurTriggers(
     executor,
     dryRun,
     defaultLeaseTtlMs,
-    spawnTimeoutMs = 30_000,
+    spawnTimeoutMs = 300_000,
     reviewTimeoutMs = 30 * 60 * 1000, // 30 minutes default
     maxConcurrentDispatches,
     currentInProgress,

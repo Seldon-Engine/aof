@@ -95,7 +95,7 @@ describe("AOFService ProtocolRouter wiring", () => {
     );
 
     const router = (service as any).protocolRouter;
-    // Default is 30_000 from ProtocolRouter constructor
-    expect((router as any).spawnTimeoutMs).toBe(30_000);
+    // Default is 300_000 (embedded-exec budget) from ProtocolRouter constructor.
+    expect((router as any).spawnTimeoutMs).toBe(300_000);
   });
 });

@@ -71,7 +71,7 @@ export class ProtocolRouter {
     this.projectStoreResolver = deps.projectStoreResolver;
     this.cascadeBlocks = deps.cascadeBlocks ?? false;
     this.executor = deps.executor;
-    this.spawnTimeoutMs = deps.spawnTimeoutMs ?? 30_000;
+    this.spawnTimeoutMs = deps.spawnTimeoutMs ?? 300_000;
     this.handlers = {
       "completion.report": (envelope, store) =>
         this.lockManager.withLock(envelope.taskId, () => this.handleCompletionReport(envelope, store)),

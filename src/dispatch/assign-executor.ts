@@ -142,7 +142,7 @@ export async function executeAssignAction(
     // Spawn agent session with correlation ID and fallback completion callback.
     // Per-task timeoutMs (from aof_dispatch) overrides scheduler's spawnTimeoutMs.
     const result = await executor.spawnSession(context, {
-      timeoutMs: context.timeoutMs ?? config.spawnTimeoutMs ?? 30_000,
+      timeoutMs: context.timeoutMs ?? config.spawnTimeoutMs ?? 300_000,
       correlationId,
       onRunComplete: (outcome) => handleRunComplete(runCompleteCtx, outcome),
     });
