@@ -152,9 +152,17 @@ See: `.planning/milestones/v1.10-ROADMAP.md` for full details
 
 **Depends on:** Phase 42 (exclusivity must land first so both architectures can coexist during migration)
 
-**Requirements:** TBD
-**Plans:** 0 plans
-- [ ] TBD (run /gsd-discuss-phase 43 to scope)
+**Requirements:** D-01 through D-14 (14 locked decisions in .planning/phases/43-thin-plugin-daemon-authority/43-CONTEXT.md)
+**Plans:** 9 plans
+- [ ] 43-01-PLAN.md — Wave 0 RED tests: IPC core + dispatch/plugin/migration scaffolding
+- [ ] 43-02-PLAN.md — Wave 0 integration helpers + 5 RED E2E scenarios (AOF_INTEGRATION=1)
+- [ ] 43-03-PLAN.md — Wave 1 IPC envelope + /v1/tool/invoke + session-event routes + daemon.mode flag
+- [ ] 43-04-PLAN.md — Wave 2 SpawnQueue + PluginRegistry + long-poll routes + PluginBridgeAdapter + SelectingAdapter
+- [ ] 43-05-PLAN.md — Wave 2 wire SelectingAdapter into daemon + assign-executor hold-in-ready (D-12)
+- [ ] 43-06-PLAN.md — Wave 3 DaemonIpcClient singleton + spawn-poller + runAgentFromSpawnRequest refactor
+- [ ] 43-07-PLAN.md — Wave 3 gut adapter.ts thin-bridge (D-02 structural invariant) + move project tools to registry
+- [ ] 43-08-PLAN.md — Wave 4 installer reversal + Migration 007 + --force-daemon deprecation warn
+- [ ] 43-09-PLAN.md — Wave 4 checkpoint:human-verify end-to-end on real Mac/Linux + OpenClaw gateway
 
 ## Backlog
 
