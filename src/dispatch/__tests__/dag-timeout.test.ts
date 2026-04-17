@@ -357,6 +357,44 @@ describe("escalateHopTimeout behavior (via checkHopTimeouts)", () => {
     );
   });
 
+  it("forwards task.frontmatter.metadata.timeoutMs on escalated re-dispatch", async () => {
+    const executor = makeExecutor();
+    const task = makeDAGTask(
+      "TASK-001",
+      [{ id: "review", role: "swe-qa", timeout: "1h", escalateTo: "swe-pm" }],
+      { review: { status: "dispatched", startedAt: ago(2 * 60 * 60 * 1000), agent: "swe-qa", correlationId: "corr-abc" } },
+    );
+    // Per-task 4h override from aof_dispatch survives escalation re-dispatch.
+    task.frontmatter.metadata = { ...task.frontmatter.metadata, timeoutMs: 14_400_000 };
+    const store = makeStore([task]);
+    const logger = makeLogger();
+    const config = makeConfig(executor, { spawnTimeoutMs: 30_000 });
+
+    await checkHopTimeouts(store, logger, config);
+
+    const call = (executor.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const [ctx, opts] = call;
+    expect(opts.timeoutMs).toBe(14_400_000);
+    expect(ctx.timeoutMs).toBe(14_400_000);
+  });
+
+  it("falls back to 300_000 on escalated re-dispatch when neither metadata nor config set", async () => {
+    const executor = makeExecutor();
+    const task = makeDAGTask(
+      "TASK-001",
+      [{ id: "review", role: "swe-qa", timeout: "1h", escalateTo: "swe-pm" }],
+      { review: { status: "dispatched", startedAt: ago(2 * 60 * 60 * 1000), agent: "swe-qa", correlationId: "corr-abc" } },
+    );
+    const store = makeStore([task]);
+    const logger = makeLogger();
+    const config = makeConfig(executor); // no spawnTimeoutMs
+
+    await checkHopTimeouts(store, logger, config);
+
+    const [, opts] = (executor.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(opts.timeoutMs).toBe(300_000);
+  });
+
   it("logs dag.hop_timeout_escalation event with from/to roles", async () => {
     const executor = makeExecutor();
     const task = makeDAGTask(

@@ -126,6 +126,14 @@ async function escalateHopTimeout(
   if (config.executor) {
     const hopContext = buildHopContext(task, hopId);
     const correlationId = randomUUID();
+
+    // Per-task timeoutMs (from aof_dispatch) overrides scheduler's spawnTimeoutMs.
+    const taskMeta = task.frontmatter.metadata ?? {};
+    const tmRaw = (taskMeta as Record<string, unknown>).timeoutMs;
+    const perTaskTimeoutMs = typeof tmRaw === "number" && Number.isFinite(tmRaw) && tmRaw > 0
+      ? tmRaw
+      : undefined;
+
     const context: TaskContext = {
       taskId: task.frontmatter.id,
       taskPath: task.path!,
@@ -134,10 +142,11 @@ async function escalateHopTimeout(
       routing: { role: escalateToRole },
       projectId: task.frontmatter.project,
       hopContext: { ...hopContext, role: escalateToRole },
+      ...(perTaskTimeoutMs !== undefined && { timeoutMs: perTaskTimeoutMs }),
     };
 
     const spawnResult = await config.executor.spawnSession(context, {
-      timeoutMs: config.spawnTimeoutMs ?? 30_000,
+      timeoutMs: perTaskTimeoutMs ?? config.spawnTimeoutMs ?? 300_000,
       correlationId,
     });
 
