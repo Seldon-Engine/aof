@@ -1,28 +1,36 @@
 /**
- * Integration test for Phase 42 installer mode-exclusivity.
+ * Integration test for scripts/install.sh daemon-install behavior.
  *
- * Shells out to scripts/install.sh against a sandboxed $HOME, exercising:
- * - D-01: plugin-mode detection via ~/.openclaw/extensions/aof
- * - D-03: auto-skip when plugin present, no prior daemon
- * - D-04: --force-daemon override (+ --help advertisement)
- * - D-05: convergence — uninstall pre-existing daemon on upgrade
- * - Regression: pure standalone path unchanged
+ * File name is legacy (Phase 42 "mode-exclusivity"); Phase 43 reversed that
+ * policy — the daemon is always installed now, plugin-mode included. The
+ * test name kept to avoid rename churn; the describe block reflects the
+ * Phase 43 reality.
+ *
+ * Exercised decisions:
+ * - Phase 43 D-01: always install the daemon, regardless of plugin-mode
+ * - Phase 43 D-04: --force-daemon is deprecated; flag still accepted but
+ *   emits a deprecation warning and otherwise matches default behavior
+ * - Phase 42 D-01: plugin-mode detection via ~/.openclaw/extensions/aof
+ *   (still used by print_summary for informational output)
  *
  * Prerequisites:
  * - `npm run build` has run (populates dist/)
- * - A tarball at .release-staging/aof-v<package.json version>.tar.gz
+ * - A tarball at aof-<package.json version>.tar.gz at the repo root
  *   (built by beforeAll via `node scripts/build-tarball.mjs <version>`).
- *   The version is read from package.json to satisfy build-tarball.mjs's
- *   coherence check (tarball version must match package.json version).
+ *   Version is read from package.json to satisfy build-tarball.mjs's
+ *   coherence check.
  *
  * Run: npx vitest run --config tests/integration/vitest.config.ts \
  *        tests/integration/install-mode-exclusivity.test.ts
  *
- * NOTE (Wave 0 — Phase 42-01): These specs are intentionally RED.
- * install.sh has no plugin-mode gate yet; Plans 02/03/04 turn them green:
- *   - Plan 02 → specs "D-01/D-03" and "regression" (detection + skip branch)
- *   - Plan 03 → specs "D-04: --force-daemon" and "D-04: --help lists --force-daemon"
- *   - Plan 04 → spec "D-05: removes pre-existing daemon"
+ * NOTE: after Phase 42→43 source changes, the tarball must be rebuilt before
+ * running this test — scripts/install.sh is packaged into it. The beforeAll
+ * below only builds the tarball if absent; a stale tarball from Phase 42
+ * will still exist and must be cleared first:
+ *
+ *   rm -f aof-*.tar.gz && AOF_INTEGRATION=1 npx vitest run --config \
+ *     tests/integration/vitest.config.ts \
+ *     tests/integration/install-mode-exclusivity.test.ts
  */
 
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
@@ -32,7 +40,6 @@ import {
   rmSync,
   mkdirSync,
   symlinkSync,
-  writeFileSync,
   existsSync,
   readFileSync,
 } from "node:fs";
@@ -43,13 +50,9 @@ const REPO_ROOT = process.cwd();
 
 // scripts/build-tarball.mjs enforces version coherence (tarball version MUST
 // equal package.json version), so we mint the fixture from the current
-// package.json version rather than a hardcoded "0.0.0-test" string. The
-// tarball is still "local / test-only" because the sandbox $HOME scopes all
-// filesystem effects — no real launchd registration occurs.
-//
-// Path note: build-tarball.mjs writes `aof-<version>.tar.gz` to the repo root
-// (not `.release-staging/aof-v<version>.tar.gz` as an earlier Plan 01 draft
-// assumed). Matching the actual output keeps the beforeAll preflight coherent.
+// package.json version rather than a hardcoded test string. The tarball is
+// still local / test-only because the sandbox $HOME scopes all filesystem
+// effects — no real launchd registration occurs.
 const PKG_VERSION: string = JSON.parse(
   readFileSync(join(REPO_ROOT, "package.json"), "utf-8"),
 ).version;
@@ -57,23 +60,20 @@ const TARBALL = join(REPO_ROOT, `aof-${PKG_VERSION}.tar.gz`);
 
 // Skip unless:
 //   - running on darwin (launchctl plist semantics assumed by test), AND
-//   - explicitly opted-in via AOF_INTEGRATION=1 (set by
-//     `npm run test:integration:plugin`). The opt-in keeps the `npm test`
-//     (unit) suite green — the root vitest.config.ts include glob matches
-//     this file, but the describe stays skipped without the flag.
+//   - explicitly opted-in via AOF_INTEGRATION=1.
 const SHOULD_RUN =
   process.platform === "darwin" && process.env.AOF_INTEGRATION === "1";
 
-describe.skipIf(!SHOULD_RUN)("install.sh mode-exclusivity", () => {
+describe.skipIf(!SHOULD_RUN)("install.sh always-install-daemon (Phase 43 D-01/D-04)", () => {
   let sandbox: string;
   let fakeHome: string;
   let prefix: string;
   let dataDir: string;
 
   beforeAll(() => {
-    // On-demand tarball fixture build (Phase 42 decision: mirrors
-    // tests/integration/plugin-load.test.ts's Docker preflight pattern).
-    // 30s one-time cost per cold run; subsequent runs hit the cached artifact.
+    // On-demand tarball fixture build. 30s one-time cost per cold run;
+    // subsequent runs hit the cached artifact. If source changes since the
+    // last build, delete aof-*.tar.gz at the repo root before running.
     if (!existsSync(TARBALL)) {
       execFileSync("node", ["scripts/build-tarball.mjs", PKG_VERSION], {
         cwd: REPO_ROOT,
@@ -127,64 +127,52 @@ describe.skipIf(!SHOULD_RUN)("install.sh mode-exclusivity", () => {
     );
   }
 
-  function createFakePlist(): string {
-    const plist = join(
-      fakeHome,
-      "Library",
-      "LaunchAgents",
-      "ai.openclaw.aof.plist",
-    );
-    mkdirSync(join(fakeHome, "Library", "LaunchAgents"), { recursive: true });
-    writeFileSync(plist, "<?xml version='1.0'?><plist/>", "utf-8");
-    return plist;
-  }
-
-  it("D-01/D-03: skips daemon install when plugin symlink is present", () => {
+  it("D-01: installs the daemon even when the plugin symlink is present", () => {
     createPluginSymlink();
     const output = runInstall();
-    expect(output).toMatch(/Plugin-mode detected.*skipping standalone daemon/);
-    expect(output).toMatch(/Daemon: skipped/);
-    expect(
-      existsSync(
-        join(fakeHome, "Library", "LaunchAgents", "ai.openclaw.aof.plist"),
-      ),
-    ).toBe(false);
-  });
 
-  it("D-05: removes pre-existing daemon on upgrade with plugin present", () => {
-    createPluginSymlink();
-    const plist = createFakePlist();
-    mkdirSync(dataDir, { recursive: true });
-    writeFileSync(join(dataDir, "daemon.pid"), "99999", "utf-8");
-    writeFileSync(join(dataDir, "daemon.sock"), "", "utf-8");
-
-    const output = runInstall();
-    expect(output).toMatch(/removing redundant standalone daemon/);
-    expect(existsSync(plist)).toBe(false);
-    expect(existsSync(join(dataDir, "daemon.pid"))).toBe(false);
-    expect(existsSync(join(dataDir, "daemon.sock"))).toBe(false);
-  });
-
-  it("regression: pure standalone (no symlink) still installs daemon", () => {
-    const output = runInstall();
-    expect(output).not.toMatch(/Plugin-mode detected/);
-    // In the fake-home sandbox, launchctl bootstrap fails against the non-user
-    // domain; either "installed and running" or the non-fatal warn is acceptable.
+    // Phase 43 no longer skips the daemon in plugin-mode. The Phase-42-era
+    // "skipping standalone daemon" note is gone; an install attempt must
+    // occur.
+    expect(output).not.toMatch(/skipping standalone daemon/);
+    expect(output).not.toMatch(/Daemon: skipped/);
+    expect(output).toMatch(/Installing daemon service/);
+    // launchctl bootstrap against a sandboxed $HOME may not actually load
+    // into the user domain, so either the success or non-fatal-warn path is
+    // acceptable — what matters is that install was attempted, not skipped.
     expect(output).toMatch(/Daemon (installed and running|install failed)/);
   });
 
-  it("D-04: --force-daemon installs even with plugin-mode detected", () => {
-    createPluginSymlink();
-    const output = runInstall(["--force-daemon"]);
-    expect(output).toMatch(/--force-daemon set/);
+  it("regression: pure standalone (no symlink) installs daemon", () => {
+    const output = runInstall();
+    // Pure-standalone path — no plugin symlink, no deprecation warn, daemon
+    // install attempted. Behavior matches D-01 default: daemon is always
+    // installed regardless of plugin detection.
+    expect(output).not.toMatch(/DEPRECATED/);
     expect(output).toMatch(/Installing daemon service/);
+    expect(output).toMatch(/Daemon (installed and running|install failed)/);
   });
 
-  it("D-04: --help lists --force-daemon", () => {
+  it("D-04: --force-daemon emits deprecation warning and still installs", () => {
+    createPluginSymlink();
+    const output = runInstall(["--force-daemon"]);
+    // Flag is a no-op with a loud deprecation warning. Default behavior
+    // (install daemon) happens regardless.
+    expect(output).toMatch(/--force-daemon is DEPRECATED/);
+    expect(output).toMatch(/Installing daemon service/);
+    // Phase-42 dual-polling warning must be gone — there is no "forcing
+    // despite plugin-mode" state anymore.
+    expect(output).not.toMatch(/Dual-polling will occur/);
+  });
+
+  it("D-04: --help tags --force-daemon as DEPRECATED", () => {
     const out = execFileSync("sh", ["scripts/install.sh", "--help"], {
       cwd: REPO_ROOT,
       encoding: "utf-8",
     });
+    // Flag is still listed (backward compat for v1.14 scripts/CI) but clearly
+    // marked as a no-op.
     expect(out).toContain("--force-daemon");
+    expect(out).toMatch(/--force-daemon\s+\[DEPRECATED\]/);
   });
 });

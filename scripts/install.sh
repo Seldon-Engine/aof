@@ -109,6 +109,12 @@ parse_args() {
         FORCE_CLEAN="true"
         ;;
       --force-daemon)
+        # [DEPRECATED as of v1.15 — Phase 43 D-04]
+        # Flag is a no-op: the daemon is now always installed (plugin-mode
+        # included) because it is the single IPC authority the plugin bridges
+        # to. We still accept the flag so scripts and CI pipelines from v1.14
+        # don't break; install_daemon() surfaces a deprecation warning when
+        # the flag is set. Flag will be removed in a future release.
         FORCE_DAEMON="true"
         ;;
       --tarball)
@@ -135,10 +141,9 @@ parse_args() {
         printf "  --yes, -y               Skip confirmation prompts (requires --clean)\n"
         printf "  --force                 Proceed with --clean even if openclaw-gateway\n"
         printf "                          appears to be running.\n"
-        printf "  --force-daemon          Install the standalone daemon even when\n"
-        printf "                          OpenClaw plugin-mode is detected. Not\n"
-        printf "                          recommended — both AOFService instances\n"
-        printf "                          will poll the same data dir.\n"
+        printf "  --force-daemon          [DEPRECATED] No-op as of v1.15 —\n"
+        printf "                          the daemon is always installed now.\n"
+        printf "                          Flag will be removed in a future release.\n"
         printf "  --tarball <path>        Install from a local tarball instead of\n"
         printf "                          downloading from GitHub. Intended for testing\n"
         printf "                          unreleased builds.\n"
@@ -679,33 +684,22 @@ plugin_mode_detected() {
 }
 
 install_daemon() {
-  # Mode-exclusivity gate (Phase 42, D-03).
-  # When plugin-mode is detected, skip the standalone daemon install unless
-  # --force-daemon (D-04) overrides. D-05: if a pre-existing daemon plist
-  # exists, converge to plugin-only by shelling out to `daemon uninstall`.
-  if plugin_mode_detected && [ -z "$FORCE_DAEMON" ]; then
-    plist="$HOME/Library/LaunchAgents/ai.openclaw.aof.plist"
-    if [ -f "$plist" ]; then
-      # D-05: pre-existing dual-mode install — converge to plugin-only.
-      if [ -f "$INSTALL_DIR/dist/cli/index.js" ]; then
-        say "Plugin-mode detected; removing redundant standalone daemon."
-        node "$INSTALL_DIR/dist/cli/index.js" daemon uninstall \
-          --data-dir "$DATA_DIR" 2>&1 || \
-          warn "Daemon uninstall returned non-zero (continuing — plist may already be gone)"
-      else
-        warn "CLI binary not found at $INSTALL_DIR/dist/cli/index.js; leaving existing $plist in place (launchd will continue to spawn the daemon)."
-      fi
-    else
-      say "Plugin-mode detected — skipping standalone daemon. Scheduler runs in-process via openclaw gateway."
-    fi
-    return 0
+  # Phase 43 D-01: always install the daemon, regardless of plugin-mode.
+  #
+  # The daemon is now the single scheduler/IPC authority. The OpenClaw plugin
+  # is a thin bridge that connects to it over daemon.sock; there's nothing to
+  # skip toward any more. Phase 42's plugin_mode_detected && skip branch and
+  # its D-05 convergence (uninstall-pre-existing-daemon) are both gone —
+  # Migration 007 now owns the upgrade path for existing users.
+  #
+  # Phase 43 D-04: --force-daemon becomes a deprecation-warn no-op. Flag is
+  # still accepted (see parse_args) so v1.14 scripts/CI don't break; flag
+  # will be removed in a future release. Default behavior matches what the
+  # flag used to force.
+  if [ -n "$FORCE_DAEMON" ]; then
+    warn "--force-daemon is DEPRECATED as of v1.15 and has no effect — the daemon is always installed now. Flag will be removed in a future release."
   fi
 
-  if plugin_mode_detected && [ -n "$FORCE_DAEMON" ]; then
-    warn "--force-daemon set: installing daemon despite plugin-mode detection. Dual-polling will occur."
-  fi
-
-  # Existing install path — unchanged from pre-Phase 42.
   if [ -f "$INSTALL_DIR/dist/cli/index.js" ]; then
     say "Installing daemon service..."
     if node "$INSTALL_DIR/dist/cli/index.js" daemon install \
@@ -771,10 +765,17 @@ print_summary() {
     printf "  OpenClaw: not detected (install OpenClaw to use AOF as a platform plugin)\n"
   fi
 
-  if plugin_mode_detected && [ -z "$DAEMON_INSTALLED" ]; then
-    printf "  Daemon: skipped (scheduler runs via OpenClaw plugin)\n"
-  elif [ -n "$DAEMON_INSTALLED" ]; then
-    printf "  Daemon: installed and running\n"
+  # Phase 43 D-01: daemon is always the answer. Either it installed
+  # successfully ("installed and running") or something failed along the way
+  # ("not installed — run 'aof daemon install' to start"). The Phase-42-era
+  # "skipped (scheduler runs via OpenClaw plugin)" state no longer exists —
+  # the plugin is a thin bridge and needs the daemon to talk to.
+  if [ -n "$DAEMON_INSTALLED" ]; then
+    if plugin_mode_detected; then
+      printf "  Daemon: installed and running (plugin bridges to daemon over IPC)\n"
+    else
+      printf "  Daemon: installed and running\n"
+    fi
   else
     printf "  Daemon: not installed — run 'aof daemon install' to start\n"
   fi
@@ -787,9 +788,10 @@ print_summary() {
   printf "  Next steps:\n"
   printf "    1. Restart your shell (or run: source your shell profile)\n"
   printf "    2. Review your org chart: %s/org/org-chart.yaml\n" "$DATA_DIR"
-  if plugin_mode_detected && [ -z "$DAEMON_INSTALLED" ]; then
-    printf "    3. Create your first task: aof task create \"My first task\"\n"
-  elif [ -z "$DAEMON_INSTALLED" ]; then
+  # Phase 43 D-01: the plugin-mode-skip case no longer exists — if
+  # DAEMON_INSTALLED is empty here, the daemon install genuinely failed and
+  # the user needs to run it manually, plugin-mode or not.
+  if [ -z "$DAEMON_INSTALLED" ]; then
     printf "    3. Start the daemon:      aof daemon install\n"
     printf "    4. Create your first task: aof task create \"My first task\"\n"
   else
