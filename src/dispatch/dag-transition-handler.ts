@@ -308,6 +308,14 @@ export async function dispatchDAGHop(
   // Build hop-scoped context
   const hopContext = buildHopContext(task, hopId);
 
+  // Per-task timeoutMs (from aof_dispatch) overrides scheduler's spawnTimeoutMs.
+  // Mirrors the pattern in assign-executor.ts so DAG hops honor the same override.
+  const taskMeta = task.frontmatter.metadata ?? {};
+  const tmRaw = (taskMeta as Record<string, unknown>).timeoutMs;
+  const perTaskTimeoutMs = typeof tmRaw === "number" && Number.isFinite(tmRaw) && tmRaw > 0
+    ? tmRaw
+    : undefined;
+
   // Build TaskContext with hop context
   const correlationId = randomUUID();
   const context: TaskContext = {
@@ -318,11 +326,12 @@ export async function dispatchDAGHop(
     routing: { role: hop.role },
     projectId: task.frontmatter.project,
     hopContext,
+    ...(perTaskTimeoutMs !== undefined && { timeoutMs: perTaskTimeoutMs }),
   };
 
   // Spawn session with enforcement callback
   const spawnResult = await executor.spawnSession(context, {
-    timeoutMs: config.spawnTimeoutMs ?? 30_000,
+    timeoutMs: perTaskTimeoutMs ?? config.spawnTimeoutMs ?? 300_000,
     correlationId,
     onRunComplete: async (outcome) => {
       // Re-read task to get fresh state

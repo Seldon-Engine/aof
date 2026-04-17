@@ -468,6 +468,81 @@ describe("dispatchDAGHop", () => {
     expect(logger.log).toHaveBeenCalled();
   });
 
+  it("forwards task.frontmatter.metadata.timeoutMs to spawnSession opts (per-task override)", async () => {
+    const task = makeTask({
+      definition: {
+        name: "test-workflow",
+        hops: [
+          { id: "implement", role: "swe", dependsOn: [], joinType: "all", autoAdvance: true, canReject: false },
+        ],
+      },
+      state: {
+        status: "running",
+        hops: { implement: { status: "ready" } },
+      },
+    });
+    // Per-task 4h override from aof_dispatch.
+    task.frontmatter.metadata = { ...task.frontmatter.metadata, timeoutMs: 14_400_000 };
+
+    const executor = makeExecutor(true);
+    const logger = makeLogger();
+    const store = makeStore();
+    const config = { spawnTimeoutMs: 30_000 };
+
+    await dispatchDAGHop(store, logger, config, executor, task, "implement");
+
+    const [ctx, opts] = (executor.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(opts.timeoutMs).toBe(14_400_000);
+    expect(ctx.timeoutMs).toBe(14_400_000);
+  });
+
+  it("falls back to config.spawnTimeoutMs when metadata.timeoutMs is absent", async () => {
+    const task = makeTask({
+      definition: {
+        name: "test-workflow",
+        hops: [
+          { id: "implement", role: "swe", dependsOn: [], joinType: "all", autoAdvance: true, canReject: false },
+        ],
+      },
+      state: {
+        status: "running",
+        hops: { implement: { status: "ready" } },
+      },
+    });
+    // metadata.timeoutMs intentionally unset.
+    const executor = makeExecutor(true);
+    const config = { spawnTimeoutMs: 45_000 };
+
+    await dispatchDAGHop(makeStore(), makeLogger(), config, executor, task, "implement");
+
+    const [ctx, opts] = (executor.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(opts.timeoutMs).toBe(45_000);
+    expect(ctx.timeoutMs).toBeUndefined();
+  });
+
+  it("falls back to 300_000 when neither metadata.timeoutMs nor config.spawnTimeoutMs are set", async () => {
+    const task = makeTask({
+      definition: {
+        name: "test-workflow",
+        hops: [
+          { id: "implement", role: "swe", dependsOn: [], joinType: "all", autoAdvance: true, canReject: false },
+        ],
+      },
+      state: {
+        status: "running",
+        hops: { implement: { status: "ready" } },
+      },
+    });
+
+    const executor = makeExecutor(true);
+    const config = {}; // no spawnTimeoutMs
+
+    await dispatchDAGHop(makeStore(), makeLogger(), config, executor, task, "implement");
+
+    const [_ctx, opts] = (executor.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(opts.timeoutMs).toBe(300_000);
+  });
+
   it("returns false on spawn failure, hop stays ready", async () => {
     const task = makeTask({
       definition: {
