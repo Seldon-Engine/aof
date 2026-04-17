@@ -123,10 +123,32 @@ describe("OpenClawAdapter", () => {
     expect(result.error).toContain("config");
   });
 
-  it("clamps timeout to 300_000ms minimum", async () => {
+  it("honors caller-supplied timeout below 300_000ms (no floor clamp)", async () => {
     mockRunEmbeddedPiAgent.mockResolvedValueOnce({ meta: { durationMs: 10 } });
 
     await executor.spawnSession(baseContext(), { timeoutMs: 60_000 });
+
+    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
+    expect(mockRunEmbeddedPiAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ timeoutMs: 60_000 }),
+    );
+  });
+
+  it("passes through large caller-supplied timeout unchanged", async () => {
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({ meta: { durationMs: 10 } });
+
+    await executor.spawnSession(baseContext(), { timeoutMs: 14_400_000 });
+
+    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
+    expect(mockRunEmbeddedPiAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ timeoutMs: 14_400_000 }),
+    );
+  });
+
+  it("defaults to 300_000ms when opts.timeoutMs is undefined", async () => {
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({ meta: { durationMs: 10 } });
+
+    await executor.spawnSession(baseContext());
 
     await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
     expect(mockRunEmbeddedPiAgent).toHaveBeenCalledWith(
@@ -134,15 +156,22 @@ describe("OpenClawAdapter", () => {
     );
   });
 
-  it("passes through timeout above 300_000ms minimum", async () => {
-    mockRunEmbeddedPiAgent.mockResolvedValueOnce({ meta: { durationMs: 10 } });
+  it("timeout error message includes taskId and agentId", async () => {
+    // Agent promise never resolves; timer fires first.
+    mockRunEmbeddedPiAgent.mockImplementationOnce(() => new Promise(() => {}));
+    const onRunComplete = vi.fn();
 
-    await executor.spawnSession(baseContext(), { timeoutMs: 600_000 });
-
-    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
-    expect(mockRunEmbeddedPiAgent).toHaveBeenCalledWith(
-      expect.objectContaining({ timeoutMs: 600_000 }),
+    await executor.spawnSession(
+      baseContext({ taskId: "TASK-TIMEOUT-001", agent: "swe-backend" }),
+      { timeoutMs: 1, onRunComplete },
     );
+
+    await vi.waitFor(() => expect(onRunComplete).toHaveBeenCalledTimes(1));
+    const outcome: AgentRunOutcome = onRunComplete.mock.calls[0][0];
+    expect(outcome.success).toBe(false);
+    expect(outcome.error?.message).toContain("TASK-TIMEOUT-001");
+    expect(outcome.error?.message).toContain("swe-backend");
+    expect(outcome.error?.message).toContain("1ms");
   });
 
   it("normalizes agent:prefix:suffix to agent name", async () => {

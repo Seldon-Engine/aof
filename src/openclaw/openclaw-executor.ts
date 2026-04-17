@@ -65,9 +65,11 @@ export class OpenClawAdapter implements GatewayAdapter {
     const agentId = this.normalizeAgentId(context.agent);
     const sessionId = randomUUID();
     const sessionKey = `agent:${agentId}:subagent:${sessionId}`;
-    // The scheduler's spawnTimeoutMs (default 30s) was designed for fast HTTP
-    // dispatch. For embedded agents, we need the full execution budget.
-    const timeoutMs = Math.max(opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
+    // Caller-supplied timeout is authoritative. Callers are responsible for
+    // passing the real execution budget (per-task timeoutMs from aof_dispatch
+    // or an appropriate default). DEFAULT_TIMEOUT_MS only applies when the
+    // caller omits opts.timeoutMs.
+    const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const prompt = this.formatTaskInstruction(context);
 
     try {
@@ -182,7 +184,9 @@ export class OpenClawAdapter implements GatewayAdapter {
 
       const timeoutPromise = new Promise<never>((_resolve, reject) => {
         const timer = setTimeout(
-          () => reject(new Error(`Agent run timed out after ${params.timeoutMs}ms`)),
+          () => reject(new Error(
+            `Agent run timed out after ${params.timeoutMs}ms (taskId=${params.taskId}, agentId=${params.agentId})`,
+          )),
           params.timeoutMs,
         );
         if (typeof timer === "object" && "unref" in timer) timer.unref();
