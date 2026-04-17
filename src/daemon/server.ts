@@ -1,6 +1,6 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { request as httpRequest } from "node:http";
-import { unlinkSync, existsSync } from "node:fs";
+import { unlinkSync, existsSync, chmodSync } from "node:fs";
 import type { ITaskStore } from "../store/interfaces.js";
 import { getHealthStatus, getLivenessStatus, type DaemonState, type DaemonStatusContext } from "./health.js";
 
@@ -10,6 +10,11 @@ export type StatusContextProvider = () => DaemonStatusContext;
 /**
  * Create and start an HTTP server on a Unix domain socket with
  * /healthz (liveness) and /status (full status) routes.
+ *
+ * The daemon attaches additional `/v1/*` IPC routes onto the same server
+ * via `attachIpcRoutes` in `src/ipc/server-attach.ts`. That function is
+ * responsible for `keepAliveTimeout` / `headersTimeout` tuning (long-poll
+ * safety, Pitfall 1 in 43-RESEARCH.md).
  */
 export function createHealthServer(
   getState: DaemonStateProvider,
@@ -54,12 +59,30 @@ export function createHealthServer(
       return;
     }
 
+    // `/v1/*` is handled by attachIpcRoutes (mounted post-construction by
+    // startAofDaemon). Fall through without writing a response so the IPC
+    // listener can reply; otherwise the double-listener race would send a
+    // premature 404.
+    if (req.url?.startsWith("/v1/")) return;
+
     // Unknown route
     res.writeHead(404, { "Content-Type": "text/plain" });
     res.end("Not Found");
   });
 
-  server.listen(socketPath);
+  server.listen(socketPath, () => {
+    // T-43-01: daemon.sock must be 0600 so only the invoking user can connect.
+    // Node's default is the process umask applied to 0o666, which typically
+    // yields 0o755 — we explicitly chmod here. Errors are best-effort logged
+    // by the caller's `listening` handler if needed; chmodSync failing would
+    // be a genuine fault surfaced via the self-check.
+    try {
+      chmodSync(socketPath, 0o600);
+    } catch {
+      // If chmod fails the self-check will still succeed (socket is alive);
+      // the test asserting 0600 will fail loudly, which is the right signal.
+    }
+  });
   return server;
 }
 

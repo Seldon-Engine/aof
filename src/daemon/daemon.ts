@@ -12,6 +12,9 @@ import { setShuttingDown } from "./health.js";
 import { VERSION } from "../version.js";
 import { StandaloneAdapter } from "./standalone-adapter.js";
 import { createLogger } from "../logging/index.js";
+import { toolRegistry } from "../tools/tool-registry.js";
+import { buildDaemonResolveStore } from "../ipc/store-resolver.js";
+import { attachIpcRoutes } from "../ipc/server-attach.js";
 
 const log = createLogger("daemon");
 
@@ -27,6 +30,10 @@ export interface AOFDaemonOptions extends AOFServiceConfig {
   gatewayUrl?: string;
   /** Gateway auth token for standalone executor (default: env OPENCLAW_GATEWAY_TOKEN). */
   gatewayToken?: string;
+  /** Path to the org chart YAML (enables PermissionAwareTaskStore wrapping in the
+   *  daemon-side IPC store resolver). When omitted, IPC dispatch uses the raw
+   *  per-project store without permission enforcement. */
+  orgChartPath?: string;
 }
 
 export interface AOFDaemonContext {
@@ -127,6 +134,21 @@ export async function startAofDaemon(opts: AOFDaemonOptions): Promise<AOFDaemonC
       healthServer.close();
       throw new Error("Health server failed to start");
     }
+
+    // --- Step 3a: Attach /v1/* IPC routes (D-05/D-06/D-07 A1) ---
+    const resolveStore = buildDaemonResolveStore({
+      dataDir: opts.dataDir,
+      baseStore: store,
+      logger,
+      orgChartPath: opts.orgChartPath,
+    });
+    attachIpcRoutes(healthServer, {
+      toolRegistry,
+      resolveStore,
+      logger,
+      service,
+      log,
+    });
   }
 
   // --- Step 4: Write PID file ONLY after self-check succeeds ---
