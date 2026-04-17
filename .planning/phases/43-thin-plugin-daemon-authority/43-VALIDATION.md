@@ -7,6 +7,8 @@ wave_0_complete: false
 created: 2026-04-17
 ---
 
+> **Frontmatter note (2026-04-17):** `nyquist_compliant: false` and `wave_0_complete: false` are pre-execution flags. They flip to `true` after Wave 0 (Plans 43-01 and 43-02) lands the 11 unit + 5 integration RED tests AND the sign-off checklist at the bottom of this file is completed during execution. Do not flip them during planning or revision — Wave 0 hasn't happened yet.
+
 # Phase 43 — Validation Strategy
 
 > Per-phase validation contract for feedback sampling during execution.
@@ -73,9 +75,9 @@ Each element of the phase goal MUST have at least one automated assertion.
 | Daemon owns sole AOFService/scheduler authority (D-02 removes in-plugin singleton) | `src/openclaw/adapter.ts`, `src/plugin.ts` | Grep assertion: no `new AOFService(` in `src/openclaw/` or `src/plugin.ts` after Phase 43. Unit test boots plugin and asserts no AOFService module-level singleton leaks. |
 | Installer always installs daemon in plugin-mode (D-01 reverses Phase 42 D-03) | `scripts/install.sh`, `src/cli/commands/daemon.ts` | E2E / shell test: `install.sh` run in plugin-mode detection path installs launchd/systemd service. No `skip daemon` branch reachable. |
 | `--force-daemon` → deprecated no-op (D-04) | `scripts/install.sh` | Unit test on arg parsing: flag emits deprecation warning, does not alter flow. |
-| Unix-socket IPC routes (D-05) | `src/daemon/server.ts` | Integration test: each route (`POST /v1/tool/invoke`, `POST /v1/event/session-end`, `/agent-end`, `/before-compaction`, `GET /v1/spawns/wait`, `POST /v1/spawns/{id}/result`) returns correct response envelope over `daemon.sock`. |
+| Unix-socket IPC routes (D-05) | `src/daemon/server.ts` | Integration test: each route (`POST /v1/tool/invoke`, `POST /v1/event/session-end`, `POST /v1/event/agent-end`, `POST /v1/event/before-compaction`, `POST /v1/event/message-received`, `GET /v1/spawns/wait`, `POST /v1/spawns/{id}/result`) returns correct response envelope over `daemon.sock`. |
 | Single `invokeTool` envelope dispatches against shared registry (D-06) | `src/daemon/server.ts`, `src/tools/tool-registry.ts` | Parametric test over every tool in registry: plugin-side IPC call → daemon handler → same result as in-process reference. Zod error envelope verified. |
-| Selective event forwarding (D-07) | `src/openclaw/adapter.ts` | Unit test: `session_end`, `agent_end`, `before_compaction` hooks trigger IPC POSTs; `before_tool_call`, `after_tool_call`, `message_received`, `message_sent` do NOT. |
+| Selective event forwarding (D-07) | `src/openclaw/adapter.ts` | Unit test (A1 resolution applied — 4 forwarded hooks): `session_end`, `agent_end`, `before_compaction`, `message_received` hooks trigger IPC POSTs (the latter because `handleMessageReceived` calls `protocolRouter.route()`, mutating daemon state); `before_tool_call`, `after_tool_call`, `message_sent` do NOT forward. |
 | Socket perm auth (D-08) | `src/daemon/server.ts` | Test asserts `daemon.sock` created with mode `0600`. |
 | Long-poll spawn callback (D-09) | `src/daemon/server.ts`, plugin `spawn-poller.ts` | Integration test: daemon enqueues `SpawnRequest`, plugin receives via `GET /v1/spawns/wait`, posts result via `POST /v1/spawns/{id}/result`. Keepalive timeout triggers clean reconnect. |
 | PluginBridgeAdapter + adapter selection (D-10) | `src/dispatch/plugin-bridge-adapter.ts`, `src/daemon/daemon.ts` | Unit test: selector returns `PluginBridgeAdapter` when plugin attached, `StandaloneAdapter` when none, both conform to `GatewayAdapter`. |
