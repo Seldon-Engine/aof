@@ -15,6 +15,11 @@ import { createLogger } from "../logging/index.js";
 import { toolRegistry } from "../tools/tool-registry.js";
 import { buildDaemonResolveStore } from "../ipc/store-resolver.js";
 import { attachIpcRoutes } from "../ipc/server-attach.js";
+import { getConfig } from "../config/registry.js";
+import { SpawnQueue } from "../ipc/spawn-queue.js";
+import { PluginRegistry } from "../ipc/plugin-registry.js";
+import { PluginBridgeAdapter } from "../dispatch/plugin-bridge-adapter.js";
+import { SelectingAdapter } from "../dispatch/selecting-adapter.js";
 
 const log = createLogger("daemon");
 
@@ -77,9 +82,27 @@ export async function startAofDaemon(opts: AOFDaemonOptions): Promise<AOFDaemonC
   }
 
   // --- Step 1: Create AOFService (constructor only, no start) ---
+  // Phase 43 D-10/D-12: wire SelectingAdapter between PluginBridgeAdapter
+  // (primary — long-poll backed) and StandaloneAdapter (fallback — HTTP to
+  // gateway). SelectingAdapter routes at dispatch time via PluginRegistry
+  // probe. Mode defaults to "standalone" so existing daemon-only installs
+  // remain regression-free; plugin-bridge installs opt in via config.
+  const daemonMode = getConfig().daemon.mode;
+  const spawnQueue = new SpawnQueue();
+  const pluginRegistry = new PluginRegistry();
+  const standaloneAdapter = new StandaloneAdapter({ gatewayUrl: opts.gatewayUrl, gatewayToken: opts.gatewayToken });
+  const pluginBridgeAdapter = new PluginBridgeAdapter(spawnQueue, pluginRegistry);
+
   const executor = opts.dryRun
     ? undefined
-    : new StandaloneAdapter({ gatewayUrl: opts.gatewayUrl, gatewayToken: opts.gatewayToken });
+    : new SelectingAdapter({
+        primary: pluginBridgeAdapter,
+        fallback: standaloneAdapter,
+        registry: pluginRegistry,
+        mode: daemonMode,
+      });
+
+  log.info({ daemonMode, dryRun: opts.dryRun ?? false }, "daemon adapter configuration");
 
   const service = new AOFService(
     {
@@ -148,6 +171,9 @@ export async function startAofDaemon(opts: AOFDaemonOptions): Promise<AOFDaemonC
       logger,
       service,
       log,
+      spawnQueue,
+      pluginRegistry,
+      deliverSpawnResult: (id, result) => pluginBridgeAdapter.deliverResult(id, result),
     });
   }
 
