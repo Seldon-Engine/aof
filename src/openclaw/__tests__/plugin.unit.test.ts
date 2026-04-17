@@ -4,6 +4,8 @@ import { homedir } from "node:os";
 import plugin from "../../plugin.js";
 import * as adapter from "../adapter.js";
 import type { OpenClawApi } from "../types.js";
+import { resetDaemonIpcClient } from "../daemon-ipc-client.js";
+import { stopSpawnPoller } from "../spawn-poller.js";
 
 vi.mock("../../logging/index.js", () => ({
   createLogger: () => ({ trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn(), child: vi.fn() }),
@@ -57,6 +59,11 @@ const DEFAULT_DATA_DIR = join(homedir(), ".aof", "data");
 
 afterEach(() => {
   vi.restoreAllMocks();
+  // Tear down module-level singletons (spawn-poller gate + DaemonIpcClient
+  // cache) so subsequent tests don't inherit a poller that's still spinning
+  // against a mocked api.
+  stopSpawnPoller();
+  resetDaemonIpcClient();
 });
 
 describe("AOF OpenClaw plugin entrypoint", () => {
@@ -81,9 +88,12 @@ describe("AOF OpenClaw plugin entrypoint", () => {
       dryRun: false,
     });
 
-    expect(registry.serviceIds).toEqual(["aof-scheduler"]);
+    // Phase 43 D-02: the plugin no longer registers an AOFService — the
+    // scheduler/store/etc. live daemon-side.
+    expect(registry.serviceIds).toEqual([]);
     expect(registry.toolNames).toEqual([
-      // From shared toolRegistry loop
+      // All 16 tools now come from the shared toolRegistry (post-43-07 Task 1
+      // moved the 3 project tools into the shared registry too).
       "aof_dispatch",
       "aof_task_update",
       "aof_task_complete",
@@ -97,7 +107,6 @@ describe("AOF OpenClaw plugin entrypoint", () => {
       "aof_context_load",
       "aof_task_subscribe",
       "aof_task_unsubscribe",
-      // Adapter-specific tools
       "aof_project_create",
       "aof_project_list",
       "aof_project_add_participant",

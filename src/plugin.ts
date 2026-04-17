@@ -58,7 +58,10 @@ const plugin = {
     const dryRun = normalizeBoolean(config.dryRun, DEFAULT_DRY_RUN);
 
     try {
-      registerAofPlugin(api, {
+      // Thin-bridge registration (Phase 43, D-02) — returns
+      // { mode, daemonSocketPath } rather than the legacy AOFService instance.
+      // The daemon owns the scheduler now; there is no service to start here.
+      const status = registerAofPlugin(api, {
         dataDir,
         pollIntervalMs,
         defaultLeaseTtlMs,
@@ -67,7 +70,9 @@ const plugin = {
 
       registerMemoryModule(api);
 
-      api.logger?.info?.(`[AOF] Plugin loaded — dataDir=${dataDir}, dryRun=${dryRun}, poll=${pollIntervalMs}ms`);
+      api.logger?.info?.(
+        `[AOF] Plugin loaded (${status.mode}) — dataDir=${dataDir}, dryRun=${dryRun}, socket=${status.daemonSocketPath}`,
+      );
     } catch (err) {
       const message = `[AOF] Plugin registration failed: ${String(err)}`;
       api.logger?.error?.(message);

@@ -25,10 +25,17 @@
  * `src/openclaw/adapter.ts`.
  */
 
-import { describe, it, expect, vi } from "vitest";
-import { DaemonIpcClient } from "../daemon-ipc-client.js"; // INTENTIONALLY MISSING — Wave 3 creates this.
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { DaemonIpcClient, resetDaemonIpcClient } from "../daemon-ipc-client.js"; // INTENTIONALLY MISSING (pre-Wave 3).
+import { stopSpawnPoller } from "../spawn-poller.js";
 
 describe("OpenClaw plugin event forwarding (D-07, A1-amended)", () => {
+  afterEach(() => {
+    // Tear down module-level singletons so the spawn-poller doesn't leak into
+    // subsequent tests (would otherwise spin a mock client in the background).
+    stopSpawnPoller();
+    resetDaemonIpcClient();
+  });
   it("D-07: exports `DaemonIpcClient` and selective-forward mechanism", () => {
     // Merely referencing the import triggers module resolution — RED until
     // Wave 3 lands the client.
@@ -43,9 +50,9 @@ describe("OpenClaw plugin event forwarding (D-07, A1-amended)", () => {
       postMessageReceived: vi.fn(async () => undefined),
     };
     const events: Record<string, (event: unknown, ctx?: unknown) => void> = {};
-    const forwardEvents = await loadEventForwardingWiring({ client, events });
+    await loadEventForwardingWiring({ client, events });
 
-    forwardEvents["session_end"]?.({ sessionId: "s1" }, { sessionId: "s1", agentId: "a1" });
+    forwardEvents_invoke(events, "session_end", { sessionId: "s1" }, { sessionId: "s1", agentId: "a1" });
 
     expect(client.postSessionEnd).toHaveBeenCalledTimes(1);
     expect(client.postAgentEnd).not.toHaveBeenCalled();
@@ -61,9 +68,9 @@ describe("OpenClaw plugin event forwarding (D-07, A1-amended)", () => {
       postMessageReceived: vi.fn(async () => undefined),
     };
     const events: Record<string, (event: unknown, ctx?: unknown) => void> = {};
-    const forwardEvents = await loadEventForwardingWiring({ client, events });
+    await loadEventForwardingWiring({ client, events });
 
-    forwardEvents["agent_end"]?.({ agent: "swe-backend" });
+    forwardEvents_invoke(events, "agent_end", { agent: "swe-backend" });
 
     expect(client.postAgentEnd).toHaveBeenCalledTimes(1);
     expect(client.postSessionEnd).not.toHaveBeenCalled();
@@ -246,9 +253,20 @@ async function loadEventForwardingWiring(
 
   // Wave 3 signature (provisional): registerAofPlugin accepts an optional
   // `daemonIpcClient` + optional `invocationContextStore` to receive mocks.
+  // Augment the client with a never-resolving `waitForSpawn` + no-op extras so
+  // the spawn-poller loop parks on await without spamming logs (afterEach's
+  // `stopSpawnPoller()` flips the module gate so the parked loop exits).
+  const fullClient = {
+    ...args.client,
+    waitForSpawn: () => new Promise(() => {}),
+    postSpawnResult: async () => undefined,
+    selfCheck: async () => true,
+    socketPath: "/tmp/fake.sock",
+  };
+
   (registerAofPlugin as unknown as (api: unknown, opts: unknown) => unknown)(api, {
     dataDir: "/tmp/aof",
-    daemonIpcClient: args.client,
+    daemonIpcClient: fullClient,
     invocationContextStore: opts.captureClearCalls
       ? {
           captureMessageRoute: () => (captureCalls.captureMessageRoute = (captureCalls.captureMessageRoute ?? 0) + 1),

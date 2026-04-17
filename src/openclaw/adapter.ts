@@ -1,393 +1,145 @@
-import { join } from "node:path";
+/**
+ * OpenClaw plugin — thin IPC bridge to the AOF daemon (Phase 43).
+ *
+ * Post-43, the daemon owns scheduler/store/logger/metrics/permissions (D-02).
+ * The plugin only: (1) keeps a DaemonIpcClient singleton alive, (2) forwards
+ * 4/7 lifecycle hooks via IPC (D-07+A1), (3) proxies tools via /v1/tool/invoke
+ * (D-06), (4) starts the long-poll spawn-poller once (D-09), (5) proxies
+ * /aof/status + /aof/metrics to the daemon's /status (Open Q4).
+ */
+
+import { randomUUID } from "node:crypto";
 import { createLogger } from "../logging/index.js";
-import { FilesystemTaskStore } from "../store/task-store.js";
+import { daemonSocketPath } from "../config/paths.js";
+import { toolRegistry } from "../tools/tool-registry.js";
+import { zodToJsonSchema } from "zod-to-json-schema";
+import { DaemonIpcClient, ensureDaemonIpcClient } from "./daemon-ipc-client.js";
+import { startSpawnPollerOnce } from "./spawn-poller.js";
+import { OpenClawToolInvocationContextStore } from "./tool-invocation-context.js";
+import { buildStatusProxyHandler } from "./status-proxy.js";
+import { mergeDispatchNotificationRecipient } from "./dispatch-notification.js";
+import type { OpenClawApi } from "./types.js";
 
 const log = createLogger("openclaw");
-import type { ITaskStore } from "../store/interfaces.js";
-import { EventLogger } from "../events/logger.js";
-import { AOFMetrics } from "../metrics/exporter.js";
-import { AOFService } from "../service/aof-service.js";
-import { NotificationPolicyEngine, DEFAULT_RULES } from "../events/notification-policy/index.js";
-import { ConsoleNotifier } from "../adapters/console-notifier.js";
-import { MatrixNotifier } from "./matrix-notifier.js";
-import { OpenClawAdapter } from "./openclaw-executor.js";
-import { OpenClawToolInvocationContextStore } from "./tool-invocation-context.js";
-import {
-  OpenClawChatDeliveryNotifier,
-  OPENCLAW_CHAT_DELIVERY_KIND,
-} from "./openclaw-chat-delivery.js";
-import { MockAdapter } from "../dispatch/executor.js";
-import type { GatewayAdapter } from "../dispatch/executor.js";
-import { loadOrgChart } from "../org/loader.js";
-import { PermissionAwareTaskStore } from "../permissions/task-permissions.js";
-import type { OrgChart } from "../schemas/org-chart.js";
-import type { OpenClawApi } from "./types.js";
-import { createMetricsHandler, createStatusHandler } from "../gateway/handlers.js";
-import { toolRegistry } from "../tools/tool-registry.js";
-import { withPermissions } from "./permissions.js";
-import { createProjectStore } from "../projects/store-factory.js";
-import { zodToJsonSchema } from "zod-to-json-schema";
 
 export interface AOFPluginOptions {
   dataDir: string;
   pollIntervalMs?: number;
   defaultLeaseTtlMs?: number;
-  dryRun?: boolean;
   maxConcurrentDispatches?: number;
-  store?: ITaskStore;
-  logger?: EventLogger;
-  metrics?: AOFMetrics;
-  service?: AOFService;
-  messageTool?: {
-    send(target: string, message: string): Promise<void>;
-  };
-  orgChartPath?: string;
-  /** Map of project ID -> task store for multi-project resolution */
-  projectStores?: Map<string, ITaskStore>;
+  dryRun?: boolean;
+  /** Test-only IPC client injection. */
+  daemonIpcClient?: DaemonIpcClient;
+  /** Test-only invocation-context-store injection. */
+  invocationContextStore?: OpenClawToolInvocationContextStore;
 }
 
-const SERVICE_NAME = "aof-scheduler";
-
-// Module-level singleton: the scheduler must run exactly once inside the gateway
-// process. AOF is loaded as a per-session memory plugin, so register() is called
-// on every agent session start — but startPluginServices (which calls service.start())
-// only runs once at gateway boot, before the memory plugin loads. Self-start on
-// first registration to ensure the scheduler actually runs.
-let schedulerService: AOFService | null = null;
-
-/**
- * Resolve the appropriate GatewayAdapter based on configuration.
- */
-function resolveAdapter(api: OpenClawApi, store: ITaskStore): GatewayAdapter {
-  const config = api.config as Record<string, unknown> | undefined;
-  const adapterType = (config?.executor as Record<string, unknown>)?.adapter;
-
-  if (adapterType === "mock") {
-    return new MockAdapter();
-  }
-
-  return new OpenClawAdapter(api, store);
+// callbackDepth source of truth is the IPC envelope (D-06). Env fallback only
+// for subscriber re-dispatch paths where callback-delivery.ts mutates
+// AOF_CALLBACK_DEPTH in-process (CLAUDE.md §Fragile documented exception).
+function parseCallbackDepth(params: { callbackDepth?: number }): number {
+  if (typeof params.callbackDepth === "number") return params.callbackDepth;
+  return parseInt(process.env.AOF_CALLBACK_DEPTH ?? "0", 10);
 }
 
-export function registerAofPlugin(api: OpenClawApi, opts: AOFPluginOptions): AOFService {
-  const vaultRoot = opts.dataDir;
-  const projectStores = opts.projectStores ?? new Map<string, ITaskStore>();
-  const store = opts.store ?? projectStores.get("_inbox") ?? new FilesystemTaskStore(join(vaultRoot, "Projects", "_inbox"), {
-    projectId: "_inbox",
-  });
-  const logger = opts.logger ?? new EventLogger(join(opts.dataDir, "events"));
-  const metrics = opts.metrics ?? new AOFMetrics();
-  const invocationContextStore = new OpenClawToolInvocationContextStore();
+export function registerAofPlugin(
+  api: OpenClawApi,
+  opts: AOFPluginOptions,
+): { mode: "thin-bridge"; daemonSocketPath: string } {
+  const socketPath = daemonSocketPath(opts.dataDir);
+  const client = opts.daemonIpcClient ?? ensureDaemonIpcClient({ socketPath });
+  const invocationContextStore =
+    opts.invocationContextStore ?? new OpenClawToolInvocationContextStore();
 
-  if (!opts.store && !projectStores.has("_inbox")) {
-    projectStores.set("_inbox", store);
-  }
-
-  const initializedStores = new WeakSet<ITaskStore>();
-  const ensureStoreInitialized = async (candidate: ITaskStore): Promise<ITaskStore> => {
-    if (initializedStores.has(candidate)) {
-      return candidate;
-    }
-
-    if ("init" in candidate && typeof candidate.init === "function") {
-      await candidate.init();
-    }
-
-    initializedStores.add(candidate);
-    return candidate;
-  };
-
-  // Load org chart for permission enforcement
-  let orgChartPromise: Promise<OrgChart | undefined> | undefined;
-  if (opts.orgChartPath) {
-    orgChartPromise = loadOrgChart(opts.orgChartPath)
-      .then(result => {
-        if (result.success && result.chart) return result.chart;
-        log.warn({ errors: result.errors }, "failed to load org chart for permission enforcement");
-        return undefined;
+  if (typeof client.selfCheck === "function") {
+    void client
+      .selfCheck()
+      .then((ok) => {
+        if (!ok) log.warn({ socketPath }, "daemon unreachable on register — will retry on first invoke");
       })
-      .catch(err => {
-        log.warn({ err }, "failed to load org chart");
-        return undefined;
-      });
+      .catch((err) => log.warn({ err, socketPath }, "selfCheck threw during register"));
   }
 
-  /**
-   * Resolve the correct project-scoped store for a given project ID.
-   */
-  const resolveProjectStore = async (projectId?: string): Promise<ITaskStore> => {
-    if (!projectId) {
-      return ensureStoreInitialized(store);
-    }
+  // OpenClaw fires hooks as (event, ctx); session identifiers live on ctx.
+  const withCtx = (e: unknown, c: unknown): unknown =>
+    e && typeof e === "object" && c && typeof c === "object"
+      ? { ...(e as Record<string, unknown>), ...(c as Record<string, unknown>) }
+      : e;
 
-    const cached = projectStores.get(projectId);
-    if (cached) {
-      return ensureStoreInitialized(cached);
-    }
-
-    const resolution = await createProjectStore({
-      projectId,
-      vaultRoot,
-      logger,
-    });
-    projectStores.set(projectId, resolution.store);
-
-    return ensureStoreInitialized(resolution.store);
-  };
-
-  /**
-   * Get a permission-aware store for the given actor.
-   */
-  const getStoreForActor = async (actor?: string, baseStore?: ITaskStore): Promise<ITaskStore> => {
-    const effectiveStore = baseStore ?? store;
-    if (!orgChartPromise || !actor || actor === "unknown") {
-      return effectiveStore;
-    }
-    const orgChart = await orgChartPromise;
-    if (!orgChart) return effectiveStore;
-    return new PermissionAwareTaskStore(effectiveStore, orgChart, actor);
-  };
-
-  // Build notification adapter
-  const notifAdapter = opts.messageTool
-    ? new MatrixNotifier(opts.messageTool)
-    : new ConsoleNotifier();
-  const engine = new NotificationPolicyEngine(notifAdapter, DEFAULT_RULES);
-
-  const resolveStoreForTask = async (taskId: string): Promise<ITaskStore | undefined> => {
-    const candidates = new Set<ITaskStore>([
-      store,
-      ...projectStores.values(),
-    ]);
-
-    for (const candidate of candidates) {
-      if (await candidate.get(taskId)) {
-        return candidate;
-      }
-    }
-
-    return undefined;
-  };
-
-  logger.addOnEvent((event) => engine.handleEvent(event));
-  if (opts.messageTool) {
-    const chatDelivery = new OpenClawChatDeliveryNotifier({
-      resolveStoreForTask,
-      messageTool: opts.messageTool,
-    });
-    logger.addOnEvent((event) => chatDelivery.handleEvent(event));
-  }
-
-  // Create executor for agent dispatch (only when explicitly not in dry-run mode)
-  const executor = opts.dryRun === false
-    ? resolveAdapter(api, store)
-    : undefined;
-
-  // Reuse the singleton if it exists (subsequent per-session loads), otherwise create.
-  const service = opts.service ?? schedulerService
-    ?? new AOFService(
-      { store, logger, metrics, engine, executor },
-      {
-        dataDir: opts.dataDir,
-        vaultRoot,
-        dryRun: opts.dryRun ?? false,
-        pollIntervalMs: opts.pollIntervalMs,
-        defaultLeaseTtlMs: opts.defaultLeaseTtlMs,
-        maxConcurrentDispatches: opts.maxConcurrentDispatches,
-      },
-    );
-
-  // Translate OpenClaw session capture into a core-agnostic completion
-  // notification delivery record. The core handler in aof_dispatch will
-  // create a subscription with this opaque payload; session idioms never
-  // leak into core.
-  //
-  // Precedence: an explicit object passed by the caller wins. `false`
-  // disables entirely. `true` / undefined triggers auto-capture; missing
-  // fields are filled from the captured session route.
-  const mergeDispatchNotificationRecipient = (params: Record<string, unknown>, toolCallId: string) => {
-    const raw = params.notifyOnCompletion;
-    if (raw === false) return params;
-
-    const captured = invocationContextStore.consumeToolCall(toolCallId);
-    const explicit = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : undefined;
-    const { kind: explicitKindRaw, ...explicitRest } = explicit ?? {};
-    const explicitKind = typeof explicitKindRaw === "string" && explicitKindRaw.trim().length > 0
-      ? explicitKindRaw.trim()
-      : undefined;
-
-    if (!explicit && !captured) return params;
-
-    const delivery: Record<string, unknown> = {
-      ...(captured ? {
-        target: captured.replyTarget,
-        sessionKey: captured.sessionKey,
-        sessionId: captured.sessionId,
-        channel: captured.channel,
-        threadId: captured.threadId,
-      } : {}),
-      ...explicitRest,
-      kind: explicitKind ?? OPENCLAW_CHAT_DELIVERY_KIND,
-    };
-
-    // Strip undefineds so schema validation doesn't choke on passthrough.
-    for (const key of Object.keys(delivery)) {
-      if (delivery[key] === undefined) delete delivery[key];
-    }
-
-    return { ...params, notifyOnCompletion: delivery };
-  };
-
-  // --- Service ---
-  api.registerService({
-    id: SERVICE_NAME,
-    start: () => service.start(),
-    stop: () => service.stop(),
-    status: () => service.getStatus(),
-  });
-
-  // Self-start: gateway's startPluginServices runs at boot before this memory
-  // plugin loads, so service.start() is never called via the service lifecycle.
-  // Start on first registration; subsequent per-session loads are no-ops
-  // (AOFService.start guards with `if (this.running) return`).
-  if (!schedulerService) {
-    schedulerService = service;
-    service.start().catch((err) => {
-      log.error({ err }, "AOF scheduler failed to self-start");
-      schedulerService = null;
-    });
-  }
-
-  // --- Event hooks ---
-  // OpenClaw fires lifecycle hooks as (event, ctx). Session identifiers
-  // (sessionKey, sessionId, agentId) live on ctx, not on event. Merging so
-  // downstream extractors can find the session route.
-  const withCtx = (event: unknown, ctx: unknown): unknown =>
-    event && typeof event === "object" && ctx && typeof ctx === "object"
-      ? { ...(event as Record<string, unknown>), ...(ctx as Record<string, unknown>) }
-      : event;
-
+  // FORWARDED (4/7) — mutate daemon-owned state.
   api.on("session_end", (event, ctx) => {
-    invocationContextStore.clearSessionRoute(withCtx(event, ctx));
-    void service.handleSessionEnd();
+    const m = withCtx(event, ctx);
+    invocationContextStore.clearSessionRoute(m);
+    void client.postSessionEnd(m).catch((err) => log.error({ err }, "postSessionEnd failed"));
+  });
+  api.on("agent_end", (event, ctx) => {
+    void client.postAgentEnd(withCtx(event, ctx)).catch((err) => log.error({ err }, "postAgentEnd failed"));
   });
   api.on("before_compaction", () => {
     invocationContextStore.clearAll();
-    void service.handleSessionEnd();
-  });
-  api.on("agent_end", (event, ctx) => {
-    void service.handleAgentEnd(withCtx(event, ctx));
+    void client.postBeforeCompaction().catch((err) => log.error({ err }, "postBeforeCompaction failed"));
   });
   api.on("message_received", (event, ctx) => {
-    const merged = withCtx(event, ctx);
-    invocationContextStore.captureMessageRoute(merged);
-    void service.handleMessageReceived(merged);
-  });
-  api.on("message_sent", (event, ctx) => {
-    invocationContextStore.captureMessageRoute(withCtx(event, ctx));
-  });
-  api.on("before_tool_call", (event, ctx) => {
-    invocationContextStore.captureToolCall(withCtx(event, ctx));
-  });
-  api.on("after_tool_call", (event, ctx) => {
-    invocationContextStore.clearToolCall(withCtx(event, ctx));
+    const m = withCtx(event, ctx);
+    invocationContextStore.captureMessageRoute(m);
+    void client.postMessageReceived(m).catch((err) => log.error({ err }, "postMessageReceived failed"));
   });
 
-  // --- Tools: shared registry loop (eliminates copy-pasted execute blocks) ---
+  // LOCAL-ONLY (3/7).
+  api.on("message_sent", (event, ctx) =>
+    invocationContextStore.captureMessageRoute(withCtx(event, ctx)),
+  );
+  api.on("before_tool_call", (event, ctx) =>
+    invocationContextStore.captureToolCall(withCtx(event, ctx)),
+  );
+  api.on("after_tool_call", (event, ctx) =>
+    invocationContextStore.clearToolCall(withCtx(event, ctx)),
+  );
+
+  // Tool-registry loop → IPC proxy.
   for (const [name, def] of Object.entries(toolRegistry)) {
-    const execute = withPermissions(def.handler, resolveProjectStore, getStoreForActor, logger, opts.orgChartPath);
     api.registerTool({
       name,
       description: def.description,
-      parameters: zodToJsonSchema(def.schema) as { type: string; properties?: Record<string, unknown>; required?: string[] },
+      parameters: zodToJsonSchema(def.schema) as {
+        type: string;
+        properties?: Record<string, unknown>;
+        required?: string[];
+      },
       execute: async (id, params) => {
-        const effectiveParams = name === "aof_dispatch"
-          ? mergeDispatchNotificationRecipient(params, id)
-          : params;
-        return execute(id, effectiveParams);
+        const p =
+          name === "aof_dispatch"
+            ? mergeDispatchNotificationRecipient(params, id, invocationContextStore)
+            : params;
+        const response = await client.invokeTool({
+          pluginId: "openclaw",
+          name,
+          params: p,
+          actor: p.actor as string | undefined,
+          projectId: (p.project ?? p.projectId) as string | undefined,
+          correlationId: randomUUID(),
+          toolCallId: id,
+          callbackDepth: parseCallbackDepth(p),
+        });
+        if ("error" in response) {
+          throw new Error(`${response.error.kind}: ${response.error.message}`);
+        }
+        const body =
+          typeof response.result === "string"
+            ? response.result
+            : JSON.stringify(response.result, null, 2);
+        return { content: [{ type: "text" as const, text: body }] };
       },
     });
   }
 
-  // --- Adapter-specific tools (not in shared registry) ---
-
-  api.registerTool({
-    name: "aof_project_create",
-    description: "Create a new project with standard directory structure and manifest.",
-    parameters: {
-      type: "object",
-      properties: {
-        id: { type: "string", description: "Project ID (lowercase, hyphens, underscores)" },
-        title: { type: "string", description: "Human-readable project title" },
-        type: { type: "string", enum: ["swe", "ops", "research", "admin", "personal", "other"], description: "Project type" },
-        participants: { type: "array", items: { type: "string" }, description: "Initial participant agent IDs" },
-      },
-      required: ["id"],
-    },
-    execute: async (_id: string, params: Record<string, unknown>) => {
-      const { createProject } = await import("../projects/create.js");
-      const result = await createProject(params.id as string, {
-        vaultRoot: opts.dataDir,
-        title: params.title as string | undefined,
-        type: params.type as "swe" | "ops" | "research" | "admin" | "personal" | "other" | undefined,
-        participants: params.participants as string[] | undefined,
-        template: true,
-      });
-      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
-    },
-  });
-
-  api.registerTool({
-    name: "aof_project_list",
-    description: "List all projects on this AOF instance.",
-    parameters: { type: "object", properties: {}, required: [] },
-    execute: async (_id: string, _params: Record<string, unknown>) => {
-      const { discoverProjects } = await import("../projects/index.js");
-      const projects = await discoverProjects(opts.dataDir);
-      return { content: [{ type: "text" as const, text: JSON.stringify({ projects: projects.map(p => ({ id: p.id, path: p.path, error: p.error })) }, null, 2) }] };
-    },
-  });
-
-  api.registerTool({
-    name: "aof_project_add_participant",
-    description: "Add an agent to a project's participant list.",
-    parameters: {
-      type: "object",
-      properties: {
-        project: { type: "string", description: "Project ID" },
-        agent: { type: "string", description: "Agent ID to add as participant" },
-      },
-      required: ["project", "agent"],
-    },
-    execute: async (_id: string, params: Record<string, unknown>) => {
-      const { resolveProject } = await import("../projects/index.js");
-      const { readFile } = await import("node:fs/promises");
-      const { join } = await import("node:path");
-      const { parse } = await import("yaml");
-      const { writeProjectManifest } = await import("../projects/manifest.js");
-
-      const resolution = await resolveProject(params.project as string, opts.dataDir);
-      const manifestPath = join(resolution.projectRoot, "project.yaml");
-      const content = await readFile(manifestPath, "utf-8");
-      const manifest = parse(content);
-
-      if (!manifest.participants) manifest.participants = [];
-      if (manifest.participants.includes(params.agent)) {
-        return { content: [{ type: "text" as const, text: JSON.stringify({ success: true, message: "Agent already a participant", participants: manifest.participants }, null, 2) }] };
-      }
-
-      manifest.participants.push(params.agent as string);
-      await writeProjectManifest(resolution.projectRoot, manifest);
-
-      return { content: [{ type: "text" as const, text: JSON.stringify({ success: true, participants: manifest.participants }, null, 2) }] };
-    },
-  });
-
-  // --- HTTP routes ---
+  // /aof/status + /aof/metrics → IPC proxies to daemon /status (Open Q4).
   if (typeof api.registerHttpRoute === "function") {
-    api.registerHttpRoute({ path: "/aof/metrics", handler: createMetricsHandler({ store, metrics, service }) });
-    api.registerHttpRoute({ path: "/aof/status", handler: createStatusHandler(service) });
+    const proxy = buildStatusProxyHandler(socketPath);
+    api.registerHttpRoute({ path: "/aof/metrics", handler: proxy });
+    api.registerHttpRoute({ path: "/aof/status", handler: proxy });
   }
 
-  return service;
+  startSpawnPollerOnce(client, api);
+  return { mode: "thin-bridge", daemonSocketPath: socketPath };
 }

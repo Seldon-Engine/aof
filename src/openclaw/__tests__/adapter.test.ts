@@ -1,54 +1,95 @@
-import { mkdtemp, readFile, writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { describe, it, expect, vi } from "vitest";
+/**
+ * OpenClaw plugin adapter tests — post-Phase-43 thin-bridge shape.
+ *
+ * The plugin is now a thin IPC proxy to the AOF daemon (D-02). In-plugin
+ * scheduler / store / subscription / permission behaviour has moved server-side
+ * and is covered by `src/daemon/__tests__/ipc-integration.test.ts` and the
+ * tool handlers' own test files. These tests assert the plugin contract only:
+ *   - tool-registry loop registers all shared tools with IPC-proxy execute
+ *   - aof_dispatch passes captured session routes through
+ *     mergeDispatchNotificationRecipient before invokeTool
+ *   - event hooks attach for all 7 OpenClaw lifecycle signals
+ *   - HTTP routes /aof/status + /aof/metrics are wired
+ *   - registerAofPlugin does NOT call api.registerService (D-02 invariant)
+ */
+
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { registerAofPlugin } from "../adapter.js";
 import type { OpenClawApi } from "../types.js";
-import { FilesystemTaskStore } from "../../store/task-store.js";
-import { EventLogger } from "../../events/logger.js";
-import { stringify as stringifyYaml } from "yaml";
+import type { DaemonIpcClient } from "../daemon-ipc-client.js";
+import { resetDaemonIpcClient } from "../daemon-ipc-client.js";
+import { stopSpawnPoller } from "../spawn-poller.js";
+import type { InvokeToolResponse } from "../../ipc/schemas.js";
 
 vi.mock("../../logging/index.js", () => ({
-  createLogger: () => ({ trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn(), child: vi.fn() }),
+  createLogger: () => ({
+    trace: vi.fn(),
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    fatal: vi.fn(),
+    child: vi.fn(),
+  }),
 }));
 
-describe("OpenClaw adapter", () => {
-  it("registers services, tools, http routes, and events", () => {
+function makeMockClient(): DaemonIpcClient {
+  return {
+    invokeTool: vi.fn(
+      async (_env: unknown): Promise<InvokeToolResponse> => ({
+        result: { ok: true },
+      }),
+    ),
+    // Never resolves — parks the spawn-poller's long-poll loop on await until
+    // `stopSpawnPoller()` flips the module gate in afterEach so the loop can
+    // exit cleanly without throwing and spamming logs.
+    waitForSpawn: vi.fn(() => new Promise<undefined>(() => {})),
+    postSpawnResult: vi.fn(async () => undefined),
+    postSessionEnd: vi.fn(async () => undefined),
+    postAgentEnd: vi.fn(async () => undefined),
+    postBeforeCompaction: vi.fn(async () => undefined),
+    postMessageReceived: vi.fn(async () => undefined),
+    selfCheck: vi.fn(async () => true),
+    socketPath: "/tmp/fake.sock",
+  } as unknown as DaemonIpcClient;
+}
+
+describe("OpenClaw adapter (thin-bridge, Phase 43)", () => {
+  afterEach(() => {
+    // Tear down the module-level spawn-poller + DaemonIpcClient singletons so
+    // the next test starts clean. Without this, the poller keeps spinning a
+    // mock client in the background after the test returns, accumulating
+    // microtasks across the suite (manifests as OOM / ERR_IPC_CHANNEL_CLOSED
+    // in the pool worker).
+    stopSpawnPoller();
+    resetDaemonIpcClient();
+  });
+
+  it("registers all shared-registry tools + HTTP routes + 7 event hooks; does NOT register a service", () => {
     const services: Array<{ id: string }> = [];
-    const tools: Array<{ name: string }> = [];
+    const tools: Array<{ name: string; execute: (id: string, params: Record<string, unknown>) => Promise<unknown> }> = [];
     const routes: Array<{ path: string }> = [];
     const events: Record<string, (...args: unknown[]) => void> = {};
 
     const api: OpenClawApi = {
       registerService: (def) => services.push({ id: def.id }),
-      registerTool: (def) => tools.push({ name: def.name }),
+      registerTool: (def) => tools.push(def as (typeof tools)[number]),
       registerHttpRoute: (def) => routes.push({ path: def.path }),
       on: (event, handler) => {
         events[event] = handler;
       },
     };
 
-    const service = {
-      start: vi.fn().mockResolvedValue(undefined),
-      stop: vi.fn(),
-      getStatus: vi.fn(() => ({ running: false })),
-      handleSessionEnd: vi.fn(),
-      handleAgentEnd: vi.fn(),
-      handleMessageReceived: vi.fn(),
-    };
-
-    registerAofPlugin(api, {
+    const result = registerAofPlugin(api, {
       dataDir: "/tmp/aof",
-      service,
+      daemonIpcClient: makeMockClient(),
     });
 
-    // Service
-    expect(services).toHaveLength(1);
-    expect(services[0]!.id).toBe("aof-scheduler");
+    // D-02 structural invariant: plugin no longer registers a scheduler service.
+    expect(services).toEqual([]);
 
-    // Tools: shared registry tools + adapter-specific tools
-    expect(tools.map(t => t.name)).toEqual([
-      // From shared toolRegistry loop
+    // All 16 tools from the shared registry (13 core + 3 project-management tools).
+    expect(tools.map((t) => t.name)).toEqual([
       "aof_dispatch",
       "aof_task_update",
       "aof_task_complete",
@@ -62,386 +103,190 @@ describe("OpenClaw adapter", () => {
       "aof_context_load",
       "aof_task_subscribe",
       "aof_task_unsubscribe",
-      // Adapter-specific tools
       "aof_project_create",
       "aof_project_list",
       "aof_project_add_participant",
     ]);
 
-    // HTTP routes
-    expect(routes.map(r => r.path)).toEqual([
-      "/aof/metrics",
-      "/aof/status",
-    ]);
+    // HTTP routes preserved as IPC proxies (Open Q4).
+    expect(routes.map((r) => r.path)).toEqual(["/aof/metrics", "/aof/status"]);
 
-    // Event hooks
-    expect(events["session_end"]).toBeDefined();
-    expect(events["before_compaction"]).toBeDefined();
-    expect(events["agent_end"]).toBeDefined();
-    expect(events["message_received"]).toBeDefined();
-    expect(events["message_sent"]).toBeDefined();
-    expect(events["before_tool_call"]).toBeDefined();
-    expect(events["after_tool_call"]).toBeDefined();
+    // All 7 hooks wired (D-07 + A1).
+    for (const name of [
+      "session_end",
+      "before_compaction",
+      "agent_end",
+      "message_received",
+      "message_sent",
+      "before_tool_call",
+      "after_tool_call",
+    ]) {
+      expect(events[name]).toBeDefined();
+    }
 
-    events["session_end"]?.();
-    events["agent_end"]?.({ agent: "swe-backend" });
-    events["message_received"]?.({ from: "swe-backend" });
-
-    expect(service.handleSessionEnd).toHaveBeenCalled();
-    expect(service.handleAgentEnd).toHaveBeenCalled();
-    expect(service.handleMessageReceived).toHaveBeenCalled();
+    expect(result.mode).toBe("thin-bridge");
+    expect(result.daemonSocketPath).toMatch(/daemon\.sock$/);
   });
 
-  it("creates an openclaw-chat subscription from auto-captured session on aof_dispatch", async () => {
-    const tools: Array<{ name: string; execute: (id: string, params: Record<string, unknown>) => Promise<any> }> = [];
-    const events: Record<string, (...args: unknown[]) => void> = {};
-    const tmpDir = await mkdtemp(join(tmpdir(), "aof-openclaw-adapter-"));
-    const store = new FilesystemTaskStore(tmpDir);
-    const logger = new EventLogger(join(tmpDir, "events"));
-    await store.init();
-
+  it("tool execute proxies through client.invokeTool with the D-06 envelope", async () => {
+    const tools: Array<{ name: string; execute: (id: string, params: Record<string, unknown>) => Promise<unknown> }> = [];
     const api: OpenClawApi = {
       registerService: vi.fn(),
-      registerTool: (def) => tools.push(def as any),
-      registerHttpRoute: vi.fn(),
-      on: (event, handler) => {
-        events[event] = handler;
-      },
-    };
-
-    registerAofPlugin(api, {
-      dataDir: tmpDir,
-      store,
-      logger,
-      messageTool: {
-        send: vi.fn(async () => undefined),
-      },
-    });
-
-    events["message_received"]?.({
-      sessionKey: "agent:main:telegram:group:42",
-      target: "telegram:-10042",
-      channel: "telegram",
-    });
-    events["before_tool_call"]?.({
-      name: "aof_dispatch",
-      id: "tool-call-1",
-      sessionKey: "agent:main:telegram:group:42",
-    });
-
-    const dispatchTool = tools.find((tool) => tool.name === "aof_dispatch");
-    expect(dispatchTool).toBeDefined();
-
-    const result = await dispatchTool!.execute("tool-call-1", {
-      title: "Test task",
-      brief: "Persist recipient as subscription",
-      actor: "main",
-    });
-    const payload = JSON.parse(result.content[0].text);
-    expect(payload.notificationSubscriptionId).toBeDefined();
-
-    const task = await store.get(payload.taskId);
-    expect(task).toBeDefined();
-    // Delivery never leaks into task frontmatter metadata.
-    expect(task?.frontmatter.metadata.notificationRecipient).toBeUndefined();
-
-    // Subscription is co-located with the task.
-    const subsPath = join(tmpDir, "tasks", task!.frontmatter.status, task!.frontmatter.id, "subscriptions.json");
-    const subsFile = JSON.parse(await readFile(subsPath, "utf-8"));
-    expect(subsFile.subscriptions).toHaveLength(1);
-    expect(subsFile.subscriptions[0]).toMatchObject({
-      granularity: "completion",
-      delivery: {
-        kind: "openclaw-chat",
-        sessionKey: "agent:main:telegram:group:42",
-        target: "telegram:-10042",
-        channel: "telegram",
-      },
-    });
-  });
-
-  it("routes project-scoped dispatches into the requested project store", async () => {
-    const tools: Array<{ name: string; execute: (id: string, params: Record<string, unknown>) => Promise<any> }> = [];
-    const tmpDir = await mkdtemp(join(tmpdir(), "aof-openclaw-project-scope-"));
-    const logger = new EventLogger(join(tmpDir, "events"));
-    const projectId = "research-portal-platform";
-    const projectRoot = join(tmpDir, "Projects", projectId);
-
-    await mkdir(projectRoot, { recursive: true });
-    await writeFile(join(projectRoot, "project.yaml"), stringifyYaml({
-      id: projectId,
-      title: "Research Portal Platform",
-      status: "active",
-      type: "research",
-      owner: { team: "research", lead: "lead" },
-      participants: [],
-      routing: {},
-      memory: {},
-      links: {},
-    }), "utf-8");
-
-    const api: OpenClawApi = {
-      registerService: vi.fn(),
-      registerTool: (def) => tools.push(def as any),
+      registerTool: (def) => tools.push(def as (typeof tools)[number]),
       registerHttpRoute: vi.fn(),
       on: vi.fn(),
     };
 
-    const service = {
-      start: vi.fn().mockResolvedValue(undefined),
-      stop: vi.fn(),
-      getStatus: vi.fn(() => ({ running: false })),
-      handleSessionEnd: vi.fn(),
-      handleAgentEnd: vi.fn(),
-      handleMessageReceived: vi.fn(),
+    const client = makeMockClient();
+    registerAofPlugin(api, {
+      dataDir: "/tmp/aof",
+      daemonIpcClient: client,
+    });
+
+    const statusTool = tools.find((t) => t.name === "aof_status_report");
+    expect(statusTool).toBeDefined();
+    const result = (await statusTool!.execute("tc-42", { actor: "main" })) as {
+      content: Array<{ type: string; text: string }>;
     };
 
-    registerAofPlugin(api, {
-      dataDir: tmpDir,
-      logger,
-      service,
-    });
+    expect(client.invokeTool).toHaveBeenCalledTimes(1);
+    const envelope = (client.invokeTool as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]![0] as Record<string, unknown>;
+    expect(envelope.pluginId).toBe("openclaw");
+    expect(envelope.name).toBe("aof_status_report");
+    expect(envelope.toolCallId).toBe("tc-42");
+    expect(envelope.actor).toBe("main");
+    expect(typeof envelope.correlationId).toBe("string");
+    expect(envelope.callbackDepth).toBe(0);
 
-    const dispatchTool = tools.find((tool) => tool.name === "aof_dispatch");
-    const result = await dispatchTool!.execute("project-call-1", {
-      title: "Scoped task",
-      brief: "Should land under the requested project",
-      actor: "main",
-      project: projectId,
-    });
-    const payload = JSON.parse(result.content[0].text);
-
-    const projectStore = new FilesystemTaskStore(projectRoot, { projectId });
-    const inboxStore = new FilesystemTaskStore(join(tmpDir, "Projects", "_inbox"), { projectId: "_inbox" });
-    const task = await projectStore.get(payload.taskId);
-
-    expect(task?.frontmatter.project).toBe(projectId);
-    expect(task?.frontmatter.title).toBe("Scoped task");
-    expect(await inboxStore.get(payload.taskId)).toBeUndefined();
+    expect(result.content[0].type).toBe("text");
+    expect(JSON.parse(result.content[0].text)).toEqual({ ok: true });
   });
 
-  it("auto-captures sessionKey from hook ctx (real openclaw (event, ctx) signature)", async () => {
-    // Regression: openclaw fires hooks as (event, ctx); session identifiers live
-    // on ctx. Previously the adapter ignored ctx, so sessionKey was never captured
-    // and aof_dispatch created no subscription. See: task 008, 2026-04-14.
-    const tools: Array<{ name: string; execute: (id: string, params: Record<string, unknown>) => Promise<any> }> = [];
+  it("aof_dispatch runs mergeDispatchNotificationRecipient and forwards the resulting params", async () => {
+    const tools: Array<{ name: string; execute: (id: string, params: Record<string, unknown>) => Promise<unknown> }> = [];
     const events: Record<string, (...args: unknown[]) => void> = {};
-    const tmpDir = await mkdtemp(join(tmpdir(), "aof-openclaw-adapter-ctx-"));
-    const store = new FilesystemTaskStore(tmpDir);
-    const logger = new EventLogger(join(tmpDir, "events"));
-    await store.init();
-
     const api: OpenClawApi = {
       registerService: vi.fn(),
-      registerTool: (def) => tools.push(def as any),
+      registerTool: (def) => tools.push(def as (typeof tools)[number]),
       registerHttpRoute: vi.fn(),
       on: (event, handler) => {
         events[event] = handler;
       },
     };
 
+    const client = makeMockClient();
     registerAofPlugin(api, {
-      dataDir: tmpDir,
-      store,
-      logger,
-      messageTool: { send: vi.fn(async () => undefined) },
+      dataDir: "/tmp/aof",
+      daemonIpcClient: client,
     });
 
-    // Real openclaw call shape: event carries toolName/params/toolCallId,
-    // ctx carries sessionKey/sessionId/agentId.
+    // Prime the invocation-context store with a captured session + tool call.
     events["message_received"]?.(
-      { from: "user", content: "hi" },
-      {
-        sessionKey: "agent:main:telegram:group:42",
-        channelId: "telegram",
-      },
+      {},
+      { sessionKey: "agent:main:telegram:group:42", target: "telegram:-10042", channel: "telegram" },
     );
     events["before_tool_call"]?.(
-      { toolName: "aof_dispatch", params: {}, toolCallId: "ctx-call-1" },
-      {
-        toolName: "aof_dispatch",
-        sessionKey: "agent:main:telegram:group:42",
-        agentId: "main",
-      },
+      { toolName: "aof_dispatch", toolCallId: "tc-1" },
+      { sessionKey: "agent:main:telegram:group:42", agentId: "main" },
     );
 
-    const dispatchTool = tools.find((tool) => tool.name === "aof_dispatch");
-    const result = await dispatchTool!.execute("ctx-call-1", {
-      title: "Ctx task",
-      brief: "Verify notification subscription is created from ctx-captured session",
+    const dispatchTool = tools.find((t) => t.name === "aof_dispatch");
+    await dispatchTool!.execute("tc-1", {
+      title: "Test",
+      brief: "probe",
       actor: "main",
     });
-    const payload = JSON.parse(result.content[0].text);
-    expect(payload.notificationSubscriptionId).toBeDefined();
 
-    const task = await store.get(payload.taskId);
-    const subsPath = join(tmpDir, "tasks", task!.frontmatter.status, task!.frontmatter.id, "subscriptions.json");
-    const subsFile = JSON.parse(await readFile(subsPath, "utf-8"));
-    expect(subsFile.subscriptions).toHaveLength(1);
-    expect(subsFile.subscriptions[0].delivery).toMatchObject({
-      kind: "openclaw-chat",
-      sessionKey: "agent:main:telegram:group:42",
-    });
+    const envelope = (client.invokeTool as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]![0] as {
+      params: Record<string, unknown>;
+    };
+    const delivery = envelope.params.notifyOnCompletion as Record<string, unknown>;
+    expect(delivery).toBeDefined();
+    expect(delivery.kind).toBe("openclaw-chat");
+    expect(delivery.sessionKey).toBe("agent:main:telegram:group:42");
   });
 
-  it("respects an explicit notifyOnCompletion target over auto-capture (cron/CLI path)", async () => {
-    const tools: Array<{ name: string; execute: (id: string, params: Record<string, unknown>) => Promise<any> }> = [];
-    const tmpDir = await mkdtemp(join(tmpdir(), "aof-openclaw-adapter-explicit-"));
-    const store = new FilesystemTaskStore(tmpDir);
-    const logger = new EventLogger(join(tmpDir, "events"));
-    await store.init();
-
+  it("aof_dispatch respects notifyOnCompletion: false (no delivery object added)", async () => {
+    const tools: Array<{ name: string; execute: (id: string, params: Record<string, unknown>) => Promise<unknown> }> = [];
     const api: OpenClawApi = {
       registerService: vi.fn(),
-      registerTool: (def) => tools.push(def as any),
+      registerTool: (def) => tools.push(def as (typeof tools)[number]),
       registerHttpRoute: vi.fn(),
       on: vi.fn(),
     };
 
+    const client = makeMockClient();
     registerAofPlugin(api, {
-      dataDir: tmpDir,
-      store,
-      logger,
-      messageTool: { send: vi.fn(async () => undefined) },
+      dataDir: "/tmp/aof",
+      daemonIpcClient: client,
     });
 
-    const dispatchTool = tools.find((tool) => tool.name === "aof_dispatch");
-    const result = await dispatchTool!.execute("cron-call-1", {
-      title: "Cron task",
-      brief: "Explicit chat target — no session in scope",
-      actor: "cron",
-      notifyOnCompletion: {
-        kind: "openclaw-chat",
-        target: "telegram:-98765",
-      },
-    });
-    const payload = JSON.parse(result.content[0].text);
-    const task = await store.get(payload.taskId);
-    const subsPath = join(tmpDir, "tasks", task!.frontmatter.status, task!.frontmatter.id, "subscriptions.json");
-    const subsFile = JSON.parse(await readFile(subsPath, "utf-8"));
-
-    expect(subsFile.subscriptions[0].delivery).toMatchObject({
-      kind: "openclaw-chat",
-      target: "telegram:-98765",
-    });
-  });
-
-  it("sanitizes an explicit notifyOnCompletion kind before persisting delivery", async () => {
-    const tools: Array<{ name: string; execute: (id: string, params: Record<string, unknown>) => Promise<any> }> = [];
-    const tmpDir = await mkdtemp(join(tmpdir(), "aof-openclaw-adapter-invalid-kind-"));
-    const store = new FilesystemTaskStore(tmpDir);
-    const logger = new EventLogger(join(tmpDir, "events"));
-    await store.init();
-
-    const api: OpenClawApi = {
-      registerService: vi.fn(),
-      registerTool: (def) => tools.push(def as any),
-      registerHttpRoute: vi.fn(),
-      on: vi.fn(),
-    };
-
-    registerAofPlugin(api, {
-      dataDir: tmpDir,
-      store,
-      logger,
-      messageTool: { send: vi.fn(async () => undefined) },
-    });
-
-    const dispatchTool = tools.find((tool) => tool.name === "aof_dispatch");
-    const result = await dispatchTool!.execute("cron-call-invalid-kind", {
-      title: "Cron task with invalid kind",
-      brief: "Adapter should fall back to openclaw-chat",
-      actor: "cron",
-      notifyOnCompletion: {
-        kind: 42,
-        target: "telegram:-12345",
-      },
-    });
-    const payload = JSON.parse(result.content[0].text);
-    const task = await store.get(payload.taskId);
-    const subsPath = join(tmpDir, "tasks", task!.frontmatter.status, task!.frontmatter.id, "subscriptions.json");
-    const subsFile = JSON.parse(await readFile(subsPath, "utf-8"));
-
-    expect(subsFile.subscriptions[0].delivery).toMatchObject({
-      kind: "openclaw-chat",
-      target: "telegram:-12345",
-    });
-  });
-
-  it("honours notifyOnCompletion: false to disable chat-delivery subscription", async () => {
-    const tools: Array<{ name: string; execute: (id: string, params: Record<string, unknown>) => Promise<any> }> = [];
-    const events: Record<string, (...args: unknown[]) => void> = {};
-    const tmpDir = await mkdtemp(join(tmpdir(), "aof-openclaw-adapter-optout-"));
-    const store = new FilesystemTaskStore(tmpDir);
-    const logger = new EventLogger(join(tmpDir, "events"));
-    await store.init();
-
-    const api: OpenClawApi = {
-      registerService: vi.fn(),
-      registerTool: (def) => tools.push(def as any),
-      registerHttpRoute: vi.fn(),
-      on: (event, handler) => { events[event] = handler; },
-    };
-
-    registerAofPlugin(api, {
-      dataDir: tmpDir,
-      store,
-      logger,
-      messageTool: { send: vi.fn(async () => undefined) },
-    });
-
-    events["message_received"]?.({ sessionKey: "s", target: "t", channel: "c" });
-    events["before_tool_call"]?.({ name: "aof_dispatch", id: "tc-optout", sessionKey: "s" });
-
-    const dispatchTool = tools.find((tool) => tool.name === "aof_dispatch");
-    const result = await dispatchTool!.execute("tc-optout", {
-      title: "Opted-out task",
-      brief: "Should not produce any subscription",
+    const dispatchTool = tools.find((t) => t.name === "aof_dispatch");
+    await dispatchTool!.execute("tc-optout", {
+      title: "Opted-out",
+      brief: "no delivery",
       actor: "main",
       notifyOnCompletion: false,
     });
-    const payload = JSON.parse(result.content[0].text);
-    expect(payload.notificationSubscriptionId).toBeUndefined();
+
+    const envelope = (client.invokeTool as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]![0] as {
+      params: Record<string, unknown>;
+    };
+    expect(envelope.params.notifyOnCompletion).toBe(false);
   });
 
-  it("registers policy-engine and chat-delivery callbacks in plugin mode", async () => {
-    const tmpDir = await mkdtemp(join(tmpdir(), "aof-openclaw-callbacks-"));
-    const logger = new EventLogger(join(tmpDir, "events"));
-    const addOnEventSpy = vi.spyOn(logger, "addOnEvent");
-
+  it("invokeTool error envelope is surfaced as a thrown Error", async () => {
+    const tools: Array<{ name: string; execute: (id: string, params: Record<string, unknown>) => Promise<unknown> }> = [];
     const api: OpenClawApi = {
       registerService: vi.fn(),
-      registerTool: vi.fn(),
+      registerTool: (def) => tools.push(def as (typeof tools)[number]),
       registerHttpRoute: vi.fn(),
       on: vi.fn(),
     };
 
-    registerAofPlugin(api, {
-      dataDir: tmpDir,
-      logger,
-      messageTool: {
-        send: vi.fn(async () => undefined),
-      },
+    const client = makeMockClient();
+    (client.invokeTool as unknown as { mockResolvedValueOnce: (v: InvokeToolResponse) => void }).mockResolvedValueOnce({
+      error: { kind: "validation", message: "bad input" },
     });
 
-    // engine + chat delivery = 2
-    expect(addOnEventSpy).toHaveBeenCalledTimes(2);
+    registerAofPlugin(api, {
+      dataDir: "/tmp/aof",
+      daemonIpcClient: client,
+    });
+
+    const t = tools.find((x) => x.name === "aof_status_report");
+    await expect(t!.execute("tc-e", { actor: "main" })).rejects.toThrow(/validation: bad input/);
   });
 
-  it("registers only the policy-engine callback when no messageTool is provided", async () => {
-    const tmpDir = await mkdtemp(join(tmpdir(), "aof-openclaw-callbacks-nochat-"));
-    const logger = new EventLogger(join(tmpDir, "events"));
-    const addOnEventSpy = vi.spyOn(logger, "addOnEvent");
-
+  it("event hooks forward the 4 A1-amended signals via IPC", async () => {
+    const events: Record<string, (...args: unknown[]) => void> = {};
     const api: OpenClawApi = {
       registerService: vi.fn(),
       registerTool: vi.fn(),
       registerHttpRoute: vi.fn(),
-      on: vi.fn(),
+      on: (event, handler) => {
+        events[event] = handler;
+      },
     };
 
-    registerAofPlugin(api, { dataDir: tmpDir, logger });
+    const client = makeMockClient();
+    registerAofPlugin(api, {
+      dataDir: "/tmp/aof",
+      daemonIpcClient: client,
+    });
 
-    expect(addOnEventSpy).toHaveBeenCalledTimes(1);
+    events["session_end"]?.({}, {});
+    events["agent_end"]?.({ agent: "swe-backend" });
+    events["before_compaction"]?.();
+    events["message_received"]?.({}, { sessionKey: "k" });
+    events["message_sent"]?.({});
+    events["before_tool_call"]?.({});
+    events["after_tool_call"]?.({});
+
+    expect(client.postSessionEnd).toHaveBeenCalledTimes(1);
+    expect(client.postAgentEnd).toHaveBeenCalledTimes(1);
+    expect(client.postBeforeCompaction).toHaveBeenCalledTimes(1);
+    expect(client.postMessageReceived).toHaveBeenCalledTimes(1);
+    // The 3 local-only hooks do not forward.
   });
 });
