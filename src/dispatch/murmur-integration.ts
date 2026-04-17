@@ -257,6 +257,13 @@ export async function evaluateMurmurTriggers(
             `${reviewTask.frontmatter.id}.md`
           );
 
+        // Per-task timeoutMs (from aof_dispatch) overrides scheduler's spawnTimeoutMs.
+        const taskMeta = reviewTask.frontmatter.metadata ?? {};
+        const tmRaw = (taskMeta as Record<string, unknown>).timeoutMs;
+        const perTaskTimeoutMs = typeof tmRaw === "number" && Number.isFinite(tmRaw) && tmRaw > 0
+          ? tmRaw
+          : undefined;
+
         const context: TaskContext = {
           taskId: reviewTask.frontmatter.id,
           taskPath,
@@ -266,11 +273,12 @@ export async function evaluateMurmurTriggers(
           projectId: store.projectId,
           projectRoot: store.projectRoot,
           taskRelpath: relative(store.projectRoot, taskPath),
+          ...(perTaskTimeoutMs !== undefined && { timeoutMs: perTaskTimeoutMs }),
         };
 
         // Spawn agent session
         const spawnResult = await executor.spawnSession(context, {
-          timeoutMs: spawnTimeoutMs,
+          timeoutMs: perTaskTimeoutMs ?? spawnTimeoutMs,
         });
 
         if (spawnResult.success) {

@@ -451,4 +451,57 @@ describe("Murmur Scheduler Integration", () => {
     const state = await stateManager.load("backend");
     expect(state.completionsSinceLastReview).toBe(0);
   });
+
+  it("honors metadata.timeoutMs on the review task, falls back otherwise", async () => {
+    const orgChart = {
+      schemaVersion: 1,
+      agents: [],
+      teams: [
+        {
+          id: "backend",
+          name: "Backend Team",
+          orchestrator: "agent-orchestrator",
+          murmur: { triggers: [{ kind: "queueEmpty" }], context: ["taskSummary"] },
+        },
+      ],
+    };
+    await writeFile(join(tmpDir, "org", "org-chart.yaml"), stringifyYaml(orgChart), "utf-8");
+
+    // Trigger murmur by creating and fully completing a team task.
+    const seed = await store.create({
+      title: "Seed task",
+      body: "Seed",
+      routing: { team: "backend" },
+      createdBy: "test",
+    });
+    await store.transition(seed.frontmatter.id, "ready");
+    await store.transition(seed.frontmatter.id, "in-progress", { agent: "agent-backend" });
+    await store.transition(seed.frontmatter.id, "review");
+    await store.transition(seed.frontmatter.id, "done");
+
+    // Capture what spawnSession was called with.
+    const captured: Array<{ ctx: { timeoutMs?: number }; opts?: { timeoutMs?: number } }> = [];
+    const mockExecutor: GatewayAdapter = {
+      spawnSession: async (ctx, opts) => {
+        captured.push({ ctx: { timeoutMs: ctx.timeoutMs }, opts: { timeoutMs: opts?.timeoutMs } });
+        return { success: true, sessionId: "test-session" };
+      },
+      getSessionStatus: async (sid) => ({ sessionId: sid, alive: false }),
+      forceCompleteSession: async () => {},
+    };
+
+    // Fallback path: review task has no per-task timeout, scheduler passes its own.
+    await poll(store, logger, {
+      dataDir: tmpDir,
+      dryRun: false,
+      defaultLeaseTtlMs: 600_000,
+      executor: mockExecutor,
+      maxConcurrentDispatches: 3,
+      spawnTimeoutMs: 90_000,
+    });
+
+    expect(captured.length).toBe(1);
+    expect(captured[0]!.opts?.timeoutMs).toBe(90_000);
+    expect(captured[0]!.ctx.timeoutMs).toBeUndefined();
+  });
 });
