@@ -222,10 +222,44 @@ export async function executeAssignAction(
         
         // No retry count increment - this is capacity exhaustion, not failure
         log.info({ taskId: action.taskId, op: "requeue" }, "task requeued to ready (platform capacity exhausted, will retry next poll)");
-        
+
         return { executed, failed };
       }
-      
+
+      // Phase 43 D-12: no-plugin-attached → hold task in ready/, no retry increment.
+      // Mirrors the platformLimit branch above — release lease, leave in ready/, emit
+      // `dispatch.held`, neither count as executed nor failed. No deadletter, no blocked
+      // transition: per PROJECT.md core value "tasks never get dropped", a briefly
+      // absent plugin (gateway restart) must not punish the task.
+      if (result.error === "no-plugin-attached") {
+        log.info({ taskId: action.taskId, op: "hold" }, "holding task: no plugin attached");
+
+        // Release lease — task transitions back to ready (not blocked)
+        try {
+          await releaseLease(store, action.taskId, action.agent!);
+        } catch (releaseErr) {
+          log.error({ err: releaseErr, taskId: action.taskId, op: "releaseLease" }, "failed to release lease");
+        }
+
+        // Emit event (non-fatal if logging fails)
+        try {
+          await logger.log("dispatch.held", "scheduler", {
+            taskId: action.taskId,
+            payload: {
+              reason: "no-plugin-attached",
+              agent: action.agent,
+              correlationId,
+            },
+          });
+        } catch (logErr) {
+          log.warn({ err: logErr, taskId: action.taskId, op: "logDispatchHeld" }, "event logger write failed (best-effort)");
+        }
+
+        // No retry count increment — this is hold, not failure
+        // executed=false, failed=false — neither counted
+        return { executed, failed };
+      }
+
       const errorClass = classifySpawnError(result.error ?? "unknown");
       log.error({ taskId: action.taskId, agent: action.agent, errorClass, spawnError: result.error, op: "spawn" }, "spawn failed");
 

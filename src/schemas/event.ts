@@ -47,6 +47,7 @@ export const EventType = z.enum([
   "dispatch.no-match",
   "dispatch.fallback",
   "dispatch.error",
+  "dispatch.held",
 
   // Completion enforcement (Phase 25)
   "completion.enforcement",
