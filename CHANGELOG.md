@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.14.11](https://github.com/d0labs/aof/compare/v1.14.10...v1.14.11) (2026-04-17)
+
+### Bug Fixes
+
+* **dispatch:** bump spawnTimeoutMs fallback 30_000 → 300_000 ([8577a4e](https://github.com/d0labs/aof/commit/8577a4e8f70c08da341ebf6dc255ae69699e64cf))
+* **dispatch:** DAG hop dispatch forwards per-task timeoutMs ([5349f34](https://github.com/d0labs/aof/commit/5349f34c88fd1bf33dc9c25d41818fbeb103a30e))
+* **dispatch:** escalation re-dispatch forwards per-task timeoutMs ([9c92216](https://github.com/d0labs/aof/commit/9c922162fb1253179337308e1f71b9da4b56879e))
+* **dispatch:** murmur integration forwards per-task timeoutMs ([6c80130](https://github.com/d0labs/aof/commit/6c801303193e9b3772a4200b06c5683146445480))
+* **mcp,dispatch:** aof_dispatch end-to-end timeoutMs via MCP ([41edf2e](https://github.com/d0labs/aof/commit/41edf2e4c03b3e119d5c039b8f17d03e1a9cf275))
+* **openclaw:** honor caller-supplied timeout (remove floor clamp) ([2830ce1](https://github.com/d0labs/aof/commit/2830ce1ef9d499829c7cc07e73d69534b2cf172e))
+
 ## [1.14.10](https://github.com/d0labs/aof/compare/v1.14.9...v1.14.10) (2026-04-16)
 
 ### Bug Fixes
