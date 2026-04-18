@@ -151,7 +151,10 @@ export const handleInvokeTool: RouteHandler = async (req, res, deps) => {
   } = {
     store,
     logger: deps.logger,
-    projectId: projectId ?? store.projectId,
+    // BUG-044: ToolContext.projectId is `string | undefined`; an
+    // unscoped base store reports `projectId === null` and must
+    // coerce to `undefined` here.
+    projectId: projectId ?? store.projectId ?? undefined,
     // aof_context_load needs these adapter-extras; daemon provides them for
     // the single built-in registry + <dataDir>/skills path (Open Q3).
     _contextRegistry: getContextRegistry(),

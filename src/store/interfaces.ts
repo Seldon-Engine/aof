@@ -20,8 +20,13 @@ export interface ITaskStore {
   /** Project root directory */
   readonly projectRoot: string;
   
-  /** Project identifier (e.g., "AOF") */
-  readonly projectId: string;
+  /**
+   * Project identifier (e.g., "AOF"), or `null` for the unscoped base
+   * store (daemon data dir without a project manifest). BUG-044: was
+   * `string` with a `basename(projectRoot)` fallback that leaked junk
+   * project IDs into task frontmatter.
+   */
+  readonly projectId: string | null;
   
   /** Tasks directory path */
   readonly tasksDir: string;

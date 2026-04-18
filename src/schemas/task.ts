@@ -135,7 +135,13 @@ export const TaskFrontmatter = z.preprocess((input) => {
 }, z.object({
   schemaVersion: z.union([z.literal(1), z.literal(2)]).describe("Schema version for migration support"),
   id: TaskId.describe("Stable task identifier"),
-  project: z.string().min(1).describe("Project identifier (required, project-scoped store)"),
+  // BUG-044: `project` is optional at the schema layer. Project-scoped
+  // stores (`createProjectStore`) stamp it; the unscoped base store at
+  // `~/.aof/data/` does not (it has no manifest, so stamping a made-up
+  // value caused task-dispatcher to probe for a non-existent project.yaml
+  // and log ENOENT on every poll). The `string().min(1)` floor still
+  // rejects empty-string values written by buggy upgrades.
+  project: z.string().min(1).optional().describe("Project identifier (set by project-scoped stores; omitted for unscoped base store)"),
   title: z.string().min(1).describe("Human-readable task title"),
   status: TaskStatus,
   priority: TaskPriority.default("normal"),

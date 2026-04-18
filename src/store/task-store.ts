@@ -10,7 +10,7 @@
  */
 
 import { readFile, writeFile, readdir, mkdir, rename, rm, stat } from "node:fs/promises";
-import { join, resolve, basename, dirname } from "node:path";
+import { join, resolve, basename } from "node:path";
 import writeFileAtomic from "write-file-atomic";
 import { createLogger } from "../logging/index.js";
 import { TaskFrontmatter, Task, isValidTransition } from "../schemas/task.js";
@@ -70,7 +70,20 @@ function formatTaskDate(date: Date): string {
  */
 export class FilesystemTaskStore implements ITaskStore {
   readonly projectRoot: string;
-  readonly projectId: string;
+  /**
+   * Project ID for the tasks stored here, or `null` when this is the
+   * unscoped base store (daemon data dir, no project manifest).
+   *
+   * BUG-044: the previous default `basename(projectRoot)` produced
+   * `"data"` for `~/.aof/data/` and leaked that as `project: data` into
+   * every task's frontmatter, driving task-dispatcher to probe for a
+   * non-existent `~/.aof/data/project.yaml`. Callers that want a
+   * project-scoped store MUST pass `opts.projectId` explicitly
+   * (`createProjectStore` already does); callers that want an unscoped
+   * store should omit it (the 3 call sites are `daemon/daemon.ts`,
+   * `service/aof-service.ts`, `mcp/shared.ts`).
+   */
+  readonly projectId: string | null;
   readonly tasksDir: string;
   private readonly hooks?: TaskStoreHooks;
   private readonly logger?: import("../events/logger.js").EventLogger;
@@ -85,8 +98,13 @@ export class FilesystemTaskStore implements ITaskStore {
 
   constructor(projectRoot: string, opts: TaskStoreOptions = {}) {
     this.projectRoot = resolve(projectRoot);
-    // Extract project ID from projectRoot basename (e.g., "AOF" from "/path/to/AOF")
-    this.projectId = opts.projectId ?? basename(this.projectRoot);
+    // BUG-044: no basename() fallback. If the caller doesn't pass a
+    // projectId, this is the unscoped base store — `null` signals
+    // "don't stamp anything into task frontmatter, don't load a
+    // manifest at our root". `opts.projectId === ""` is also treated
+    // as unscoped (defensive — an empty string was never a valid
+    // project id per the manifest schema).
+    this.projectId = opts.projectId && opts.projectId.length > 0 ? opts.projectId : null;
     this.tasksDir = resolve(this.projectRoot, "tasks");
     this.hooks = opts.hooks;
     this.logger = opts.logger;
@@ -215,7 +233,11 @@ export class FilesystemTaskStore implements ITaskStore {
       const frontmatter = TaskFrontmatter.parse({
         schemaVersion: 1,
         id,
-        project: this.projectId,
+        // BUG-044: only stamp `project` when the store is project-scoped.
+        // Unscoped base stores (projectId === null) must leave this
+        // field absent so task-dispatcher doesn't attempt a manifest
+        // lookup for a project that doesn't exist.
+        ...(this.projectId ? { project: this.projectId } : {}),
         title: opts.title,
         status,
         priority: opts.priority ?? "normal",

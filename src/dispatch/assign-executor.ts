@@ -121,7 +121,9 @@ export async function executeAssignAction(
       agent: action.agent!,
       priority: leasedTask?.frontmatter.priority ?? task.frontmatter.priority,
       routing: leasedTask?.frontmatter.routing ?? task.frontmatter.routing,
-      projectId: store.projectId,
+      // BUG-044: TaskContext.projectId is `string | undefined`; coerce
+      // null (unscoped base store) to undefined.
+      projectId: store.projectId ?? undefined,
       projectRoot: store.projectRoot,
       taskRelpath: relative(store.projectRoot, taskPath),
       ...(timeoutMs !== undefined && { timeoutMs }),

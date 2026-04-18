@@ -166,7 +166,7 @@ export class PermissionAwareTaskStore implements ITaskStore {
     return this.store.projectRoot;
   }
 
-  get projectId(): string {
+  get projectId(): string | null {
     return this.store.projectId;
   }
 

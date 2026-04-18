@@ -265,7 +265,10 @@ export async function generateCurationTasks(
         frontmatter: {
           schemaVersion: 1,
           id: "DRY-RUN",
-          project: store.projectId,
+          // BUG-044: `project` on TaskFrontmatter is now optional; an
+          // unscoped store leaves it absent rather than stamping a
+          // basename-derived placeholder.
+          ...(store.projectId ? { project: store.projectId } : {}),
           title: `[DRY-RUN] Curate ${scope.type} ${scope.id}`,
           status: "backlog",
           priority: "normal",

@@ -270,7 +270,8 @@ export async function evaluateMurmurTriggers(
           agent: team.orchestrator!,
           priority: reviewTask.frontmatter.priority,
           routing: reviewTask.frontmatter.routing,
-          projectId: store.projectId,
+          // BUG-044: TaskContext.projectId is `string | undefined`.
+          projectId: store.projectId ?? undefined,
           projectRoot: store.projectRoot,
           taskRelpath: relative(store.projectRoot, taskPath),
           ...(perTaskTimeoutMs !== undefined && { timeoutMs: perTaskTimeoutMs }),

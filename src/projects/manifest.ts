@@ -101,16 +101,27 @@ export function buildProjectManifest(
  * When projectId matches store.projectId, reads from store.projectRoot/project.yaml.
  * Otherwise falls back to store.projectRoot/projects/<projectId>/project.yaml.
  *
- * @param store - Task store with projectRoot and projectId
+ * Early-returns `null` (no filesystem probe, no warn log) when the
+ * requested projectId is falsy. This is BUG-044: legacy tasks from an
+ * unscoped base store have `frontmatter.project === undefined`, and
+ * task-dispatcher previously hit this function with `projectId = "data"`
+ * (the spurious basename) on every poll, producing ENOENT spam in the
+ * daemon logs.
+ *
+ * @param store - Task store with projectRoot and (possibly null) projectId
  * @param projectId - Project to load manifest for
- * @returns Parsed manifest or null if not found / unreadable
+ * @returns Parsed manifest or null if not found / unreadable / unscoped
  */
 export async function loadProjectManifest(
   store: ITaskStore,
-  projectId: string
+  projectId: string | null | undefined
 ): Promise<ProjectManifest | null> {
+  // BUG-044: no project requested, or the store itself is unscoped →
+  // there can't be a manifest to load. Skip the readFile+warn path.
+  if (!projectId) return null;
+
   try {
-    const projectPath = (store.projectId === projectId)
+    const projectPath = (store.projectId && store.projectId === projectId)
       ? join(store.projectRoot, "project.yaml")
       : join(store.projectRoot, "projects", projectId, "project.yaml");
     const content = await readFile(projectPath, "utf-8");

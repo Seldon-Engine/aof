@@ -42,7 +42,9 @@ export function withPermissions(
     const ctx: ToolContext = {
       store: permissionStore,
       logger,
-      projectId: projectId ?? permissionStore.projectId,
+      // BUG-044: coerce null (unscoped store) to undefined to satisfy
+      // ToolContext's `string | undefined` shape.
+      projectId: projectId ?? permissionStore.projectId ?? undefined,
       orgChartPath,
     };
 
