@@ -94,8 +94,12 @@ export class AOFService {
       onEvent: deps.engine ? (e) => deps.engine!.handleEvent(e) : undefined,
     });
 
+    // BUG-044: unscoped base store — see src/daemon/daemon.ts for the
+    // full rationale. `projectId: null` keeps tasks created by this
+    // store from carrying a basename-derived `project:` field.
     const storeWithHooks = deps.store ?? new FilesystemTaskStore(config.dataDir, {
       hooks: this.createStoreHooks(config.dataDir),
+      projectId: null,
     });
 
     this.store = storeWithHooks;

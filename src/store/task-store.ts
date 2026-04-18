@@ -46,7 +46,13 @@ export type { TaskStoreHooks } from "./interfaces.js";
 export interface TaskStoreOptions {
   hooks?: TaskStoreHooks;
   logger?: import("../events/logger.js").EventLogger;
-  projectId?: string;
+  /**
+   * Project identifier for this store. Pass `null` (or omit) to
+   * declare this as an unscoped base store — tasks created here will
+   * NOT receive a `project:` frontmatter field and `loadProjectManifest`
+   * will skip the same-root branch (BUG-044).
+   */
+  projectId?: string | null;
 }
 
 // Re-export parser functions for public API

@@ -57,7 +57,11 @@ function isProcessRunning(pid: number): boolean {
 
 export async function startAofDaemon(opts: AOFDaemonOptions): Promise<AOFDaemonContext> {
   const startTime = Date.now();
-  const store = opts.store ?? new FilesystemTaskStore(opts.dataDir);
+  // BUG-044: pass `projectId: null` explicitly to declare this as an
+  // unscoped base store. The daemon data dir (e.g. ~/.aof/data/) is a
+  // root above project directories — it has no project.yaml of its own,
+  // and tasks created here must NOT carry a spurious `project:` field.
+  const store = opts.store ?? new FilesystemTaskStore(opts.dataDir, { projectId: null });
   const logger = opts.logger ?? new EventLogger(eventsDir(opts.dataDir));
   const socketPath = opts.socketPath ?? daemonSocketPath(opts.dataDir);
   const lockFile = daemonPidPath(opts.dataDir);

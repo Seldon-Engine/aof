@@ -71,8 +71,11 @@ export async function createAofMcpContext(options: AofMcpOptions): Promise<AofMc
       // No manifest or parse error -- projectConfig stays undefined
     }
   } else {
-    // Legacy behavior: use dataDir directly
-    store = options.store ?? new FilesystemTaskStore(options.dataDir);
+    // Legacy behavior: use dataDir directly. BUG-044: explicit
+    // `projectId: null` declares this as an unscoped base store so
+    // tasks created via the legacy MCP path don't stamp a spurious
+    // basename-derived project id.
+    store = options.store ?? new FilesystemTaskStore(options.dataDir, { projectId: null });
     dataDir = options.dataDir;
     logger = options.logger ?? new EventLogger(eventsDir(dataDir));
     orgChartPath = options.orgChartPath ?? orgChartPathFn(dataDir);
