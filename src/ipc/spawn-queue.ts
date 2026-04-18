@@ -36,7 +36,7 @@ export class SpawnQueue extends EventEmitter {
    * `"enqueue"` with the fully-formed request for any active long-poll.
    */
   enqueue(partial: Omit<SpawnRequest, "id">): SpawnRequest {
-    const full = { id: randomUUID(), ...partial } as SpawnRequest;
+    const full: SpawnRequest = { id: randomUUID(), ...partial };
     this.pending.set(full.id, full);
     this.emit("enqueue", full);
     log.debug({ id: full.id, taskId: full.taskId }, "spawn enqueued");
