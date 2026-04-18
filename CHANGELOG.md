@@ -1,5 +1,41 @@
 # Changelog
 
+## [1.15.0](https://github.com/d0labs/aof/compare/v1.14.11...v1.15.0) (2026-04-18)
+
+### Features
+
+* **43-03:** IPC envelope schemas + daemon.mode config flag (D-05/D-06/D-07/D-13) ([d99d494](https://github.com/d0labs/aof/commit/d99d49499f7d69206625da88cb6b16621400a20c))
+* **43-03:** IPC routes invoke-tool + session-events + server-attach + store-resolver ([598db40](https://github.com/d0labs/aof/commit/598db400da3f425438c007588db57c0231e7e255))
+* **43-03:** wire attachIpcRoutes into startAofDaemon (D-05 routes live on daemon.sock) ([ebe4d76](https://github.com/d0labs/aof/commit/ebe4d76d2825b0aec70d6fe6243b256e55918138))
+* **43-04:** long-poll spawn queue + plugin registry + wait/result routes (D-09/D-11) ([672be1c](https://github.com/d0labs/aof/commit/672be1ce23006b1861b3ac1a50b65b682fc6d063))
+* **43-04:** PluginBridgeAdapter + SelectingAdapter (D-10) ([96139df](https://github.com/d0labs/aof/commit/96139dfc536494fe5afd69d3935648afadd97a0f))
+* **43-05:** hold-in-ready branch for no-plugin-attached dispatch (D-12) ([45b3f63](https://github.com/d0labs/aof/commit/45b3f63f06967f624c52612e1a453b1f79a1e7f2))
+* **43-05:** wire SelectingAdapter + SpawnQueue + PluginRegistry into startAofDaemon (D-10/D-12) ([f7b4529](https://github.com/d0labs/aof/commit/f7b45295a37c3fce678f4e972619eedf0ec953d6))
+* **43-06:** DaemonIpcClient + module-level singleton (D-05/D-06/D-09) ([1e39708](https://github.com/d0labs/aof/commit/1e397080e874de02d2c7c4589754dd3979064cbc))
+* **43-06:** spawn-poller long-poll loop + runAgentFromSpawnRequest refactor (D-09) ([9f9ecd4](https://github.com/d0labs/aof/commit/9f9ecd4d3d184263fb78e362e3987dff6be146e2))
+* **43-07:** thin-bridge restructure of src/openclaw/adapter.ts (D-02/D-06/D-07) ([412e776](https://github.com/d0labs/aof/commit/412e776e65c6f91b005cec1dcd38d947578e496b))
+* **43-08:** migration 007 — always install aof-daemon (D-14) ([81a8f45](https://github.com/d0labs/aof/commit/81a8f457c0c13bc8d6e9dd3148e9066bd6620279))
+* **43-08:** reverse Phase 42 installer gates, demote --force-daemon (D-01/D-04) ([00ffda9](https://github.com/d0labs/aof/commit/00ffda914ff2d3b09a1ff42e52c97796de67acdc))
+
+### Bug Fixes
+
+* **43:** WR-01 short-circuit readBody data handler after limit exceeded ([87d1b29](https://github.com/d0labs/aof/commit/87d1b29d2b9dbe0be6707fa1ee04dbe207cf0f35))
+* **43:** WR-02 remove raw-string guard from install.sh dir-equality check ([0c595ff](https://github.com/d0labs/aof/commit/0c595ff02aaaa43a8c34495269f060aa5a5939a1))
+* **43:** WR-03 replace as-cast with typed annotation in SpawnQueue.enqueue ([3ef5726](https://github.com/d0labs/aof/commit/3ef5726808c462932367d7637538adf4e9fbe64a))
+
+### Refactor
+
+* **43-07:** move aof_project_* tools into shared tool-registry (Open Q2 resolution) ([9c079d8](https://github.com/d0labs/aof/commit/9c079d87373c0d8fdc2559adc4814ba70e73eda0))
+
+### Tests
+
+* **43-01:** add RED dispatch/plugin/migration scaffolding tests ([55d2cb2](https://github.com/d0labs/aof/commit/55d2cb272a31eaea1ccdd1dee9ded6beee3e7365))
+* **43-01:** add RED IPC core scaffolding tests ([dfb8b18](https://github.com/d0labs/aof/commit/dfb8b187ea65a74233bc60f7809556dce3746275))
+* **43-02:** add integration helpers daemon-harness + plugin-ipc-client ([29b5671](https://github.com/d0labs/aof/commit/29b5671b3f890f3807caf0dc39f84ccfdfb67841))
+* **43-02:** add RED integration scaffolds for IPC round-trip, long-poll, hold, restart, session boundaries ([f83950e](https://github.com/d0labs/aof/commit/f83950e21310dc6ea1c37d3cf6e3565fb34d8bef))
+* **43-06:** RED — spawn-poller idempotency, keepalive, backoff, exception posting ([f6c95ef](https://github.com/d0labs/aof/commit/f6c95efafc29efb9908a8e85fb3ab7972a064d8d))
+* **43:** persist human verification items as UAT ([d3e03d8](https://github.com/d0labs/aof/commit/d3e03d8df9c8b8e042f430262028491cdb064cd5))
+
 ## [1.14.11](https://github.com/d0labs/aof/compare/v1.14.10...v1.14.11) (2026-04-17)
 
 ### Bug Fixes
