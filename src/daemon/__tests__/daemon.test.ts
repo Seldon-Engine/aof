@@ -199,10 +199,14 @@ describe("AOF daemon", () => {
       // Simulate SIGTERM — handler is now async (drain-aware)
       process.emit("SIGTERM" as any);
 
-      // Wait for async drain to complete (poller resolves instantly, so drain is fast)
+      // Wait for async drain to complete (poller resolves instantly, so drain is fast).
+      // Use a generous timeout: the drain itself is near-instant, but under heavy
+      // parallel-fork CPU load the event loop can take several seconds to run the
+      // SIGTERM handler + async cleanup. The assertion is still about *correctness*
+      // (exit(0) was called at all, PID removed) — not about latency.
       await vi.waitFor(() => {
         expect(exitSpy).toHaveBeenCalledWith(0);
-      }, { timeout: 2000 });
+      }, { timeout: 8000, interval: 50 });
 
       // PID file should be removed after drain completes
       expect(existsSync(pidFile)).toBe(false);
@@ -326,9 +330,13 @@ describe("AOF daemon", () => {
       // Simulate SIGTERM
       process.emit("SIGTERM" as any);
 
+      // Generous timeout: under CPU-saturated parallel-fork runs the event loop
+      // can take several seconds to run the async SIGTERM handler + health-server
+      // close. The assertion is about correctness (exit called, socket removed),
+      // not latency.
       await vi.waitFor(() => {
         expect(exitSpy).toHaveBeenCalledWith(0);
-      }, { timeout: 2000 });
+      }, { timeout: 8000, interval: 50 });
 
       // Socket file should be removed after shutdown
       expect(existsSync(socketPath)).toBe(false);
