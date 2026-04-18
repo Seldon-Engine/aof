@@ -23,16 +23,16 @@ export async function readBody(
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     let size = 0;
+    let limitExceeded = false;
     const chunks: Buffer[] = [];
     req.on("data", (chunk: Buffer | string) => {
+      if (limitExceeded) return;
       const buf = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
       size += buf.length;
       if (size > maxBytes) {
-        const err = new PayloadTooLargeError(
-          `request body exceeded ${maxBytes} bytes`,
-        );
+        limitExceeded = true;
         req.destroy();
-        reject(err);
+        reject(new PayloadTooLargeError(`request body exceeded ${maxBytes} bytes`));
         return;
       }
       chunks.push(buf);
