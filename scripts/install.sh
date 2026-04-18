@@ -172,8 +172,7 @@ parse_args() {
 
   # Refuse the obviously-broken case where DATA_DIR equals INSTALL_DIR —
   # that collapses the segregation we rely on for clean upgrades.
-  if [ "$(cd "$INSTALL_DIR" 2>/dev/null && pwd)" = "$(cd "$DATA_DIR" 2>/dev/null && pwd)" ] \
-     && [ "$INSTALL_DIR" = "$DATA_DIR" ]; then
+  if [ "$(cd "$INSTALL_DIR" 2>/dev/null && pwd)" = "$(cd "$DATA_DIR" 2>/dev/null && pwd)" ]; then
     err "--data-dir must not equal --prefix ($INSTALL_DIR)."
     printf "    User data needs a dedicated subdirectory so code can be wiped safely.\n"
     exit 1
