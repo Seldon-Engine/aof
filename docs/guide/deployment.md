@@ -1,39 +1,118 @@
 ---
 title: "AOF Deployment Guide"
-description: "Set up AOF as an OpenClaw plugin or standalone daemon."
+description: "Deploy AOF as a daemon with an optional OpenClaw thin-plugin bridge."
 ---
 
-**Audience:** Operators, SREs, DevOps teams  
-**Scope:** OpenClaw plugin mode, standalone daemon mode, and conflict prevention
+**Audience:** Operators, SREs, DevOps teams
+**Scope:** Daemon deployment, OpenClaw plugin wiring, and post-install verification
 
 ---
 
 ## Overview
 
-AOF can run in **two modes**:
+As of v1.15 AOF has **one** runtime shape: a single `aof-daemon` user service
+owns the task store, scheduler, and IPC authority. Consumers connect to the
+daemon over a Unix-domain socket at `~/.aof/data/daemon.sock`.
 
-1. **Plugin mode (recommended for OpenClaw):** AOF runs inside the OpenClaw Gateway as a plugin.
-2. **Daemon mode (standalone):** AOF runs as a detached scheduler process managed by the CLI.
+There is no longer a "plugin-mode vs daemon-mode" choice. The OpenClaw plugin
+is a thin bridge that connects to the daemon; running OpenClaw is optional,
+but if you run it the plugin must be able to reach the daemon.
 
-**Important:** The plugin scheduler and daemon both **poll tasks and dispatch**. They **must NOT run simultaneously** for the same project.
+Two dispatch paths coexist in a single daemon:
+
+1. **PluginBridgeAdapter** — used when an OpenClaw plugin is currently attached
+   (holding an open long-poll on `GET /v1/spawns/wait`). Agent spawns are
+   delegated to the plugin because `runtime.agent.runEmbeddedPiAgent` is only
+   reachable from inside the gateway process.
+2. **StandaloneAdapter** — fallback for daemon-only deployments without a
+   plugin. Dispatches via HTTP directly to the OpenClaw gateway API.
+
+Adapter selection happens per dispatch. You never choose between them in
+configuration; whichever applies at the moment is used.
 
 ---
 
-## Plugin Mode (OpenClaw) — Recommended
+## Daemon service
+
+The daemon runs under the host OS supervisor:
+
+- **macOS:** launchd user agent at `~/Library/LaunchAgents/ai.openclaw.aof.plist`
+- **Linux:** systemd user unit at `~/.config/systemd/user/ai.openclaw.aof.service`
+
+The supervisor handles crash recovery and restart-on-reboot; you do not run
+`aof-daemon` directly.
+
+### Installing the daemon
+
+The installer (`scripts/install.sh`) installs the daemon as part of its normal
+flow. Upgrades from v1.14 run Migration 007, which installs the service if
+absent. You can also install or refresh the service file manually:
+
+```bash
+aof daemon install
+```
+
+This command is idempotent — safe to run multiple times. It writes the
+platform service file, loads it, and starts the daemon.
+
+### Lifecycle commands
+
+```bash
+aof daemon status              # Query /status on the Unix socket
+aof daemon stop                # Graceful shutdown (SIGTERM via supervisor)
+aof daemon stop --force        # Bypass supervisor, SIGTERM the process directly
+aof daemon uninstall           # Stop and remove the service file
+```
+
+### Health endpoints
+
+The daemon exposes three classes of HTTP endpoint on `daemon.sock`:
+
+| Route | Purpose |
+|-------|---------|
+| `GET /healthz`, `GET /status` | Health and state inspection. Used by `aof daemon status`. |
+| `POST /v1/tool/invoke` | Tool dispatch from any attached plugin. |
+| `POST /v1/event/session-end`, `/v1/event/agent-end`, `/v1/event/before-compaction`, `/v1/event/message-received` | Session lifecycle events forwarded from the plugin. |
+| `GET /v1/spawns/wait`, `POST /v1/spawns/{id}/result` | Long-poll spawn callback path (plugin side). |
+
+The socket is created with mode `0600`. Trust boundary is the invoking user's
+Unix uid — there is no token-based auth, and AOF does not listen on TCP.
+
+Health check from the shell:
+
+```bash
+curl --unix-socket ~/.aof/data/daemon.sock http://localhost/healthz
+```
+
+### Verifying the daemon is active
+
+- `aof daemon status` shows `Status: running (healthy)` and the version
+- `~/.aof/data/daemon.pid` exists and contains a live PID
+- `~/.aof/data/daemon.sock` exists with mode `0600`
+- Socket responds to `/healthz`
+
+---
+
+## OpenClaw plugin wiring
+
+The OpenClaw plugin ships inside the AOF tarball at `dist/plugin.js`. It is
+referenced by `openclaw.plugin.json` at the install root.
 
 ### Auto-discovery
 
 Place the AOF plugin at:
 
 ```
-~/.openclaw/extensions/aof/
+~/.openclaw/extensions/aof
 ```
 
-OpenClaw auto-discovers extensions from this path on gateway start.
+The installer's `scripts/deploy.sh` creates this symlink when run against a
+local checkout. OpenClaw auto-discovers extensions from this path on gateway
+start.
 
 ### Configuration
 
-Configure via **gateway config** (not `settings`):
+Configure the plugin via **gateway config** (not `settings`):
 
 ```yaml
 plugins:
@@ -45,7 +124,7 @@ plugins:
         gatewayToken: "YOUR_GATEWAY_TOKEN"
 ```
 
-**Required for dispatch:**
+**Required for agent spawns (StandaloneAdapter path only):**
 
 ```yaml
 gateway:
@@ -54,85 +133,69 @@ gateway:
       - sessions_spawn
 ```
 
-> ✅ `plugins.entries.aof.config` is the correct key. **Do not use** `plugins.entries.aof.settings`.
+> `plugins.entries.aof.config` is the correct key. **Do not use**
+> `plugins.entries.aof.settings`.
 
-### Verifying plugin mode is active
+When the plugin is attached the daemon uses `PluginBridgeAdapter` and delegates
+spawns back through the long-poll channel — the `sessions_spawn` allowlist is
+only needed for deployments where the daemon is expected to fall back to the
+HTTP StandaloneAdapter.
 
-- OpenClaw Gateway logs show AOF plugin startup
-- `/aof/status` responds:
-  ```bash
-  curl http://localhost:19003/aof/status
-  ```
-- Plugin scheduler logs appear in `~/.openclaw/logs/gateway.log`
+### Verifying plugin attachment
 
----
+- `aof daemon status` shows plugin-related lines when at least one plugin is
+  holding an active long-poll
+- Daemon log (follow with `tail -f ~/.aof/data/logs/daemon.log`) shows
+  `/v1/spawns/wait` and `/v1/tool/invoke` activity during normal operation
+- OpenClaw Gateway logs show AOF plugin startup under `~/.openclaw/logs/gateway.log`
 
-## Daemon Mode (Standalone)
+### No-plugin-attached behavior
 
-The daemon runs the scheduler loop and exposes `/health`.
+When the scheduler picks up a ready task and no plugin is attached:
 
-### CLI lifecycle commands
+- If the daemon is running in plugin-expected mode, the task is **held in
+  `ready/`** and the daemon logs
+  `log.warn({ taskId, reason: "no-plugin-attached" })`. The task is NOT
+  moved to deadletter; it dispatches on the next poll once the plugin
+  reconnects. This upholds the "tasks never get dropped" invariant.
+- If the daemon is running in standalone mode (no plugin expected), the
+  dispatch falls through to `StandaloneAdapter` and the HTTP gateway API is
+  used directly.
 
-```bash
-# Start daemon (background)
-aof daemon start --port 18000 --bind 127.0.0.1
-
-# Status
-aof daemon status --port 18000
-
-# Stop
-aof daemon stop
-```
-
-### Health endpoint
-
-```bash
-curl http://127.0.0.1:18000/health
-```
-
-### Verifying daemon mode is active
-
-- `aof daemon status` shows PID + uptime
-- PID file exists: `<dataDir>/daemon.pid`
-- `/health` returns 200
-
----
-
-## Conflict Prevention (Plugin + Daemon)
-
-**Never run plugin and daemon simultaneously** for the same AOF project. Both poll and dispatch.
-
-### How to detect conflicts
-
-- **Plugin active** if `/aof/status` responds and Gateway logs show `[AOF]` activity.
-- **Daemon active** if `aof daemon status` shows a running PID or `daemon.pid` exists.
-
-### Recommended workflow
-
-| Use Case | Mode | Actions |
-|---|---|---|
-| Running inside OpenClaw Gateway | **Plugin** | Enable plugin, **do not** run daemon |
-| Running standalone (no OpenClaw) | **Daemon** | Run daemon, **disable** plugin |
-
-> TODO: The daemon CLI does **not** currently check for an active OpenClaw plugin before starting. Operators must manually ensure only one scheduler is running.
+Mode is determined at scheduler boot based on whether a plugin registers
+within the first polls; explicit operator configuration is not required.
 
 ---
 
 ## Deployment Steps (Docker / OpenClaw Environments)
 
-### 1) Install AOF plugin (OpenClaw)
+### 1) Install AOF (daemon + optional plugin symlink)
 
-1. Copy AOF to OpenClaw extensions:
+```bash
+# One-liner — installs code, data, and starts the daemon
+curl -fsSL https://raw.githubusercontent.com/d0labs/aof/main/scripts/install.sh | sh
+```
+
+For a containerized / offline install using a pre-downloaded tarball:
+
+```bash
+# --tarball takes a local .tar.gz and skips the GitHub download
+sh install.sh --tarball ./aof-1.15.0.tar.gz --data-dir /var/lib/aof
+```
+
+### 2) Wire the plugin into OpenClaw
+
+1. Symlink the plugin directory:
    ```bash
    mkdir -p /home/node/.openclaw/extensions
-   cp -r /opt/aof /home/node/.openclaw/extensions/aof
+   ln -s ~/.aof /home/node/.openclaw/extensions/aof
    ```
 2. Configure gateway:
    ```yaml
    gateway:
      tools:
        allow:
-         - sessions_spawn
+         - sessions_spawn   # still needed for StandaloneAdapter fallback
 
    plugins:
      entries:
@@ -146,23 +209,23 @@ curl http://127.0.0.1:18000/health
    ```bash
    openclaw gateway restart
    ```
-4. Verify:
+4. Verify end-to-end:
    ```bash
-   curl http://localhost:19003/aof/status
+   aof daemon status
+   curl --unix-socket ~/.aof/data/daemon.sock http://localhost/healthz
    ```
 
-### 2) Standalone daemon (non-OpenClaw)
+### 3) Daemon-only deployments (no OpenClaw plugin)
 
-If running outside OpenClaw, use the daemon CLI (located in `dist/cli/`).
+Skip the symlink and gateway config. The daemon runs on its own and dispatches
+via `StandaloneAdapter` whenever a plugin is not attached. Ensure:
 
 ```bash
-# from AOF install
-node dist/cli/index.js daemon start --root /data/aof --port 18000
+aof daemon status     # Must show running (healthy)
 ```
 
-> Note: The daemon CLI must be invoked directly from the AOF distribution (e.g., `node dist/cli/index.js daemon start`).
-
-Use Docker or systemd to supervise. Ensure **only one daemon** runs per project.
+Agents reached via `StandaloneAdapter` require `gateway.tools.allow:
+["sessions_spawn"]` on the remote OpenClaw gateway.
 
 ---
 
@@ -369,7 +432,9 @@ The AOF `package.json` must include:
 
 ## Critical: Agent Spawn Permissions
 
-For AOF to dispatch tasks to agents, the **main agent** (or whichever agent the AOF executor uses as `sessionKey`) must have:
+For the `StandaloneAdapter` fallback path to dispatch tasks to agents, the
+**main agent** (or whichever agent the AOF executor uses as `sessionKey`) must
+have:
 
 ```yaml
 agents:
@@ -381,6 +446,9 @@ agents:
 
 Without this, `sessions_spawn` returns "Agent not found" even though the agent exists in the config. The `agents_list` tool will show `allowAny: false` with only the requesting agent visible.
 
+The `PluginBridgeAdapter` path uses `runtime.agent.runEmbeddedPiAgent` inside
+the gateway process and is not subject to the HTTP-tool allowlist.
+
 ## Critical: Config Change Protocol (Docker/Container Environments)
 
 1. **Use `openclaw config get/set`** — never edit `openclaw.json` directly
@@ -391,12 +459,17 @@ Without this, `sessions_spawn` returns "Agent not found" even though the agent e
 
 ## Troubleshooting
 
-**Plugin not dispatching:**
+**Daemon not dispatching:**
+- Check `aof daemon status`
+- Verify `curl --unix-socket ~/.aof/data/daemon.sock http://localhost/healthz` returns 200
+- Check daemon logs for `no-plugin-attached` — means the scheduler expects a
+  plugin and is holding tasks until one reconnects
+
+**Plugin not dispatching (StandaloneAdapter path):**
 - Ensure `gateway.tools.allow: ["sessions_spawn"]`
 - Verify `plugins.entries.aof.config` is used (not `settings`)
 - Check `agents_list` via HTTP — should show `allowAny: true` and target agents
 - Check `main.subagents.allowAgents: ["*"]` is set
-- Check `/aof/status` and gateway logs
 
 **"Agent not found" but agent exists in config:**
 - Check `subagents.allowAgents` on the requesting agent (usually `main`)
@@ -406,14 +479,15 @@ Without this, `sessions_spawn` returns "Agent not found" even though the agent e
 - AOF plugin `package.json` is missing `openclaw.configSchema`, or the schema doesn't include all config properties being set
 - Fix the schema, then restart
 
-**Daemon not dispatching:**
-- Check `aof daemon status`
-- Verify `/health` returns 200
-- Confirm daemon is not running alongside the plugin
+**Plugin reports "daemon unreachable":**
+- Confirm `~/.aof/data/daemon.sock` exists and has mode `0600`
+- Confirm the gateway is running as the same Unix user that installed AOF
+- Run `aof daemon status` from the same user to verify reachability
 
 ---
 
 ## References
 
+- Upgrading from earlier versions: [UPGRADING.md](../../UPGRADING.md)
 - Recovery runbook: `docs/RECOVERY-RUNBOOK.md`
 - Watchdog design: `docs/design/DAEMON-WATCHDOG-DESIGN.md`

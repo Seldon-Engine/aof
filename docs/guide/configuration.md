@@ -310,10 +310,11 @@ AOF runtime configuration controls the scheduler, event logging, metrics, and co
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `schemaVersion` | `1` | -- | Schema version, must be `1` |
-| `dataDir` | string | `"~/.openclaw/aof"` | Root data directory for AOF runtime data |
+| `dataDir` | string | `"~/.aof/data"` | Root data directory for AOF runtime data |
 | `orgChartPath` | string | `"org-chart.yaml"` | Path to org chart YAML file |
 | `vaultRoot` | string | -- | Root directory for vault (Projects/, Resources/) |
 | `dispatcher` | DispatcherConfig | `{}` | Scheduler/dispatch settings |
+| `daemon` | DaemonConfig | `{}` | Daemon runtime settings |
 | `metrics` | MetricsConfig | `{}` | Prometheus metrics settings |
 | `eventLog` | EventLogConfig | `{}` | Event logging settings |
 | `comms` | CommsConfig | `{}` | Communication fallback settings |
@@ -332,6 +333,16 @@ Controls how the scheduler scans for tasks and dispatches them.
 | `maxConcurrentDispatches` | number | `3` | Maximum concurrent dispatches globally |
 | `minDispatchIntervalMs` | number | `0` | Minimum interval between dispatches (0 = disabled) |
 | `maxDispatchesPerPoll` | number | `10` | Maximum dispatches per poll cycle |
+
+### Daemon Configuration
+
+Controls the `aof-daemon` runtime. Source: `src/config/registry.ts`.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `pollIntervalMs` | number | `30000` | Poll interval for the scheduler loop (ms) |
+| `socketPath` | string | `<dataDir>/daemon.sock` | Override path for the Unix-domain IPC socket. Created with mode `0600`. |
+| `mode` | `"plugin-bridge"` \| `"standalone"` | `"standalone"` | Dispatch mode selector. `plugin-bridge` expects an OpenClaw plugin to attach via long-poll and delegates agent spawns to it; `standalone` falls through to the HTTP gateway adapter. Adapter selection also happens at dispatch time based on whether a plugin is currently attached — the `mode` value controls the "no plugin attached → hold" behavior (D-12). |
 
 ### Metrics Configuration
 
@@ -364,7 +375,14 @@ Controls how the dispatcher communicates with agents.
 
 ## OpenClaw Plugin Wiring
 
-AOF registers as an OpenClaw plugin via `openclaw.plugin.json`. This section covers the plugin manifest and the gateway configuration needed to activate AOF.
+AOF registers as an OpenClaw plugin via `openclaw.plugin.json`. As of v1.15,
+the plugin is a thin bridge: it forwards tool invocations to the daemon over
+`daemon.sock` and handles agent-spawn callbacks from the daemon via a
+long-poll. It no longer owns an in-process `AOFService` — that lives in the
+daemon.
+
+This section covers the plugin manifest and the gateway configuration needed
+to activate AOF.
 
 ### Plugin Manifest (`openclaw.plugin.json`)
 
@@ -385,7 +403,7 @@ These fields go in the `plugins.aof.config` section of your `openclaw.json`:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `dataDir` | string | `"~/.openclaw/aof"` | AOF state directory |
+| `dataDir` | string | `"~/.aof/data"` | AOF state directory (must match the daemon's) |
 | `pollIntervalMs` | number | `30000` | Scheduler poll interval in milliseconds |
 | `defaultLeaseTtlMs` | number | `300000` | Default task lease TTL in milliseconds |
 | `dryRun` | boolean | `false` | If true, scheduler observes but does not dispatch |
@@ -423,7 +441,7 @@ To enable AOF in your OpenClaw gateway, add it to the `plugins` section of `~/.o
     "aof": {
       "enabled": true,
       "config": {
-        "dataDir": "~/.openclaw/aof",
+        "dataDir": "~/.aof/data",
         "pollIntervalMs": 30000,
         "maxConcurrentDispatches": 3,
         "modules": {

@@ -235,9 +235,55 @@ No manual intervention is required for existing tasks.
 
 ### Gate source code
 
-Gate evaluation code (`src/dispatch/gate-*.ts`, `src/schemas/gate.ts`, `src/schemas/workflow.ts`) is kept but deprecated. It serves as a safety net during the migration period and will be removed in v1.3.
+Gate evaluation code was fully removed in v1.3. If you are still running v1.1 or v1.2, upgrade with `aof setup --auto --upgrade` and the migration framework will convert any gate-based tasks in place (Migration 002 in v1.3).
+
+## Daemon as Single Authority (v1.14 to v1.15)
+
+AOF v1.15 makes `aof-daemon` mandatory infrastructure. The OpenClaw plugin
+becomes a thin bridge that IPCs to the daemon over a Unix-domain socket at
+`~/.aof/data/daemon.sock`. The prior "plugin-mode skips daemon install"
+branch from Phase 42 / v1.14 is removed.
+
+### What changed
+
+- The installer always installs the `aof-daemon` launchd (macOS) or systemd
+  (Linux) user service — regardless of whether the OpenClaw plugin is also
+  wired.
+- The in-plugin `AOFService` singleton is gone. One daemon owns the task
+  store, scheduler, and dispatch logic per install.
+- `install.sh --force-daemon` is a deprecated no-op; passing it emits a
+  warning but otherwise runs the default install path. The flag will be
+  removed in a future release.
+- `daemon.sock` is created with mode `0600`. Trust boundary is the invoking
+  user's Unix uid.
+
+### Automatic migration (Migration 007)
+
+`aof setup --auto --upgrade` runs Migration 007, which:
+
+1. Checks for the platform service file (`~/Library/LaunchAgents/ai.openclaw.aof.plist`
+   or `~/.config/systemd/user/ai.openclaw.aof.service`).
+2. If absent, calls `installService({ dataDir: <aofRoot> })` — the same
+   helper `aof daemon install` uses — to write the service file and
+   load/start the daemon.
+3. If present, no-ops with a green-check breadcrumb line.
+
+The migration is idempotent and safe to re-run. It has no `down()`: rolling
+it back would strand the v1.15 thin-bridge plugin with no IPC authority to
+talk to. Canonical rollback from v1.15 is "install an older AOF version"
+(see [UPGRADING.md](../../UPGRADING.md) §Rollback).
+
+### What you need to do
+
+- **Fresh installs:** Nothing. The installer handles it.
+- **Upgrades from v1.14 that skipped the daemon:** The daemon will be
+  installed automatically. If you deliberately opted out of the daemon and
+  need to stay there, pin your deployment to v1.14.
+- **CI/deployment scripts passing `--force-daemon`:** Keep working but will
+  print a deprecation warning. Remove the flag at your earliest convenience.
 
 ## See Also
 
 - [Task Format](./task-format.md) -- Task file structure and frontmatter schema
 - [Workflow DAGs](workflow-dags.md) -- Full DAG workflow documentation
+- [Upgrading](../../UPGRADING.md) -- Version-to-version upgrade guide

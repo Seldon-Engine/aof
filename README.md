@@ -29,14 +29,18 @@ It works for any domain where agents collaborate — software engineering, RevOp
 curl -fsSL https://raw.githubusercontent.com/d0labs/aof/main/scripts/install.sh | sh
 ```
 
+The installer scaffolds your data directory and installs the `aof-daemon`
+user service (launchd on macOS, systemd on Linux). The daemon is the single
+scheduler/IPC authority; the OpenClaw plugin connects to it over a Unix
+socket at `~/.aof/data/daemon.sock`.
+
 ### Set up and run
 
 ```bash
 aof init              # Configure OpenClaw integration
-aof daemon install    # Start the background daemon
+aof daemon status     # Verify the daemon is running (installed by the installer)
 aof org show          # List available agents
 aof task create "My first task" --agent <your-agent-id>
-aof daemon status     # Verify it's running
 ```
 
 See the **[Getting Started Guide](docs/guide/getting-started.md)** for a complete zero-to-working walkthrough.
@@ -63,6 +67,7 @@ See the **[Getting Started Guide](docs/guide/getting-started.md)** for a complet
 - **[Getting Started](docs/guide/getting-started.md)** — Install, configure, and orchestrate your first agent team
 - **[Configuration Reference](docs/guide/configuration.md)** — Org chart schema, AOF config, OpenClaw plugin wiring
 - **[CLI Reference](docs/guide/cli-reference.md)** — Complete command reference (auto-generated)
+- **[Upgrading](UPGRADING.md)** — Version-to-version upgrade notes (v1.15 notes on the daemon being mandatory)
 - **[Full User Guide](docs/README.md)** — All user-facing docs
 
 ### For Contributors
