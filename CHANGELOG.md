@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.15.1](https://github.com/d0labs/aof/compare/v1.15.0...v1.15.1) (2026-04-18)
+
+### Features
+
+* **migrations:** add 008-strip-bogus-project-data to clean tainted tasks ([b1014f2](https://github.com/d0labs/aof/commit/b1014f20a50b184955ea17aa749f992753a0e617))
+
+### Bug Fixes
+
+* **daemon,service,mcp:** pass explicit null projectId for root store ([1389667](https://github.com/d0labs/aof/commit/138966777d70d8c6e13f3a8c8dc7c336ae241bdf))
+* **store:** remove basename() projectId fallback, make unscoped explicit ([4297713](https://github.com/d0labs/aof/commit/4297713cd97867797edba1b88946beeb971a6d6c))
+* **test-infra:** bound HTTP timeout in StandaloneAdapter fall-through test ([203bb3c](https://github.com/d0labs/aof/commit/203bb3c862259ffa2503e9bdc2f815c6312e3e20))
+* **test-infra:** raise HNSW P99 ceiling to regression-guard (not benchmark) ([c3741e4](https://github.com/d0labs/aof/commit/c3741e44d304d6de218bacc2060d3472e7b83016))
+* **test-infra:** scope default vitest config to src/__tests__ only ([b9d9196](https://github.com/d0labs/aof/commit/b9d919684a405dc1962eb00b7156b30cb3eeb293))
+* **test-infra:** widen vi.waitFor timeout for daemon SIGTERM cleanup tests ([4bf55e1](https://github.com/d0labs/aof/commit/4bf55e18b761b9311e57f57fd5ba60f31c2e9388))
+
+### Tests
+
+* **044:** RED — assert no project leak from unscoped store ([c3b63b5](https://github.com/d0labs/aof/commit/c3b63b549ec2837c3fbcece282f4062b66b0165d))
+
 ## [1.15.0](https://github.com/d0labs/aof/compare/v1.14.11...v1.15.0) (2026-04-18)
 
 ### Features
