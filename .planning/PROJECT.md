@@ -97,6 +97,21 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 - ✓ Architecture fixes (0 circular deps, store abstraction enforced, config→org layering fixed, memory barrel split) — v1.10
 - ✓ Test infrastructure (createTestHarness adopted by 13 files, typed mock factories, coverage expanded to all src/) — v1.10
 
+### Validated (v1.15)
+
+- ✓ Thin-plugin / daemon-as-single-authority — OpenClaw plugin is a bridge to aof-daemon over Unix-domain socket at `~/.aof/data/daemon.sock`; the in-plugin `AOFService` singleton is removed (D-02) — v1.15
+- ✓ Daemon always installed — installer and Migration 007 install the launchd/systemd user service unconditionally; Phase 42 plugin-mode skip branch removed (D-01, D-14) — v1.15
+- ✓ `--force-daemon` demoted to deprecated no-op with stderr warning; flag retained for one release cycle for CI/script compatibility (D-04) — v1.15
+- ✓ Seven new IPC routes over daemon.sock: `POST /v1/tool/invoke`, four `POST /v1/event/*` (session-end, agent-end, before-compaction, message-received), `GET /v1/spawns/wait`, `POST /v1/spawns/{id}/result` (D-05) — v1.15
+- ✓ Single `invokeTool` envelope dispatches against shared tool-registry — adding a new tool requires no new IPC route (D-06) — v1.15
+- ✓ Selective session-event forwarding — 4 state-mutating hooks forward to daemon, 3 capture hooks stay local in the plugin (D-07) — v1.15
+- ✓ Socket permissions: `daemon.sock` created with mode `0600`, trust boundary = invoking Unix uid (D-08) — v1.15
+- ✓ Long-poll spawn callback — plugin pulls `SpawnRequest` via `GET /v1/spawns/wait`, invokes `runEmbeddedPiAgent` inside gateway, posts outcome via `POST /v1/spawns/{id}/result` (D-09) — v1.15
+- ✓ PluginBridgeAdapter alongside retained StandaloneAdapter — dispatch-time selection based on attached-plugin presence (D-10) — v1.15
+- ✓ Implicit plugin registration via active long-poll presence; auto-release on socket close (D-11) — v1.15
+- ✓ No-plugin-attached → tasks held in `ready/` (not deadlettered); upholds "tasks never get dropped" invariant (D-12) — v1.15
+- ✓ Multi-plugin design-ready — `pluginId` field reserved (Zod-optional, defaults to `"openclaw"`) in IPC envelopes; only openclaw plugin wired this release (D-13) — v1.15
+
 ### Active
 
 (No active milestone — planning next)
@@ -122,7 +137,7 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 - OpenTelemetry integration — deferred to v2
 - Self-healing (circuit breaker, dead-letter resurrection, stuck session recovery) — deferred to v2
 - Agent-guided org chart setup — addressed in v1.4 (org chart guidance in compressed skill, agent-led provisioning)
-- Standalone daemon executor wiring — deferred to v2
+- Standalone daemon executor wiring — addressed in v1.15 (StandaloneAdapter retained for daemon-only installs; PluginBridgeAdapter selected when plugin attached)
 - Memory search reranker — deferred to v2
 - Memory tier auto compaction — deferred to v2
 - Autoupdate mechanism — deferred to v2
@@ -131,13 +146,15 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 - Kanban/mailbox view polish — deferred to v2
 - Large task orchestration / agent subtask creation — partially addressed by v1.2 workflows, full scope deferred to v2
 - npm registry publishing — distribution via GitHub Releases + installer
+- Non-OpenClaw plugins (slack, cli, other gateways) — v1.15 IPC contract is design-ready via reserved `pluginId` field; wiring deferred to a follow-up phase
+- Remote daemon over TCP/HTTP — Unix socket only per v1.15 D-08; PROJECT.md single-machine constraint unchanged
 
 ## Context
 
 - AOF lives at `~/Projects/AOF/` — TypeScript project with src/, tests/, dist/
-- Source structure: cli/, dispatch/, store/, protocol/, events/, org/, memory/, schemas/, daemon/, recovery/, gateway/, plugins/
+- Source structure: cli/, dispatch/, store/, protocol/, events/, org/, memory/, schemas/, daemon/, recovery/, gateway/, plugins/, ipc/
 - Builds with tsdown, tests with vitest (~107k LOC, 3,017 tests)
-- Runtime data lands in `~/.openclaw/aof/` (events/, tasks/, state/, memory/)
+- Runtime data lands in `~/.aof/data/` (events/, tasks/, state/, memory/, daemon.sock, daemon.pid)
 - OpenClaw gateway is at `~/.openclaw/workspace/package/` — AOF uses its plugin-sdk export
 - The org chart (`org/org-chart.yaml`) drives all routing, memory, and agent configuration
 - v1.0 shipped: scheduler is restart-safe, daemon runs under OS supervision, gateway dispatch works via GatewayAdapter
@@ -148,6 +165,7 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 - v1.5 shipped: event tracing — completion enforcement, session trace capture, `aof trace` CLI with DAG hop correlation
 - v1.8 shipped: task notifications — subscription API, callback delivery with retry, all-granularity batching, depth limiting, restart recovery
 - v1.10 shipped: codebase cleanups — dead code removal, bug fixes, centralized config, structured logging, code refactoring, architecture fixes, test infrastructure
+- v1.15 shipped: thin-plugin / daemon-as-single-authority — plugin-to-daemon IPC over Unix socket, PluginBridgeAdapter, Migration 007 (always-install daemon), 0600 socket perms, no-plugin-attached hold-not-drop invariant, pluginId envelope reservation for future fan-out
 - OpenClaw constraint: no nested agent sessions — scheduler must advance hops between independent sessions
 - Node 22 pinned as prerequisite (Node 24/25 have better-sqlite3 build failures)
 
@@ -209,6 +227,15 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 | Dependency inversion for config→org cycle | Linter passed as optional parameter to break upward import | ✓ Good |
 | ITaskStore.save/saveToPath for store encapsulation | All persistence routed through interface, no direct serialize+write | ✓ Good |
 | createTestHarness() for test setup unification | One function creates tmpDir, store, logger, events — adopted by 13 files | ✓ Good |
+| Daemon-as-single-authority (v1.15 D-02) | Eliminates dual-code-path fragility between plugin and standalone modes; one writer per install | ✓ Good |
+| Unix-socket IPC over TCP for plugin-daemon bridge (v1.15 D-05) | Zero new ports, zero auth surface, lowest latency; same idiom as existing health socket | ✓ Good |
+| Single `invokeTool` envelope (v1.15 D-06) | Adding a tool requires no new IPC route; mirrors toolRegistry unification from v1.10 | ✓ Good |
+| Long-poll spawn callback vs inbound plugin socket (v1.15 D-09) | OpenClaw plugin-sdk doesn't expose inbound listeners; pull-model is proven pattern (GH Actions runners, Buildkite agents) | ✓ Good |
+| Implicit plugin registration via long-poll presence (v1.15 D-11) | No separate register/deregister handshake, survives OpenClaw's per-session reload cycle | ✓ Good |
+| No-plugin-attached → hold in ready, not deadletter (v1.15 D-12) | Upholds core-value invariant — gateway reloads must not drop tasks | ✓ Good |
+| `pluginId` reserved in IPC envelopes (v1.15 D-13) | Future non-openclaw plugins (slack, cli) can attach without schema bumps | ✓ Good |
+| Migration 007 idempotent, no `down()` (v1.15 D-14) | Matches 005/006 precedent; canonical v1.15 rollback is "install older version" | ✓ Good |
+| `--force-daemon` demoted to deprecated no-op (v1.15 D-04) | Preserves v1.14 CI/script compatibility for one release cycle; flag removed in future | ✓ Good |
 
 ---
-*Last updated: 2026-03-16 after v1.10 milestone completed*
+*Last updated: 2026-04-17 after v1.15 Phase 43 shipped*
