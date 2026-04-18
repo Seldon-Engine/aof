@@ -172,7 +172,16 @@ describe("startAofDaemon — SelectingAdapter wiring (43-05)", () => {
     // connection-refused or similar transient error — NOT the "no-plugin-attached"
     // sentinel. That's the observable signal that standalone fell through
     // rather than held.
-    const result = await executor.spawnSession(makeTaskContext());
+    //
+    // Pass a short `timeoutMs` so the HTTP fetch aborts quickly instead of
+    // waiting 30s for the default. On a loaded machine, the default (30s
+    // spawn + 5s health verify = 35s worst case) can exceed the 10s vitest
+    // per-test timeout and flake this test. Under normal conditions TCP
+    // connect fails with ECONNREFUSED in <100ms anyway — this bound just
+    // prevents worst-case stalls from bleeding into the assertion window.
+    const result = await executor.spawnSession(makeTaskContext(), {
+      timeoutMs: 1000,
+    });
     expect(result.success).toBe(false);
     // The critical assertion: we did NOT return the D-12 sentinel; standalone
     // mode falls through to the StandaloneAdapter whose failure mode is a
