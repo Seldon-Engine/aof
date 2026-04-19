@@ -44,6 +44,28 @@ npm run release:patch|minor|major # GitHub-only. NEVER pass --no-npm (skips vers
 npm run deploy                    # Build + deploy to ~/.aof + symlink plugin
 ```
 
+**Release notes are ALWAYS hand-crafted — never ship the auto-generated `@release-it/conventional-changelog` dump to users.** Immediately after `release-it` completes, overwrite the GitHub release notes with a structured highlights document. A release is not "done" until this step runs.
+
+```bash
+# After release-it succeeds:
+gh release edit v<version> --notes-file /tmp/v<version>-notes.md
+```
+
+Required sections, in this order:
+1. **TL;DR** — 1–2 sentences: what changed, what the user needs to do to upgrade.
+2. **What's New** (features) / **Bug Fixed** (patches) — user-visible behavior change, not commit titles. Tables for enumerable things (routes, flags, config keys).
+3. **Upgrade Notes** — required upgrade actions (migrations, deprecations, config changes, compatibility breaks). Call out migration numbers and idempotence.
+4. **Architecture Internals** (for minor+) OR **Test Infrastructure** (if infra work shipped) — for developers working on AOF itself; keep brief.
+5. **Full Changelog** — link to the `v<prev>...v<this>` compare URL.
+
+Hard rules for the notes body:
+- No GSD phase internals (`43-08`, `D-01/D-04`, `WR-01`) in user-facing copy — those are internal references.
+- No bare conventional-commit dumps (`feat(X): ...` lists) — readers shouldn't have to decode commit subjects to learn what changed.
+- Cite concrete commands users will run (`aof setup --auto --upgrade`), concrete paths (`~/.aof/data/daemon.sock`), concrete error strings they might see in logs.
+- "Who is affected" paragraph whenever a bug fix is user-visible.
+
+If you're tempted to skip the notes pass because "it was a small release" or "the commits are self-explanatory": they aren't. Do it anyway.
+
 ## Orphan vitest workers
 Vitest uses a tinypool worker pool. When a `npm test` / `npx vitest` invocation is aborted mid-run (timeout, Ctrl-C, tool cancellation), the pool's child `node (vitest N)` processes are frequently leaked — they keep running at 100% CPU, holding ports and file handles. Root cause isn't ours; vitest's pool cleanup on SIGTERM is unreliable under some circumstances.
 
