@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.16.1](https://github.com/d0labs/aof/compare/v1.16.0...v1.16.1) (2026-04-23)
+
+### Features
+
+* **subscription:** add attempts audit trail; clear stale failureReason ([b71947a](https://github.com/d0labs/aof/commit/b71947a703b23a53488f06397bd3211a68018e86))
+
+### Bug Fixes
+
+* **chat-delivery:** migrate sender to unified runtime.channel.outbound API ([711d91e](https://github.com/d0labs/aof/commit/711d91e4be395ebf02849f32ffe6e56015477132))
+* **daemon:** default mode to plugin-bridge; document zombie-agent cache ([2e58395](https://github.com/d0labs/aof/commit/2e583951d44f7bfafe13c34e40b3448586f96cff))
+* **daemon:** pass vaultRoot to AOFService for multi-project discovery ([ee63dc0](https://github.com/d0labs/aof/commit/ee63dc06aeac357193f9ec81a97c33c3475e4544))
+
 ## [1.16.0](https://github.com/d0labs/aof/compare/v1.15.1...v1.16.0) (2026-04-23)
 
 ### Features
