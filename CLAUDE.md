@@ -72,6 +72,14 @@ launchctl kickstart -k "gui/$(id -u)/ai.openclaw.gateway"   # OpenClaw gateway (
 ```
 Restarting only the gateway is a trap: the plugin reloads with new code and starts polling new IPC routes, but the daemon keeps the old code in memory and returns 404 until it's restarted. A silent 30s-backoff loop results.
 
+**Before kickstarting, verify the `op run` wrapper is still present in the plists.** Upgrades and manual edits have historically stripped it out (see the `*.plist.bak-pre-oprun-restore-*` backups in `~/Library/LaunchAgents/`); without it the process runs with no 1Password-sourced env vars, and the failure mode (missing API keys, empty tokens) is usually a cascade of unrelated-looking errors. Quick check:
+```bash
+rg -A 1 "ProgramArguments" ~/Library/LaunchAgents/ai.openclaw.gateway.plist ~/Library/LaunchAgents/ai.openclaw.aof.plist | rg "oprun|op run|\.openclaw/bin/"
+```
+The gateway plist should invoke `openclaw-gateway-oprun.sh` (or equivalent `op run --env-file …` wrapper). If the line is missing, restore from the most recent `.bak-pre-oprun-restore-*` backup before kickstarting — otherwise the restart will bring the process up in a broken state. Do this check even when only restarting (not just deploying).
+
+**Long-running OpenClaw agent processes cache plugin code in memory.** OpenClaw reloads the AOF plugin per-session, but process-resident agents (workspace processes started on some prior day) hold whatever plugin code they loaded at startup. After an AOF version bump that crosses an architectural boundary (e.g. Phase 43 thin-bridge, pre vs post), those agents continue running OLD plugin code — including a pre-thin-bridge in-process `AOFService` + `EventLogger` that appends to the same `events/YYYY-MM-DD.jsonl` as the new daemon. Symptoms: two interleaved `eventId` sequences in one file, `aof_dispatch` calls logged by an unexpected logger, transitions that never reach the new daemon's notifier callbacks. Restarting the gateway alone does not help — the zombie agents are separate processes. `ps aux | grep openclaw` and kill any agent process whose start time pre-dates the AOF install, or just **reboot**. There is no live plugin-reload mechanism.
+
 **Release notes are ALWAYS hand-crafted — never ship the auto-generated `@release-it/conventional-changelog` dump to users.** Immediately after `release-it` completes, overwrite the GitHub release notes with a structured highlights document. A release is not "done" until this step runs.
 
 ```bash

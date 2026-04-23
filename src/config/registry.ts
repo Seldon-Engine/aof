@@ -38,7 +38,29 @@ export const AofConfigSchema = z.object({
     .object({
       pollIntervalMs: z.coerce.number().positive().default(30_000),
       socketPath: z.string().optional(),
-      mode: z.enum(["plugin-bridge", "standalone"]).default("standalone"),
+      /**
+       * Dispatch routing:
+       *   - `plugin-bridge` (default): the daemon dispatches only via the
+       *     in-process OpenClaw plugin's spawn-queue long-poll. When no plugin
+       *     is attached (e.g. brief window during gateway restart, or the
+       *     daemon's first few polls before the plugin has long-polled yet),
+       *     tasks hold-in-ready until a plugin attaches. The HTTP adapter is
+       *     never used.
+       *   - `standalone`: opt-in fallback for truly headless setups where
+       *     no OpenClaw plugin will ever attach. Dispatches via HTTP to
+       *     `openclaw.gatewayUrl`. Post-Phase-43 this path is rarely useful
+       *     — the normal gateway does not expose the HTTP dispatch endpoint
+       *     it requires — but the mode is retained for diagnostic and
+       *     legacy setups.
+       *
+       * Prior default was `standalone`, which raced the daemon's first
+       * dispatch against the plugin's initial long-poll attach. When the
+       * daemon "won" the race (no plugin attached yet), it fell through to
+       * the HTTP adapter and got 404 from gateways that never implemented
+       * the standalone endpoint. `plugin-bridge` is the safer default for
+       * every shipped OpenClaw install.
+       */
+      mode: z.enum(["plugin-bridge", "standalone"]).default("plugin-bridge"),
     })
     .default({}),
   openclaw: z
