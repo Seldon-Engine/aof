@@ -73,6 +73,25 @@ export async function transitionToDeadletter(
   const retryCount = (task.frontmatter.metadata.retryCount as number | undefined) ?? 0;
   const errorClass = (task.frontmatter.metadata.errorClass as string | undefined) ?? "unknown";
   const agent = task.frontmatter.routing?.agent;
+  const deadletteredAt = new Date().toISOString();
+  const deadletterReason =
+    errorClass === "permanent" ? "permanent_error" : "max_dispatch_failures";
+
+  // BUG-005: stamp the deadletter cause into the task's own frontmatter
+  // metadata, not just the event log. Coordinators triaging a deadlettered
+  // task via `aof_status_report` or a direct file read need the failure
+  // summary on the task itself; chasing the cause through events.jsonl is
+  // operationally painful, especially during incidents where many tasks
+  // deadletter for the same reason (e.g. a shared upstream auth outage).
+  task.frontmatter.metadata = {
+    ...task.frontmatter.metadata,
+    deadletterReason,
+    deadletterLastError: lastFailureReason,
+    deadletterErrorClass: errorClass,
+    deadletterAt: deadletteredAt,
+    deadletterFailureCount: failureCount,
+  };
+  await store.save(task);
 
   // Transition task to deadletter status
   await store.transition(taskId, "deadletter");

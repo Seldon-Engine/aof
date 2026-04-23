@@ -100,7 +100,14 @@ export const toolRegistry: ToolRegistry = {
   },
 
   aof_task_cancel: {
-    description: "Cancel a task with optional reason. Moves task to cancelled status.",
+    description:
+      "Cancel a task with optional reason. Moves task to cancelled status. " +
+      "Works from any non-terminal state including `deadletter` — the canonical way for a coordinator to clean up a task whose work was completed elsewhere (direct session, manual fallback) or that deadlettered for operational reasons (missing agent credentials, upstream outage). " +
+      "Use structured reason prefixes for auditability: " +
+      "`superseded: <explanation>` for work completed outside the task lifecycle; " +
+      "`duplicate-of: TASK-YYYY-MM-DD-NNN` when another task covered the same work; " +
+      "`abandoned: <explanation>` when the work is no longer needed. " +
+      "The reason is persisted in the task's frontmatter metadata (`cancellationReason`) and in the `task.cancelled` event payload.",
     schema: taskCancelSchema,
     handler: async (ctx, input) => aofTaskCancel(ctx, input),
   },
