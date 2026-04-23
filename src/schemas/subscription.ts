@@ -38,6 +38,24 @@ export const SubscriptionDelivery = z.object({
 }).passthrough();
 export type SubscriptionDelivery = z.infer<typeof SubscriptionDelivery>;
 
+/**
+ * A single delivery attempt — either successful or failed. The full ordered
+ * list lives in `TaskSubscription.attempts` for an audit trail; the
+ * aggregate top-level fields (`deliveryAttempts` counter, `failureReason`
+ * from the last attempt, `lastAttemptAt`, `deliveredAt`) are derived from
+ * this list but persisted alongside for cheap reads.
+ */
+export const TaskSubscriptionAttempt = z.object({
+  attemptedAt: z.string().datetime().describe("ISO-8601 timestamp when the attempt started"),
+  success: z.boolean().describe("Whether the attempt delivered successfully"),
+  toStatus: z.string().optional().describe("Status transition that triggered this attempt (e.g. 'done'); absent for non-transition-triggered deliveries"),
+  error: z.object({
+    kind: z.string().optional().describe("Machine-readable error class (e.g. 'send-failed', 'not-found')"),
+    message: z.string().describe("Human-readable failure reason"),
+  }).optional().describe("Failure details; absent when success is true"),
+});
+export type TaskSubscriptionAttempt = z.infer<typeof TaskSubscriptionAttempt>;
+
 /** A single task subscription. */
 export const TaskSubscription = z.object({
   id: z.string().uuid().describe("Unique subscription identifier (UUID v4)"),
@@ -48,11 +66,12 @@ export const TaskSubscription = z.object({
   createdAt: z.string().datetime().describe("ISO-8601 creation timestamp"),
   updatedAt: z.string().datetime().describe("ISO-8601 last update timestamp"),
   deliveredAt: z.string().datetime().optional().describe("ISO-8601 delivery timestamp (set on successful delivery)"),
-  failureReason: z.string().optional().describe("Reason for delivery failure (set when status is 'failed')"),
-  deliveryAttempts: z.number().int().min(0).default(0).describe("Number of delivery attempts made"),
+  failureReason: z.string().optional().describe("Reason for the MOST RECENT FAILED attempt (cleared on success). Full history lives in `attempts`."),
+  deliveryAttempts: z.number().int().min(0).default(0).describe("Total number of delivery attempts made (equals `attempts.length`)"),
   lastAttemptAt: z.string().datetime().optional().describe("ISO-8601 timestamp of last delivery attempt"),
   lastDeliveredAt: z.string().datetime().optional().describe("ISO-8601 cursor for all-granularity delivery — tracks last delivered transition timestamp"),
   notifiedStatuses: z.array(z.string()).default([]).describe("Per-status dedupe ledger for kinds that fire on multiple non-terminal transitions"),
+  attempts: z.array(TaskSubscriptionAttempt).default([]).describe("Ordered audit trail of every delivery attempt — success + failure — for post-mortem analysis and retry reasoning"),
 });
 export type TaskSubscription = z.infer<typeof TaskSubscription>;
 

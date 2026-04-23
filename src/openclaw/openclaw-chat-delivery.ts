@@ -101,12 +101,18 @@ export class OpenClawChatDeliveryNotifier {
 
     const message = renderMessage({ task, toStatus, actor, reason, runResult });
 
+    const attemptedAt = new Date().toISOString();
     try {
       await this.opts.messageTool.send(target, message, {
         subscriptionId: sub.id,
         taskId: task.frontmatter.id,
         toStatus,
         delivery: sub.delivery as Record<string, unknown> | undefined,
+      });
+      await subscriptionStore.appendAttempt(task.frontmatter.id, sub.id, {
+        attemptedAt,
+        success: true,
+        toStatus,
       });
       await subscriptionStore.markStatusNotified(task.frontmatter.id, sub.id, toStatus);
       if (TERMINAL_STATUSES.has(toStatus)) {
@@ -116,11 +122,19 @@ export class OpenClawChatDeliveryNotifier {
         });
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      await subscriptionStore.update(task.frontmatter.id, sub.id, {
-        deliveryAttempts: sub.deliveryAttempts + 1,
-        lastAttemptAt: new Date().toISOString(),
-        failureReason: message,
+      const failureMessage = err instanceof Error ? err.message : String(err);
+      const kind =
+        err && typeof err === "object" && "kind" in err && typeof (err as { kind: unknown }).kind === "string"
+          ? ((err as { kind: string }).kind)
+          : undefined;
+      await subscriptionStore.appendAttempt(task.frontmatter.id, sub.id, {
+        attemptedAt,
+        success: false,
+        toStatus,
+        error: {
+          ...(kind !== undefined ? { kind } : {}),
+          message: failureMessage,
+        },
       });
       log.error({ err, target, taskId: task.frontmatter.id }, "messageTool.send failed");
     }

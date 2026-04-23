@@ -52,6 +52,7 @@ export class SubscriptionStore {
       updatedAt: now,
       deliveryAttempts: 0,
       notifiedStatuses: [],
+      attempts: [],
       ...(delivery ? { delivery } : {}),
     };
 
@@ -184,6 +185,51 @@ export class SubscriptionStore {
       ...existing,
       notifiedStatuses: [...existing.notifiedStatuses, status],
       updatedAt: new Date().toISOString(),
+    };
+    data.subscriptions[index] = updated;
+
+    await this.writeSubscriptionsFile(filePath, data);
+    return updated;
+  }
+
+  /**
+   * Append an entry to the subscription's `attempts` audit trail and refresh
+   * the aggregate top-level fields (`deliveryAttempts`, `lastAttemptAt`, and
+   * `failureReason` — cleared on success, set on failure).
+   *
+   * Does NOT set `status` or `deliveredAt` — the caller decides lifecycle
+   * transitions based on delivery kind (e.g. chat-delivery flips to
+   * `delivered` only on terminal transitions; all-granularity subscriptions
+   * stay `active` even after successful deliveries).
+   */
+  async appendAttempt(
+    taskId: string,
+    subscriptionId: string,
+    attempt: import("../schemas/subscription.js").TaskSubscriptionAttempt,
+  ): Promise<TaskSubscription | undefined> {
+    const taskDir = await this.taskDirResolver(taskId);
+    const filePath = join(taskDir, SUBSCRIPTIONS_FILENAME);
+    const data = await this.readSubscriptionsFile(filePath);
+
+    const index = data.subscriptions.findIndex((s) => s.id === subscriptionId);
+    if (index === -1) return undefined;
+
+    const existing = data.subscriptions[index]!;
+    const attempts = [...existing.attempts, attempt];
+    const now = new Date().toISOString();
+
+    const updated: TaskSubscription = {
+      ...existing,
+      attempts,
+      deliveryAttempts: attempts.length,
+      lastAttemptAt: attempt.attemptedAt,
+      // Clear the stale failureReason on success; set it on failure so
+      // old readers that don't consume `attempts` still see the current
+      // failure at the top level.
+      ...(attempt.success
+        ? { failureReason: undefined }
+        : { failureReason: attempt.error?.message ?? "delivery failed" }),
+      updatedAt: now,
     };
     data.subscriptions[index] = updated;
 
