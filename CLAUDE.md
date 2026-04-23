@@ -65,6 +65,13 @@ npm run release:patch|minor|major # GitHub-only. NEVER pass --no-npm (skips vers
 npm run deploy                    # Build + deploy to ~/.aof + symlink plugin
 ```
 
+**After `npm run deploy`, restart BOTH launchd jobs** — the gateway AND the standalone daemon:
+```bash
+launchctl kickstart -k "gui/$(id -u)/ai.openclaw.aof"       # standalone daemon (owns /v1/* routes)
+launchctl kickstart -k "gui/$(id -u)/ai.openclaw.gateway"   # OpenClaw gateway (hosts the plugin)
+```
+Restarting only the gateway is a trap: the plugin reloads with new code and starts polling new IPC routes, but the daemon keeps the old code in memory and returns 404 until it's restarted. A silent 30s-backoff loop results.
+
 **Release notes are ALWAYS hand-crafted — never ship the auto-generated `@release-it/conventional-changelog` dump to users.** Immediately after `release-it` completes, overwrite the GitHub release notes with a structured highlights document. A release is not "done" until this step runs.
 
 ```bash
