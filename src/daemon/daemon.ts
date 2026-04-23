@@ -122,6 +122,10 @@ export async function startAofDaemon(opts: AOFDaemonOptions): Promise<AOFDaemonC
     },
     {
       dataDir: opts.dataDir,
+      // Multi-project discovery: without this, AOFService only polls the
+      // unscoped root store. `dataDir` IS the vault root — project
+      // directories live at `<dataDir>/Projects/*`.
+      vaultRoot: opts.dataDir,
       dryRun: opts.dryRun,
       pollIntervalMs: opts.pollIntervalMs,
       defaultLeaseTtlMs: opts.defaultLeaseTtlMs,
