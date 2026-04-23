@@ -57,6 +57,14 @@ export interface ITaskStore {
     contextTier?: "seed" | "full";
     /** Callback chain depth for callback-spawned tasks (SAFE-01). */
     callbackDepth?: number;
+    /**
+     * Initial lifecycle status. Defaults to `"backlog"` to preserve existing
+     * creation semantics. `aofDispatch` overrides to `"ready"` so the file
+     * materializes directly in `tasks/ready/` instead of being written in
+     * `backlog/` and then renamed — closes BUG-006's concurrent-read race
+     * where a parallel `aof_status_report` briefly observes neither dir.
+     */
+    initialStatus?: TaskStatus;
   }): Promise<Task>;
 
   /**

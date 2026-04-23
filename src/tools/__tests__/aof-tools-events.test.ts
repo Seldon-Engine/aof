@@ -54,7 +54,11 @@ describe("BUG-002: AOF tool event emission", () => {
     await rm(tmpDir, { recursive: true, force: true });
   });
 
-  it("aofDispatch emits task.created and task.transitioned events", async () => {
+  it("aofDispatch emits task.created with the task born in 'ready'", async () => {
+    // BUG-006 mitigation: dispatch creates the task directly in tasks/ready/
+    // (no intermediate backlog→ready step). The result is a single
+    // task.created event stamped with status "ready" — no separate
+    // task.transitioned event is emitted because no transition happens.
     const result = await aofDispatch(
       { store, logger },
       {
@@ -65,20 +69,17 @@ describe("BUG-002: AOF tool event emission", () => {
     );
 
     expect(result.taskId).toBeDefined();
-    
-    // Should have task.created event
+    expect(result.status).toBe("ready");
+
     const createdEvents = capturedEvents.filter(e => e.type === "task.created");
     expect(createdEvents).toHaveLength(1);
     expect(createdEvents[0]?.taskId).toBe(result.taskId);
-    
-    // Should have transition events (backlog → ready)
-    const transitionEvents = capturedEvents.filter(e => e.type === "task.transitioned");
-    expect(transitionEvents.length).toBeGreaterThan(0);
-    
-    const backlogToReady = transitionEvents.find(
-      e => e.payload.from === "backlog" && e.payload.to === "ready"
-    );
-    expect(backlogToReady).toBeDefined();
+
+    // No backlog→ready transition — dispatch bypasses backlog entirely.
+    const backlogToReady = capturedEvents
+      .filter(e => e.type === "task.transitioned")
+      .find(e => e.payload.from === "backlog" && e.payload.to === "ready");
+    expect(backlogToReady).toBeUndefined();
   });
 
   it("aofTaskUpdate emits task.transitioned event when status changes", async () => {

@@ -195,8 +195,12 @@ export async function aofDispatch(
     metadata.timeoutMs = Math.min(Math.floor(input.timeoutMs), MAX_DISPATCH_TIMEOUT_MS);
   }
 
-  // Create task with TaskStore.create
-  const task = await ctx.store.create({
+  // Create task directly in `ready/` to close BUG-006's concurrent-read
+  // race. Passing through `backlog/` + a subsequent transition doubles the
+  // window during which a concurrent aof_status_report's readdir can miss
+  // the file (once for backlog/, once for ready/). Writing once, into the
+  // final status directory, collapses the window to a single atomic rename.
+  const readyTask = await ctx.store.create({
     title: input.title.trim(),
     body: brief.trim(),
     priority,
@@ -209,32 +213,22 @@ export async function aofDispatch(
     parentId: input.parentId,
     metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
     createdBy: actor,
+    initialStatus: "ready",
   });
 
-  // Log task.created event
+  // Log task.created event — the task was born ready, so no separate
+  // `task.transitioned` event is emitted. Downstream consumers of the
+  // dispatch flow already handle the "born-ready" case because the
+  // scheduler's auto-promote path only fires on tasks in `backlog/`;
+  // dispatched tasks were never intended to be auto-promoted anyway.
   await ctx.logger.log("task.created", actor, {
-    taskId: task.frontmatter.id,
+    taskId: readyTask.frontmatter.id,
     payload: {
-      title: task.frontmatter.title,
-      priority: task.frontmatter.priority,
-      routing: task.frontmatter.routing,
+      title: readyTask.frontmatter.title,
+      priority: readyTask.frontmatter.priority,
+      routing: readyTask.frontmatter.routing,
     },
   });
-
-  // Transition to ready status
-  const readyTask = await ctx.store.transition(task.frontmatter.id, "ready", {
-    agent: actor,
-    reason: "task_dispatch",
-  });
-
-  // Log transition
-  await ctx.logger.logTransition(
-    task.frontmatter.id,
-    "backlog",
-    "ready",
-    actor,
-    "task_dispatch"
-  );
 
   // Subscribe at dispatch time
   let subscriptionId: string | undefined;
@@ -242,12 +236,12 @@ export async function aofDispatch(
     const subscriberId = input.actor ?? "unknown";
     await validateSubscriberAgent(ctx.orgChartPath, subscriberId);
     const subscriptionStore = createSubscriptionStore(ctx.store);
-    const existing = await subscriptionStore.list(task.frontmatter.id, { status: "active" });
+    const existing = await subscriptionStore.list(readyTask.frontmatter.id, { status: "active" });
     const duplicate = existing.find(s => s.subscriberId === subscriberId && s.granularity === input.subscribe);
     if (duplicate) {
       subscriptionId = duplicate.id;
     } else {
-      const sub = await subscriptionStore.create(task.frontmatter.id, subscriberId, input.subscribe!);
+      const sub = await subscriptionStore.create(readyTask.frontmatter.id, subscriberId, input.subscribe!);
       subscriptionId = sub.id;
     }
   }
@@ -262,7 +256,7 @@ export async function aofDispatch(
       completionDelivery.subscriberId ?? `notify:${completionDelivery.kind}`;
     const subscriptionStore = createSubscriptionStore(ctx.store);
     const sub = await subscriptionStore.create(
-      task.frontmatter.id,
+      readyTask.frontmatter.id,
       deliverySubscriberId,
       "completion",
       completionDelivery,

@@ -211,9 +211,19 @@ export class FilesystemTaskStore implements ITaskStore {
     workflow?: { definition: WorkflowDefinition; templateName?: string };
     contextTier?: "seed" | "full";
     callbackDepth?: number;
+    /**
+     * Initial lifecycle status for the new task. Defaults to `"backlog"` to
+     * preserve the long-standing creation semantics. `aofDispatch` overrides
+     * this to `"ready"` so the task file materializes directly in
+     * `tasks/ready/` instead of being written in `backlog/` and then renamed
+     * — closing BUG-006's concurrent-write-vs-read race where a parallel
+     * `aof_status_report` could observe the brief window when the file was
+     * in neither status directory.
+     */
+    initialStatus?: TaskStatus;
   }): Promise<Task> {
     const body = opts.body ?? "";
-    const status: TaskStatus = "backlog";
+    const status: TaskStatus = opts.initialStatus ?? "backlog";
 
     // --- Workflow handling: auto-validate and auto-initialize ---
     let resolvedWorkflow: TaskWorkflow | undefined;
