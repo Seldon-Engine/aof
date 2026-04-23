@@ -161,6 +161,23 @@ export async function aofDispatch(
     throw new Error("Task brief/description is required");
   }
 
+  // Validate dependsOn: every referenced task must exist in the store before
+  // the new task is created. Silently accepting bogus IDs produced tasks in
+  // a permanently-blocked dependency state that dep_remove couldn't clean up
+  // (reported as BUG-004 sub-issue A).
+  if (input.dependsOn && input.dependsOn.length > 0) {
+    const missing: string[] = [];
+    for (const blockerId of input.dependsOn) {
+      const blocker = await ctx.store.get(blockerId);
+      if (!blocker) missing.push(blockerId);
+    }
+    if (missing.length > 0) {
+      throw new Error(
+        `dependsOn references nonexistent task${missing.length === 1 ? "" : "s"}: ${missing.join(", ")}`,
+      );
+    }
+  }
+
   const completionDelivery =
     input.notifyOnCompletion && typeof input.notifyOnCompletion === "object"
       ? normalizeCompletionDelivery(input.notifyOnCompletion as Record<string, unknown>)
