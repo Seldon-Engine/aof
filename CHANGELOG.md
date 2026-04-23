@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.16.3](https://github.com/d0labs/aof/compare/v1.16.2...v1.16.3) (2026-04-23)
+
+### Bug Fixes
+
+* **store:** harden transitionTask against partial-rename split-state ([6fbcb18](https://github.com/d0labs/aof/commit/6fbcb18cf187c7cf770e9468edcf2a7e4d9eec0a))
+
 ## [1.16.2](https://github.com/d0labs/aof/compare/v1.16.1...v1.16.2) (2026-04-23)
 
 ### Bug Fixes
