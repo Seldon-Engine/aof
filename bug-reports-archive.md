@@ -95,3 +95,34 @@ Follow-up repair attempts:
 - Despite all of the above, `aof_status_report` continued to show the review task as `ready`.
 
 ---
+
+## BUG-003: registerHttpRoute calls rejected by gateway — missing `auth` descriptor
+
+**Date/Time:** 2026-04-23 16:40 EDT
+**Severity:** P2
+**Status:** fixed
+**Archived:** 2026-04-23
+**Fixing commit:**
+- `c683c71` fix(openclaw): pass auth: "gateway" on registerHttpRoute calls — adds required `auth` field to both `/aof/metrics` and `/aof/status` registrations and tightens the local `OpenClawHttpRouteDefinition` type so future callers can't omit it.
+
+**Verification:**
+- Pre-fix: `curl http://127.0.0.1:18789/aof/status` → HTTP 404 (route never registered); gateway.err.log logged `http route registration missing or invalid auth` on every plugin load.
+- Post-fix (deployed, both services restarted): `curl http://127.0.0.1:18789/aof/status` → HTTP 401 (route registered, gateway auth middleware reached). No further `http route registration` errors in `gateway.err.log` for the new plugin boot.
+
+**Notes on the auth shape:** The original bug report hypothesized an `auth: { mode: "token" }` object. Source inspection of the OpenClaw CLI loader (`/opt/homebrew/lib/node_modules/openclaw/dist/loader-*.js`) showed the validator requires `auth` to be the literal string `"gateway"` or `"plugin"`. The local `OpenClawHttpRouteDefinition` interface mirrors this.
+
+### Short Description
+AOF's `/aof/metrics` and `/aof/status` HTTP routes failed to register on every gateway startup because the `api.registerHttpRoute` calls omitted the `auth` descriptor that OpenClaw has required since `2026.4.11`. The plugin loaded fine and tool calls worked; only the internal HTTP observability surface was silently unregistered.
+
+### Root Cause
+`src/openclaw/adapter.ts` passed only `{ path, handler }` to `api.registerHttpRoute`. OpenClaw's loader validator (since `2026.4.11`) rejects any registration where `params.auth !== "gateway" && params.auth !== "plugin"`, logging an error and skipping the registration. Net effect: the two routes never joined the plugin-http-route table, so the gateway returned 404 for any request to them.
+
+### Original Observed Symptoms
+On every gateway boot (consistently since `2026.4.11` through at least `2026.4.22`):
+```
+[gateway] [plugins] http route registration missing or invalid auth: /aof/metrics (plugin=aof, source=/Users/xavier/.openclaw/extensions/aof/index.ts)
+[gateway] [plugins] http route registration missing or invalid auth: /aof/status  (plugin=aof, source=/Users/xavier/.openclaw/extensions/aof/index.ts)
+```
+Result: neither route was available for external polling. AOF tool calls via MCP continued to work.
+
+---
