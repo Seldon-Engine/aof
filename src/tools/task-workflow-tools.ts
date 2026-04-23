@@ -349,28 +349,43 @@ export async function aofTaskDepRemove(
   input: AOFTaskDepRemoveInput,
 ): Promise<AOFTaskDepRemoveResult> {
   const actor = input.actor ?? "unknown";
-  
-  // Validate both tasks exist
-  const task = await resolveTask(ctx.store, input.taskId);
-  const blocker = await resolveTask(ctx.store, input.blockerId);
 
-  const updatedTask = await ctx.store.removeDep(task.frontmatter.id, blocker.frontmatter.id);
+  // The dependent task must exist — removing a dep from a phantom task is
+  // always a caller mistake.
+  const task = await resolveTask(ctx.store, input.taskId);
+
+  // The blocker, however, may be an orphan ID that slipped through before
+  // the dispatch-time validator landed (or was authored by external tooling).
+  // If it doesn't resolve, pass the literal id to store.removeDep — the store
+  // tolerates missing blocker references (idempotent) and this is the only
+  // path through which corrupt dependsOn entries can be cleaned up via MCP.
+  // Mirrors the CLI behavior in src/cli/commands/task-dep.ts.
+  const resolvedBlocker = await ctx.store.get(input.blockerId)
+    .catch(() => undefined);
+  const blockerPrefix = resolvedBlocker
+    ? undefined
+    : await ctx.store.getByPrefix(input.blockerId).catch(() => undefined);
+  const blockerId = resolvedBlocker?.frontmatter.id
+    ?? blockerPrefix?.frontmatter.id
+    ?? input.blockerId;
+
+  const updatedTask = await ctx.store.removeDep(task.frontmatter.id, blockerId);
 
   await ctx.logger.log("task.dep.removed", actor, {
     taskId: updatedTask.frontmatter.id,
-    payload: { blockerId: blocker.frontmatter.id },
+    payload: { blockerId },
   });
 
-  const summary = `Task ${updatedTask.frontmatter.id} no longer depends on ${blocker.frontmatter.id}`;
+  const summary = `Task ${updatedTask.frontmatter.id} no longer depends on ${blockerId}`;
   const envelope = compactResponse(summary, {
     taskId: updatedTask.frontmatter.id,
-    blockerId: blocker.frontmatter.id,
+    blockerId,
   });
 
   return {
     ...envelope,
     taskId: updatedTask.frontmatter.id,
-    blockerId: blocker.frontmatter.id,
+    blockerId,
     dependsOn: updatedTask.frontmatter.dependsOn ?? [],
   };
 }
