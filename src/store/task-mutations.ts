@@ -5,7 +5,8 @@
  * They accept store methods as parameters to avoid circular dependencies.
  */
 
-import { rename } from "node:fs/promises";
+import { rename, unlink, mkdir, stat } from "node:fs/promises";
+import { dirname } from "node:path";
 import writeFileAtomic from "write-file-atomic";
 import type { Task, TaskStatus } from "../schemas/task.js";
 import { isValidTransition } from "../schemas/task.js";
@@ -171,20 +172,57 @@ export async function transitionTask(
   const newPath = getTaskPath(id, newStatus);
 
   if (oldPath !== newPath) {
-    // Atomic transition: write to old location first, then rename
-    // This ensures the file is never missing during the transition
-    await writeFileAtomic(oldPath, serializeTask(task));
-    
-    // Atomic move to new location
-    await rename(oldPath, newPath);
+    // Failure-safe transition:
+    //   1. Ensure target status directory exists.
+    //   2. Write the new-location file FIRST (atomic) — new location becomes
+    //      source of truth before we touch the old location.
+    //   3. Move the companion directory (best-effort — a missing companion
+    //      dir is fine; any other failure aborts and rolls back the .md write).
+    //   4. Remove the old .md. If this fails, we're in a duplicate-file state
+    //      rather than a split-state, which a startup reconciliation sweep
+    //      can detect (both files with matching frontmatter.status) and
+    //      resolve idempotently.
+    //
+    // Prior implementation wrote to the OLD path then renamed. If anything
+    // (including a concurrent writer from a zombie pre-thin-bridge plugin
+    // process) interfered between the rename of the .md and the rename of
+    // the companion dir, the .md could end up at the OLD location with
+    // frontmatter pointing at the NEW status — a permanent split-state that
+    // the scheduler couldn't reconcile. Writing new-first inverts that risk.
+    await mkdir(dirname(newPath), { recursive: true });
 
-    // Move companion directories if present
+    await writeFileAtomic(newPath, serializeTask(task));
+
     const oldDir = getTaskDir(id, currentStatus);
     const newDir = getTaskDir(id, newStatus);
     try {
       await rename(oldDir, newDir);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") {
+        // Companion dir exists but couldn't move — roll back the .md write
+        // to avoid stranding content at two locations. ENOENT is fine
+        // (some tasks have no companion directory).
+        await unlink(newPath).catch(() => {
+          // best-effort rollback; if this also fails the next startup
+          // reconciliation will clean up
+        });
+        throw err;
+      }
+    }
+
+    // Cross-process safety: verify the new file actually landed before we
+    // delete the old one. If verification fails, leave the old file in place
+    // so nothing is lost.
+    try {
+      await stat(newPath);
+      await unlink(oldPath).catch((err) => {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT") throw err;
+        // Old file already gone (e.g. another writer beat us to it) — fine.
+      });
     } catch {
-      // Companion directory missing — ignore
+      // New file verification failed — unusual but non-destructive to bail.
     }
   } else {
     // Same location, just update content atomically
