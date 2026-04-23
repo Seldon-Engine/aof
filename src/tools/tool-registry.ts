@@ -66,7 +66,9 @@ export type ToolRegistry = Record<string, ToolDefinition>;
  */
 export const toolRegistry: ToolRegistry = {
   aof_dispatch: {
-    description: "Create a new AOF task and assign to an agent or team. Returns taskId, status, and filePath.",
+    description:
+      "Create a new AOF task and assign to an agent or team. Returns taskId, status, and filePath. " +
+      "If you intend to query status for the same project in the same turn, await this response before calling aof_status_report — a status_report fired in parallel may not yet see the just-dispatched task.",
     schema: dispatchSchema,
     handler: async (ctx, input) => aofDispatch(ctx, input),
   },
@@ -84,7 +86,9 @@ export const toolRegistry: ToolRegistry = {
   },
 
   aof_status_report: {
-    description: "Summarize AOF tasks by status/agent; use to check your queue or team workload without scanning task files.",
+    description:
+      "Summarize AOF tasks by status/agent; use to check your queue or team workload without scanning task files. " +
+      "If you just called aof_dispatch in the same turn, await that response before calling this — the listing is a point-in-time scan of the tasks/ directories and a parallel call may miss a freshly dispatched task.",
     schema: statusReportSchema,
     handler: async (ctx, input) => aofStatusReport(ctx, input),
   },
