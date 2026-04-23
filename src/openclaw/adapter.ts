@@ -135,10 +135,13 @@ export function registerAofPlugin(
   }
 
   // /aof/status + /aof/metrics → IPC proxies to daemon /status (Open Q4).
+  // auth: "gateway" — OpenClaw >= 2026.4.11 rejects registrations without
+  // an auth descriptor. These are loopback-only observability surfaces; the
+  // gateway-token-protected mode is the correct choice.
   if (typeof api.registerHttpRoute === "function") {
     const proxy = buildStatusProxyHandler(socketPath);
-    api.registerHttpRoute({ path: "/aof/metrics", handler: proxy });
-    api.registerHttpRoute({ path: "/aof/status", handler: proxy });
+    api.registerHttpRoute({ path: "/aof/metrics", handler: proxy, auth: "gateway" });
+    api.registerHttpRoute({ path: "/aof/status", handler: proxy, auth: "gateway" });
   }
 
   startSpawnPollerOnce(client, api);

@@ -33,6 +33,17 @@ export interface OpenClawToolOpts {
 export interface OpenClawHttpRouteDefinition {
   path: string;
   handler: GatewayHandler;
+  /**
+   * Required auth descriptor (OpenClaw >= 2026.4.11). The gateway's loader
+   * rejects registrations where `auth` is neither "gateway" nor "plugin":
+   *   - "gateway": protected by gateway token auth (requests need a valid
+   *     gateway token — appropriate for loopback-only admin/observability
+   *     surfaces that should not be reachable without the local token).
+   *   - "plugin": the plugin's handler is responsible for its own auth.
+   * Canonical validator lives in the openclaw CLI at dist/loader-*.js —
+   * this mirror exists so TypeScript callers can't omit the field.
+   */
+  auth: "gateway" | "plugin";
 }
 
 /**

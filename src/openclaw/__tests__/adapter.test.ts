@@ -68,13 +68,13 @@ describe("OpenClaw adapter (thin-bridge, Phase 43)", () => {
   it("registers all shared-registry tools + HTTP routes + 7 event hooks; does NOT register a service", () => {
     const services: Array<{ id: string }> = [];
     const tools: Array<{ name: string; execute: (id: string, params: Record<string, unknown>) => Promise<unknown> }> = [];
-    const routes: Array<{ path: string }> = [];
+    const routes: Array<{ path: string; auth: "gateway" | "plugin" }> = [];
     const events: Record<string, (...args: unknown[]) => void> = {};
 
     const api: OpenClawApi = {
       registerService: (def) => services.push({ id: def.id }),
       registerTool: (def) => tools.push(def as (typeof tools)[number]),
-      registerHttpRoute: (def) => routes.push({ path: def.path }),
+      registerHttpRoute: (def) => routes.push({ path: def.path, auth: def.auth }),
       on: (event, handler) => {
         events[event] = handler;
       },
@@ -108,8 +108,13 @@ describe("OpenClaw adapter (thin-bridge, Phase 43)", () => {
       "aof_project_add_participant",
     ]);
 
-    // HTTP routes preserved as IPC proxies (Open Q4).
-    expect(routes.map((r) => r.path)).toEqual(["/aof/metrics", "/aof/status"]);
+    // HTTP routes preserved as IPC proxies (Open Q4), each registered with
+    // auth: "gateway" so the OpenClaw gateway loader accepts them
+    // (>= 2026.4.11 rejects registrations missing the auth descriptor).
+    expect(routes).toEqual([
+      { path: "/aof/metrics", auth: "gateway" },
+      { path: "/aof/status", auth: "gateway" },
+    ]);
 
     // All 7 hooks wired (D-07 + A1).
     for (const name of [
