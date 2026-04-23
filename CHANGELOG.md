@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.16.2](https://github.com/d0labs/aof/compare/v1.16.1...v1.16.2) (2026-04-23)
+
+### Bug Fixes
+
+* **scheduler:** poll root store alongside project stores in multi-project mode ([193a242](https://github.com/d0labs/aof/commit/193a242cb16c7111a277bced5217b2f7ba76a2ae))
+
 ## [1.16.1](https://github.com/d0labs/aof/compare/v1.16.0...v1.16.1) (2026-04-23)
 
 ### Features
