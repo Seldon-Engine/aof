@@ -126,3 +126,56 @@ On every gateway boot (consistently since `2026.4.11` through at least `2026.4.2
 Result: neither route was available for external polling. AOF tool calls via MCP continued to work.
 
 ---
+
+## BUG-006: `aof_status_report` silently omits freshly dispatched tasks under parallel tool_use
+
+**Date/Time:** 2026-04-23 17:13 EDT
+**Severity:** P2
+**Status:** fixed
+**Archived:** 2026-04-23
+**Fixing commits:**
+- `0ab4001` fix(dispatch): create task directly in ready/, skip backlog intermediate — new `ITaskStore.create({ initialStatus })` option, dispatch uses `"ready"` to collapse the write path from two disk ops (backlog write + rename to ready) to a single atomic rename, halving the concurrent-read race window.
+- `83debf4` docs(tools): warn LLMs not to parallelize aof_dispatch and aof_status_report — tool descriptions explicitly tell the agent to await dispatch before firing status_report in the same turn, closing the remaining inherent filesystem race.
+
+**Verification:**
+- Reproduced deterministically on fresh projects when the LLM emitted parallel `tool_use` blocks for dispatch + status_report (race in the daemon's IPC path).
+- Direct daemon IPC with sequential calls always returned the task correctly — confirming the bug was not in `list()` or any cache.
+- After both fixes deployed: the agent read the updated tool description, serialized the two calls, and status_report returned the freshly-dispatched task on the first attempt.
+
+### Restated Root Cause
+The bug report's framing ("silently omits … until the file is touched again") turned out to be misleading — the staleness was not time-based and had nothing to do with a cache. The real mechanism was a **concurrent filesystem read-vs-write race**: LLM agents (Opus/Sonnet) emit parallel `tool_use` blocks for operations the model judges independent. OpenClaw executes these in parallel at the HTTP/IPC level. When `aof_dispatch` and `aof_status_report` fire in the same parallel burst, the status_report's `readdir` across the `tasks/<status>/` directories could run during the brief window when dispatch's write was still in flight — the file was in neither the old nor the new directory, and the reader saw `0 tasks`. Subsequent sequential calls always saw the task correctly, which is why "the task appeared after a few minutes" — those later calls were sequential, not stale-cache-refreshed.
+
+### Fix Details
+
+**Server-side (code change):**
+- Added `initialStatus?: TaskStatus` parameter to `ITaskStore.create`. Defaults to `"backlog"` for existing callers. `aofDispatch` now passes `initialStatus: "ready"` so the task file materializes directly in `tasks/ready/` instead of being written to `backlog/` and renamed. The race window shrinks from two disk ops to one atomic rename.
+- Behavior change: dispatched tasks no longer emit a synthetic `task.transitioned backlog→ready` event — they're born in `ready`. The only downstream consumer of that event was the scheduler's auto-promote path (which only fires on `tasks/backlog/` entries, and dispatched tasks were never intended to auto-promote).
+
+**LLM-side (tool description):**
+- `aof_dispatch` and `aof_status_report` descriptions updated to explicitly instruct the caller to await a dispatch response before firing a same-project status_report in the same turn. This is the canonical hint for LLMs deciding whether to emit parallel or sequential `tool_use` blocks.
+
+Both changes are load-bearing:
+- Without the code change: even a serialized caller could in principle race, because the two-write path had a wider window and each dispatch briefly left the file in `backlog/`.
+- Without the description change: an LLM that emits parallel tool_use would still race the single-write window (point-in-time `readdir` is inherent to filesystems — no code in the store can make two concurrent operations atomic across each other).
+
+### Scope of Investigation (historical)
+Initial hypotheses were all wrong:
+- "Daemon-side project-store cache" — false; `FilesystemTaskStore.list()` does fresh `readdir` per call with no in-memory cache.
+- "MCP context store mismatch" — false; the daemon routes dispatch and status_report to the same cached project store instance.
+- "Plugin-side response cache" — false; no such cache exists.
+
+The correct diagnosis was found by:
+1. Reproducing with direct `curl --unix-socket` (sequential) → always saw the task → ruled out daemon staleness.
+2. Reproducing with concurrent `curl &` + `wait` → raced → proved the race is below the HTTP layer.
+3. Adding debug logging to the adapter to confirm the plugin was forwarding `envelopeProjectId` correctly on both calls.
+4. Observing in gateway logs that both tool calls fired in the same millisecond via parallel LLM tool_use.
+
+### Reproduction
+1. Create a brand-new project (no existing tasks).
+2. Ask an LLM agent to run `aof_dispatch` + `aof_status_report` in the same turn with no instructions to serialize.
+3. Observe: dispatch returns success with a file path; status_report returns `0 tasks`.
+4. Ask the agent to call `aof_status_report` again a moment later → task visible.
+
+After the fix: same prompt, but the agent reads the tool descriptions' sequencing hint and awaits dispatch before calling status_report → `1 task` on first try.
+
+---
