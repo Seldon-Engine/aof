@@ -102,6 +102,26 @@ Hard rules for the notes body:
 
 If you're tempted to skip the notes pass because "it was a small release" or "the commits are self-explanatory": they aren't. Do it anyway.
 
+## End-to-end debugging via the OpenClaw agent channel
+Some classes of bug only surface through the full plugin → daemon → tool-call pipeline (dispatch races, MCP envelope forwarding, agent-driven workflows). For these, the fastest loop is: you (Claude) drive AOF tool calls from the OpenClaw side by messaging the user's running `main` agent, receive its raw JSON responses, and correlate them with code reads and store state.
+
+**Send channel:** `openclaw agent --agent main --session-id <sid> --message "…"`. The flag is `--session-id`, NOT `--to` (which is E.164-only). Discover candidate sessions with `openclaw sessions --agent main --active 1440 --json` and pick a `kind: "direct"` session that's well under its `contextTokens` budget — avoid the user's active `group`/channel sessions.
+
+**Receive channel:** the `openclaw agent` CLI's stdout **does NOT reliably deliver the reply** — it hangs indefinitely in OpenClaw ≥ `2026.4.22` even when the RPC completes and the agent finishes producing output. Do not wait on its stdout. Instead, read the agent's on-disk session transcript at `~/.openclaw/agents/<agent>/sessions/<session-id>.jsonl`. Assistant replies land as JSONL records of the form `{"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"…"}],"stopReason":"stop",...}}`. The transcript is the authoritative record and doesn't depend on the CLI's delivery mechanism.
+
+**Helper (reusable within a session):** write a small send-and-wait script that (1) records the JSONL line count as a baseline, (2) fires the CLI in the background with stdout/stderr discarded (`nohup openclaw agent … >/dev/null 2>&1 </dev/null &`), (3) polls from `tail -n +$((BEFORE+1))` for a new record matching `.type=="message" and .message.role=="assistant" and .message.stopReason=="stop"`, (4) extracts `.message.content[] | select(.type=="text") | .text`. Filter on `stopReason=="stop"` so you skip intermediate tool-call / thinking records. When emitting the final text, keep it JSON-encoded through `head -n 1` and unwrap with `jq -r` only AFTER selecting the line — `jq -r` unescapes embedded newlines, and `head -n 1` on that output chops replies mid-string. Typical round-trip once the session is warm: ~8–15s.
+
+**When to use this channel:**
+- Reproducing bugs that need a real agent to exercise the MCP → daemon path (e.g. parallel tool_use races, envelope forwarding, invocation-context, completion enforcement).
+- Smoke-testing a freshly deployed fix end-to-end (dispatch a task, drive updates, observe state).
+- Anything where "can the agent actually talk to AOF through the gateway plugin right now" is the load-bearing question.
+
+**When NOT to use this channel:**
+- Pure unit-testable logic — write the vitest test instead.
+- Reads you can satisfy with a direct `curl --unix-socket ~/.aof/data/daemon.sock http://localhost/v1/tool/invoke` call. Direct IPC bypasses the plugin and is faster to iterate on; use it to isolate whether a bug is in the plugin path or the daemon path.
+
+**Zombie agent caveat:** long-running `openclaw-agent` processes cache plugin code at startup (`ps -eo pid,lstart,command | grep openclaw-agent`). If a zombie pre-dates the most recent `npm run deploy`, it runs stale code and may mask or fake-reproduce bugs. Force a fresh plugin load by confirming the session's agent process start time is newer than the deploy, or reboot / `kill` the zombies. This is distinct from the gateway-restart caveat already called out in Build & Release.
+
 ## Orphan vitest workers
 Vitest uses a tinypool worker pool. When a `npm test` / `npx vitest` invocation is aborted mid-run (timeout, Ctrl-C, tool cancellation), the pool's child `node (vitest N)` processes are frequently leaked — they keep running at 100% CPU, holding ports and file handles. Root cause isn't ours; vitest's pool cleanup on SIGTERM is unreliable under some circumstances.
 
