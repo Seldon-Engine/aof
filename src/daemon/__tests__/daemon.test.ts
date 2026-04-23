@@ -63,7 +63,12 @@ describe("AOF daemon", () => {
       enableHealthServer: false,
     });
 
-    expect(poller).toHaveBeenCalledTimes(1);
+    // Poller fires once for the unscoped root store and once per discovered
+    // project (discoverProjects always yields an `_inbox` placeholder even
+    // in an empty vault). At least one call confirms the daemon started its
+    // poll loop.
+    expect(poller).toHaveBeenCalled();
+    expect(poller).toHaveBeenCalledWith(store, logger, expect.anything());
 
     await service.stop();
   });

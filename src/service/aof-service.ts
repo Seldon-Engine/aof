@@ -435,7 +435,18 @@ export class AOFService {
   private async pollAllProjects(): Promise<PollResult> {
     const results: PollResult[] = [];
     const aggregateStart = performance.now();
-    
+
+    // Poll the unscoped root store in addition to every project store.
+    // Tasks created without a `project:` field live at `<dataDir>/tasks/`
+    // and would otherwise be stranded — the daemon reports them in its
+    // status taskCounts but never dispatches them.
+    try {
+      const rootResult = await this.poller(this.store, this.logger, this.schedulerConfig);
+      results.push(rootResult);
+    } catch (err) {
+      svcLog.error({ err, projectId: "<root>" }, "failed to poll root store");
+    }
+
     // Poll each project store
     for (const [projectId, store] of this.projectStores) {
       try {
