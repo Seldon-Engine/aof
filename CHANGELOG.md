@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.16.0](https://github.com/d0labs/aof/compare/v1.15.1...v1.16.0) (2026-04-23)
+
+### Features
+
+* **chat-delivery:** wire completion notifications from daemon to OpenClaw sessions ([1b34b18](https://github.com/d0labs/aof/commit/1b34b185009de84658e8f96df44ce4525939be6f))
+
 ## [1.15.1](https://github.com/d0labs/aof/compare/v1.15.0...v1.15.1) (2026-04-18)
 
 ### Features
