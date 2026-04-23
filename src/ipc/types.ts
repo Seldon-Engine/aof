@@ -15,8 +15,9 @@ import type { EventLogger } from "../events/logger.js";
 import type { AOFService } from "../service/aof-service.js";
 import type { ToolRegistry } from "../tools/tool-registry.js";
 import type { createLogger } from "../logging/index.js";
-import type { SpawnResultPost } from "./schemas.js";
+import type { SpawnResultPost, ChatDeliveryResultPost } from "./schemas.js";
 import type { SpawnQueue } from "./spawn-queue.js";
+import type { ChatDeliveryQueue } from "./chat-delivery-queue.js";
 import type { PluginRegistry } from "./plugin-registry.js";
 
 /** Resolves the daemon-side ITaskStore for a given (actor, projectId). */
@@ -53,6 +54,14 @@ export interface IpcDeps {
     id: string,
     result: SpawnResultPost,
   ) => Promise<void>;
+
+  /** Queue backing the chat-delivery long-poll (plugin-owned completion notifications). */
+  chatDeliveryQueue?: ChatDeliveryQueue;
+  /**
+   * Settles the awaiting `MatrixMessageTool.send()` promise on the daemon side.
+   * The daemon wires this to `chatDeliveryQueue.deliverResult`.
+   */
+  deliverChatResult?: (id: string, result: ChatDeliveryResultPost) => void;
 }
 
 /** Signature of an IPC route handler. */

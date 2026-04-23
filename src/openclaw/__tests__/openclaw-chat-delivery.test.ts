@@ -65,7 +65,11 @@ describe("OpenClawChatDeliveryNotifier", () => {
     await notifier.handleEvent(makeEvent(taskId, "review"));
 
     expect(send).toHaveBeenCalledTimes(1);
-    expect(send).toHaveBeenCalledWith("telegram:-42", expect.stringContaining("Task ready for review"));
+    expect(send).toHaveBeenCalledWith(
+      "telegram:-42",
+      expect.stringContaining("Task ready for review"),
+      expect.objectContaining({ subscriptionId: expect.any(String), taskId, toStatus: "review" }),
+    );
 
     const subs = await subStore.list(taskId);
     expect(subs[0]!.notifiedStatuses).toContain("review");
@@ -140,7 +144,11 @@ describe("OpenClawChatDeliveryNotifier", () => {
     });
 
     await notifier.handleEvent(makeEvent(taskId, "done"));
-    expect(send).toHaveBeenCalledWith("session:abc", expect.anything());
+    expect(send).toHaveBeenCalledWith(
+      "session:abc",
+      expect.anything(),
+      expect.objectContaining({ taskId, toStatus: "done" }),
+    );
   });
 
   it("ignores non-actionable status transitions (e.g. ready)", async () => {

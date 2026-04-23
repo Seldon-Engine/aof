@@ -132,6 +132,55 @@ export const SpawnResultPost = z.object({
 export type SpawnResultPost = z.infer<typeof SpawnResultPost>;
 
 // ---------------------------------------------------------------------------
+// ChatDelivery / ChatDeliveryResultPost — plugin-owned completion-notification
+// delivery long-poll. The daemon instantiates OpenClawChatDeliveryNotifier with
+// a QueueBackedMessageTool that enqueues here instead of sending in-process;
+// the plugin long-polls, performs the actual send via OpenClaw's outbound
+// surface, and POSTs the outcome so the daemon can resolve the awaiting
+// subscription update.
+// ---------------------------------------------------------------------------
+
+/**
+ * Enqueued chat-delivery envelope claimed by a long-polling plugin.
+ *
+ * The `delivery` payload is the subscription's captured OpenClaw route
+ * (sessionKey, sessionId, channel, threadId, target) — mirrored verbatim so
+ * the plugin can use whichever identifier matches its outbound primitive.
+ * `message` is pre-rendered on the daemon (the notifier renders a task-status
+ * summary; plugins are not asked to render).
+ */
+export const ChatDeliveryRequest = z.object({
+  id: z.string(),
+  subscriptionId: z.string(),
+  taskId: z.string(),
+  toStatus: z.string(),
+  message: z.string(),
+  delivery: z
+    .object({
+      kind: z.string(),
+      target: z.string().optional(),
+      sessionKey: z.string().optional(),
+      sessionId: z.string().optional(),
+      channel: z.string().optional(),
+      threadId: z.string().optional(),
+    })
+    .passthrough(),
+});
+export type ChatDeliveryRequest = z.infer<typeof ChatDeliveryRequest>;
+
+/** Plugin-posted outcome of a chat-delivery attempt. */
+export const ChatDeliveryResultPost = z.object({
+  success: z.boolean(),
+  error: z
+    .object({
+      kind: z.string(),
+      message: z.string(),
+    })
+    .optional(),
+});
+export type ChatDeliveryResultPost = z.infer<typeof ChatDeliveryResultPost>;
+
+// ---------------------------------------------------------------------------
 // Session-event forwarders (D-07 + A1 amendment)
 // ---------------------------------------------------------------------------
 

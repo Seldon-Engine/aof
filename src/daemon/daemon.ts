@@ -17,9 +17,12 @@ import { buildDaemonResolveStore } from "../ipc/store-resolver.js";
 import { attachIpcRoutes } from "../ipc/server-attach.js";
 import { getConfig } from "../config/registry.js";
 import { SpawnQueue } from "../ipc/spawn-queue.js";
+import { ChatDeliveryQueue } from "../ipc/chat-delivery-queue.js";
 import { PluginRegistry } from "../ipc/plugin-registry.js";
 import { PluginBridgeAdapter } from "../dispatch/plugin-bridge-adapter.js";
 import { SelectingAdapter } from "../dispatch/selecting-adapter.js";
+import { OpenClawChatDeliveryNotifier } from "../openclaw/openclaw-chat-delivery.js";
+import { buildResolveStoreForTask } from "./resolve-store-for-task.js";
 
 const log = createLogger("daemon");
 
@@ -93,6 +96,7 @@ export async function startAofDaemon(opts: AOFDaemonOptions): Promise<AOFDaemonC
   // remain regression-free; plugin-bridge installs opt in via config.
   const daemonMode = getConfig().daemon.mode;
   const spawnQueue = new SpawnQueue();
+  const chatDeliveryQueue = new ChatDeliveryQueue();
   const pluginRegistry = new PluginRegistry();
   const standaloneAdapter = new StandaloneAdapter({ gatewayUrl: opts.gatewayUrl, gatewayToken: opts.gatewayToken });
   const pluginBridgeAdapter = new PluginBridgeAdapter(spawnQueue, pluginRegistry);
@@ -125,6 +129,67 @@ export async function startAofDaemon(opts: AOFDaemonOptions): Promise<AOFDaemonC
       taskActionTimeoutMs: opts.taskActionTimeoutMs,
     },
   );
+
+  // --- Chat-delivery wiring: on qualifying task transitions, the notifier
+  //     enqueues a delivery envelope onto chatDeliveryQueue and awaits the
+  //     long-polling plugin's ACK via the MatrixMessageTool.send() promise.
+  //     The notifier handles dedupe, subscription status updates, and error
+  //     recording — we only provide the transport shim.
+  const resolveStoreForTask = buildResolveStoreForTask({
+    dataDir: opts.dataDir,
+    baseStore: store,
+    logger,
+  });
+  const queueBackedMessageTool = {
+    async send(
+      target: string,
+      message: string,
+      ctx?: {
+        subscriptionId: string;
+        taskId: string;
+        toStatus: string;
+        delivery?: Record<string, unknown>;
+      },
+    ): Promise<void> {
+      // Prefer ctx.delivery fields verbatim — they carry the original
+      // captured routing (sessionKey, channel, threadId). `target` here is
+      // the notifier's flat fallback (delivery.target ?? sessionKey ??
+      // sessionId) and can shadow parseable sessionKey values if written
+      // second. Only add `target` when the original delivery didn't specify
+      // one, so platform-aware routing on the plugin side has the richest
+      // possible info.
+      const baseDelivery = (ctx?.delivery ?? {}) as Record<string, unknown>;
+      const delivery: Record<string, unknown> = {
+        ...baseDelivery,
+        kind: "openclaw-chat",
+      };
+      // The notifier computes `target = delivery.target ?? sessionKey ??
+      // sessionId` as a flat fallback. For plugin-side platform routing we
+      // prefer the ORIGINAL fields (sessionKey/channel/threadId) — a flat
+      // target overwriting a parseable sessionKey would destroy the route.
+      // Only add `target` when the original delivery had neither an explicit
+      // target nor a sessionKey for sendChatDelivery to parse.
+      const hasUsableRoute =
+        (typeof baseDelivery.target === "string" && baseDelivery.target.length > 0)
+        || (typeof baseDelivery.sessionKey === "string" && baseDelivery.sessionKey.length > 0);
+      if (!hasUsableRoute) {
+        delivery.target = target;
+      }
+      const { done } = chatDeliveryQueue.enqueueAndAwait({
+        subscriptionId: ctx?.subscriptionId ?? "unknown",
+        taskId: ctx?.taskId ?? "unknown",
+        toStatus: ctx?.toStatus ?? "unknown",
+        message,
+        delivery: delivery as { kind: string } & Record<string, unknown>,
+      });
+      return done;
+    },
+  };
+  const chatNotifier = new OpenClawChatDeliveryNotifier({
+    resolveStoreForTask,
+    messageTool: queueBackedMessageTool,
+  });
+  logger.addOnEvent((event) => chatNotifier.handleEvent(event));
 
   // --- Step 2: Start health server on Unix socket ---
   let healthServer: Server | undefined;
@@ -178,6 +243,8 @@ export async function startAofDaemon(opts: AOFDaemonOptions): Promise<AOFDaemonC
       spawnQueue,
       pluginRegistry,
       deliverSpawnResult: (id, result) => pluginBridgeAdapter.deliverResult(id, result),
+      chatDeliveryQueue,
+      deliverChatResult: (id, result) => chatDeliveryQueue.deliverResult(id, result),
     });
   }
 

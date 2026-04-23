@@ -33,10 +33,13 @@ import type {
   InvokeToolResponse,
   SpawnRequest,
   SpawnResultPost,
+  ChatDeliveryRequest,
+  ChatDeliveryResultPost,
 } from "../ipc/schemas.js";
 import {
   InvokeToolResponse as InvokeToolResponseSchema,
   SpawnRequest as SpawnRequestSchema,
+  ChatDeliveryRequest as ChatDeliveryRequestSchema,
 } from "../ipc/schemas.js";
 
 const log = createLogger("plugin-bridge");
@@ -101,6 +104,32 @@ export class DaemonIpcClient {
       10_000,
     );
     this.requireSuccess(statusCode, body, `POST /v1/spawns/${id}/result`);
+  }
+
+  /**
+   * GET /v1/deliveries/wait — chat-delivery long-poll.
+   *
+   * Same semantics as `waitForSpawn` but for plugin-owned completion
+   * notifications. Returns `undefined` on 204 keepalive, a parsed
+   * `ChatDeliveryRequest` on 200. Any other status rejects.
+   */
+  async waitForChatDelivery(timeoutMs = 30_000): Promise<ChatDeliveryRequest | undefined> {
+    const { statusCode, body } = await this.getRaw("/v1/deliveries/wait", timeoutMs + 5_000);
+    if (statusCode === 204) return undefined;
+    if (statusCode === 200) {
+      return ChatDeliveryRequestSchema.parse(JSON.parse(body));
+    }
+    throw new Error(`unexpected delivery long-poll status ${statusCode}: ${body.slice(0, 200)}`);
+  }
+
+  /** POST /v1/deliveries/:id/result — chat-delivery outcome. */
+  async postChatDeliveryResult(id: string, result: ChatDeliveryResultPost): Promise<void> {
+    const { statusCode, body } = await this.postRaw(
+      `/v1/deliveries/${encodeURIComponent(id)}/result`,
+      result,
+      10_000,
+    );
+    this.requireSuccess(statusCode, body, `POST /v1/deliveries/${id}/result`);
   }
 
   /** POST /v1/event/session-end — D-07 forward. */

@@ -15,6 +15,7 @@ import { toolRegistry } from "../tools/tool-registry.js";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { DaemonIpcClient, ensureDaemonIpcClient } from "./daemon-ipc-client.js";
 import { startSpawnPollerOnce } from "./spawn-poller.js";
+import { startChatDeliveryPollerOnce } from "./chat-delivery-poller.js";
 import { OpenClawToolInvocationContextStore } from "./tool-invocation-context.js";
 import { buildStatusProxyHandler } from "./status-proxy.js";
 import { mergeDispatchNotificationRecipient } from "./dispatch-notification.js";
@@ -141,5 +142,6 @@ export function registerAofPlugin(
   }
 
   startSpawnPollerOnce(client, api);
+  startChatDeliveryPollerOnce(client, api);
   return { mode: "thin-bridge", daemonSocketPath: socketPath };
 }

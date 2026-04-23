@@ -24,6 +24,8 @@ import {
 } from "./routes/session-events.js";
 import { handleSpawnWait } from "./routes/spawn-wait.js";
 import { handleSpawnResult } from "./routes/spawn-result.js";
+import { handleDeliveryWait } from "./routes/delivery-wait.js";
+import { handleDeliveryResult } from "./routes/delivery-result.js";
 
 export function attachIpcRoutes(server: Server, deps: IpcDeps): void {
   // Long-poll safety (Pitfall 1): Node default keepAliveTimeout is 5s, which
@@ -40,7 +42,8 @@ export function attachIpcRoutes(server: Server, deps: IpcDeps): void {
     "/v1/event/before-compaction": handleBeforeCompaction,
     "/v1/event/message-received": handleMessageReceived,
     "/v1/spawns/wait": handleSpawnWait,
-    // `/v1/spawns/{id}/result` is matched via regex below (parametric path).
+    "/v1/deliveries/wait": handleDeliveryWait,
+    // `/v1/spawns/{id}/result` + `/v1/deliveries/{id}/result` matched via regex below.
   };
 
   /**
@@ -53,6 +56,7 @@ export function attachIpcRoutes(server: Server, deps: IpcDeps): void {
     handler: import("./types.js").RouteHandler;
   }> = [
     { re: /^\/v1\/spawns\/[^/]+\/result$/, handler: handleSpawnResult },
+    { re: /^\/v1\/deliveries\/[^/]+\/result$/, handler: handleDeliveryResult },
   ];
 
   server.on("request", (req, res) => {

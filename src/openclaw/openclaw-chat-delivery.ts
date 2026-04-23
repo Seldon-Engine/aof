@@ -102,7 +102,12 @@ export class OpenClawChatDeliveryNotifier {
     const message = renderMessage({ task, toStatus, actor, reason, runResult });
 
     try {
-      await this.opts.messageTool.send(target, message);
+      await this.opts.messageTool.send(target, message, {
+        subscriptionId: sub.id,
+        taskId: task.frontmatter.id,
+        toStatus,
+        delivery: sub.delivery as Record<string, unknown> | undefined,
+      });
       await subscriptionStore.markStatusNotified(task.frontmatter.id, sub.id, toStatus);
       if (TERMINAL_STATUSES.has(toStatus)) {
         await subscriptionStore.update(task.frontmatter.id, sub.id, {

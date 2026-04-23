@@ -30,9 +30,30 @@ Schema (`src/schemas/`) → store (if task-related) → logic (`src/dispatch/` o
 - **MCP tool skip-list** (`mcp/tools.ts:326`): Hardcoded 5-name array. Must update manually when adding MCP-specific overrides.
 - **Dispatch chain** (`scheduler.ts` → `task-dispatcher.ts` → `action-executor.ts` → `assign-executor.ts`): Tightly coupled. Changes cascade.
 - **`AOF_CALLBACK_DEPTH`** env mutation (`dispatch/callback-delivery.ts`): Only exception to config-only env access. Don't add more.
+- **Chat-delivery cross-process chain**: `OpenClawChatDeliveryNotifier` (daemon) → `QueueBackedMessageTool` → `ChatDeliveryQueue` → `/v1/deliveries/wait` (plugin long-poll) → `sendChatDelivery` → OpenClaw `api.runtime.channel.<platform>.sendMessage<Platform>` → ACK back → queue resolves the awaiter → notifier updates subscription. The notifier's `messageTool.send()` BLOCKS on plugin ACK — a slow/broken plugin stalls the EventLogger callback. Not fatal (EventLogger catches thrown callbacks) but visible in log latency. Don't add async work to that chain without understanding this.
 
-## Serena MCP
-**Use Serena as primary code navigation.** `get_symbols_overview` before reading files, `find_symbol(include_body=true)` for code, `find_referencing_symbols` for callers, `replace_symbol_body` for edits. Check `read_memory` before investigating unfamiliar areas. After structural changes, update stale memories. Serena can't parse: `events/logger.ts`, `events/notifier.ts`, `views/kanban.ts`, `views/mailbox.ts`, `events/notification-policy/engine.ts` — use Read for those.
+## Code Navigation — tool preference order
+**Always Serena first, then ripgrep, then the boring old tools.** This is not a suggestion.
+
+| Task | Preferred | Fallback |
+|---|---|---|
+| Understand a new file | `get_symbols_overview` | `Read` (last resort) |
+| Read a specific function/class | `find_symbol(include_body=true)` | `Read` with offset |
+| Find who calls / references X | `find_referencing_symbols` | `rg 'X\b' -t ts` |
+| Edit a whole function/class | `replace_symbol_body` | `Edit` |
+| Edit a few lines inside a symbol | `replace_content` (regex) | `Edit` |
+| Text/literal/regex search | `search_for_pattern` | `rg` |
+| Existing project context | `read_memory` | — |
+
+Rules that catch common reflexes:
+- **"Is this symbol used in production?"** is `find_referencing_symbols`, *never* `grep \| grep -v __tests__`. One call, structured answer, no re-export blind spots.
+- **Never `Read` an entire file before you know which symbol you want.** Overview first.
+- **Never `cat`/`sed`/`awk` source files via Bash.** Use Serena or Read.
+- `rg` beats `grep` for everything. If you're typing `grep -rn`, stop and use `rg`.
+
+Serena parser gaps (use `Read` for these only): `events/logger.ts`, `events/notifier.ts`, `views/kanban.ts`, `views/mailbox.ts`, `events/notification-policy/engine.ts`.
+
+After structural changes (new modules, moved files, renamed interfaces), update Serena memories — stale memories actively mislead future sessions.
 
 ## Build & Release
 ```bash

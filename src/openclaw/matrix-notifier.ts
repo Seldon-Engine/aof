@@ -10,8 +10,20 @@ import type { NotificationAdapter } from "../events/notifier.js";
 
 const log = createLogger("matrix-notifier");
 
+/**
+ * Optional per-delivery context forwarded by OpenClawChatDeliveryNotifier.
+ * Transport adapters that need the subscription/task identity (e.g. the
+ * daemon's QueueBackedMessageTool) consume this; simple transports ignore it.
+ */
+export interface ChatDeliveryContext {
+  subscriptionId: string;
+  taskId: string;
+  toStatus: string;
+  delivery?: Record<string, unknown>;
+}
+
 export interface MatrixMessageTool {
-  send(target: string, message: string): Promise<void>;
+  send(target: string, message: string, ctx?: ChatDeliveryContext): Promise<void>;
 }
 
 export class MatrixNotifier implements NotificationAdapter {

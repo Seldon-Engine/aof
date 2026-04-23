@@ -137,12 +137,17 @@ src/ipc/
 ├── store-resolver.ts       buildDaemonResolveStore() + getStoreForActor()
 │                             (moved from openclaw/adapter.ts — D-02 cleanup)
 ├── spawn-queue.ts          SpawnQueue (EventEmitter, FIFO, enqueue/claim/tryClaim)
+├── chat-delivery-queue.ts  ChatDeliveryQueue — enqueueAndAwait() returns a promise the
+│                             daemon-side QueueBackedMessageTool awaits; deliverResult()
+│                             settles it on plugin ACK. Powers notify-on-completion.
 ├── plugin-registry.ts      Implicit attach-via-long-poll handle (D-11)
 └── routes/
     ├── invoke-tool.ts      POST /v1/tool/invoke — dispatches against toolRegistry (D-06)
     ├── session-events.ts   POST /v1/event/{session-end,agent-end,before-compaction,message-received} (D-07 A1)
     ├── spawn-wait.ts       GET  /v1/spawns/wait — long-poll (~30s keepalive, 204 on timeout)
-    └── spawn-result.ts     POST /v1/spawns/{id}/result — plugin-posted outcome
+    ├── spawn-result.ts     POST /v1/spawns/{id}/result — plugin-posted outcome
+    ├── delivery-wait.ts    GET  /v1/deliveries/wait — chat-delivery long-poll (same pattern)
+    └── delivery-result.ts  POST /v1/deliveries/{id}/result — plugin-posted delivery outcome
 ```
 
 ### Wire contracts (`src/ipc/schemas.ts`)
@@ -152,6 +157,8 @@ src/ipc/
 | `InvokeToolRequest` / `InvokeToolResponse` / `IpcError` (+ `IpcErrorKind` enum) | plugin → daemon | `POST /v1/tool/invoke` |
 | `SpawnRequest` | daemon → plugin | `GET /v1/spawns/wait` (200 body) |
 | `SpawnResultPost` | plugin → daemon | `POST /v1/spawns/{id}/result` |
+| `ChatDeliveryRequest` | daemon → plugin | `GET /v1/deliveries/wait` (200 body) |
+| `ChatDeliveryResultPost` | plugin → daemon | `POST /v1/deliveries/{id}/result` |
 | `SessionEndEvent` / `AgentEndEvent` / `BeforeCompactionEvent` / `MessageReceivedEvent` | plugin → daemon | `POST /v1/event/*` |
 
 - `InvokeToolRequest` uses `.strict()` — unknown envelope fields rejected. Inner `params` uses `z.record(z.string(), z.unknown())`; per-tool validation runs server-side via `toolRegistry[name].schema`.
@@ -193,11 +200,36 @@ src/openclaw/
 ├── tool-invocation-context.ts  OpenClawToolInvocationContextStore — per-session route capture
 │                             for notify-on-completion. Stays plugin-side (D-07): captured route
 │                             is attached to aof_dispatch params BEFORE the IPC send.
-├── openclaw-chat-delivery.ts   "openclaw-chat" subscription delivery kind (daemon-side logic,
-│                             but file groups with openclaw idioms).
-├── matrix-notifier.ts          message-tool adapter invoked by chat-delivery.
+├── openclaw-chat-delivery.ts   "openclaw-chat" subscription delivery kind. Runs on the
+│                             daemon as an EventLogger callback: on task.transitioned to
+│                             a trigger status, filters matching subscriptions and calls
+│                             messageTool.send(target, msg, ctx). Dedupe + subscription
+│                             status updates live here.
+├── chat-delivery-poller.ts     `startChatDeliveryPollerOnce(client, api)` — plugin-side
+│                             long-poll loop that drains GET /v1/deliveries/wait and
+│                             dispatches each ChatDeliveryRequest to sendChatDelivery().
+│                             Same module-scope gate + backoff pattern as spawn-poller.
+├── chat-message-sender.ts      sendChatDelivery(api, req): parses sessionKey (or uses
+│                             delivery.channel + target) and dispatches to the matching
+│                             api.runtime.channel.<platform>.sendMessage<Platform>.
+│                             Telegram honors threadId; other platforms forward target+text.
+├── matrix-notifier.ts          MatrixMessageTool + ChatDeliveryContext interface. The
+│                             daemon's queue-backed tool implements this to bridge the
+│                             notifier onto ChatDeliveryQueue.enqueueAndAwait().
 ├── executor.ts, permissions.ts, types.ts  unchanged leaf files.
 ```
+
+### Chat-delivery pipeline
+
+The "notify the originating session on task completion" feature crosses process boundaries (EventLogger lives in the daemon; session-send lives in the plugin). Mirrors the spawn-poller inversion:
+
+1. Agent calls `aof_dispatch`. `mergeDispatchNotificationRecipient` (in `dispatch-notification.ts`) attaches `{kind: "openclaw-chat", sessionKey, sessionId, target, channel, threadId}` to `notifyOnCompletion` using the plugin-local invocation-context store.
+2. Daemon creates a subscription with that delivery payload via `project-tools.ts:aofDispatch`.
+3. Task transitions to a trigger status (`blocked|review|done|cancelled|deadletter`). `EventLogger.log` fires the `OpenClawChatDeliveryNotifier` callback wired in `startAofDaemon`.
+4. The notifier calls `messageTool.send(target, renderedMsg, ctx)` on the daemon-side `QueueBackedMessageTool`, which enqueues a `ChatDeliveryRequest` onto `ChatDeliveryQueue` and returns a promise pending plugin ACK.
+5. Plugin's `chat-delivery-poller` claims the request via long-poll, `chat-message-sender` dispatches to the right OpenClaw outbound send.
+6. Plugin POSTs `/v1/deliveries/{id}/result`. Daemon's `ChatDeliveryQueue.deliverResult` resolves/rejects the awaiting promise.
+7. Notifier updates the subscription: `notifiedStatuses += toStatus`; for terminal statuses, `status = "delivered"` + `deliveredAt`. On failure, `deliveryAttempts++` + `failureReason`.
 
 ### Lifecycle hook routing (D-07 + A1)
 
