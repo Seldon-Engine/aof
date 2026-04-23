@@ -179,3 +179,52 @@ The correct diagnosis was found by:
 After the fix: same prompt, but the agent reads the tool descriptions' sequencing hint and awaits dispatch before calling status_report → `1 task` on first try.
 
 ---
+
+## BUG-005: AOF tasks can reconcile to `deadletter` even when the requested work completed successfully outside the task lifecycle
+
+**Date/Time:** 2026-04-23 16:42 EDT
+**Severity:** P2
+**Status:** fixed (partial — see notes)
+**Archived:** 2026-04-23
+**Fixing commit:**
+- `1a90da1` fix(dispatch): stamp deadletter cause into task frontmatter + document superseded cancel path
+
+**Verification:**
+- Historical event-log investigation of the original tasks (`TASK-2026-04-23-004`, `TASK-2026-04-23-005`) showed that the deadletter transitions were not orphan-sweep reconciliation — they were caused by real `completion.enforcement` failures: the `swe-frontend` and `swe-ux` agents could not spawn because their `auth-profiles.json` was missing the OpenAI API key. Each task accumulated 3+ `dispatchFailures` → deadletter via the normal path.
+- The task lifecycle already allowed a coordinator to cancel a deadlettered task with a reason (`store.cancel` accepts `deadletter` as a source state, and `cancelTask` at `src/store/task-lifecycle.ts:179` rejects only `done` and `cancelled`, not `deadletter`). The reason is persisted in `metadata.cancellationReason`. This mechanism was under-documented.
+- Regression tests in `src/dispatch/__tests__/deadletter-frontmatter-stamp.test.ts` cover (a) deadletter frontmatter stamping, (b) permanent-error reason distinction, (c) the `cancel(deadletter, reason="superseded: …")` cleanup path.
+
+### Restated Root Cause
+
+Two separate issues under one report:
+
+1. **Observability**: when a task deadlettered, the failure cause (e.g. "No API key found for provider openai") was written only to `events.jsonl`. A coordinator viewing the task via `aof_status_report` or reading the task file saw no indication of *why* it deadlettered and had to grep the event log. During an incident where many tasks deadletter for the same upstream cause (e.g. missing credentials affecting multiple agents), this is operationally painful.
+
+2. **Missing cleanup affordance (perceived)**: the original report hypothesized no "superseded" or "completed_elsewhere" lifecycle state, forcing deadletter as a catch-all. Investigation showed this was not actually missing — `aof_task_cancel(taskId, reason="superseded: …")` worked from `deadletter` already, and the reason was already persisted in frontmatter metadata. The issue was discoverability, not capability.
+
+### Fix Summary
+
+- **Frontmatter stamping (code)**: `transitionToDeadletter` in `src/dispatch/failure-tracker.ts` now writes `deadletterReason`, `deadletterLastError`, `deadletterErrorClass`, `deadletterFailureCount`, and `deadletterAt` into the task's own frontmatter metadata before the status transition. The event log retains the same payload (dashboards already use it); the task itself gains parity so coordinators see the cause without grepping events.
+- **Tool description (LLM hint)**: `aof_task_cancel` description now explicitly calls out the "superseded / externally completed" use case as a first-class pattern, with suggested structured reason prefixes (`superseded:`, `duplicate-of:TASK-…`, `abandoned:`). This surfaces the existing capability to LLM agents and operators.
+
+**Not introduced**: a new terminal lifecycle state (`superseded` or `completed_elsewhere`). Option A from the triage discussion was rejected in favor of the smaller-blast-radius `cancelled + structured reason` path (option B). Open to revisiting if operational experience shows the single `cancelled` state is too ambiguous for dashboards.
+
+### Historical Observed Symptoms
+
+Original tasks (from the field):
+- `TASK-2026-04-23-004` — Implement Opreto component library + showcase + skill integration (`swe-frontend`)
+- `TASK-2026-04-23-005` — Define Opreto report/web component library (`swe-ux`)
+
+Timeline (reconstructed from `events/2026-04-23.jsonl`):
+1. 17:53: both tasks dispatched to `ready`.
+2. 19:35: scheduler attempted to assign; first attempt held with `reason: "no-plugin-attached"`; second attempt matched and spawned agent sessions.
+3. 19:36 / 19:40: both agent sessions exited without calling `aof_task_complete` → `completion.enforcement` fired, `dispatchFailures=1`.
+4. 19:46-19:57: retry cycles, more enforcement failures, `dispatchFailures` climbed to 3.
+5. 19:57:40: TASK-005 deadlettered (max_dispatch_failures).
+6. 20:14:55: auth profile remediated manually, both tasks transitioned `deadletter → ready`.
+7. 20:15: dispatch reattempted, failed again with the same "No API key found for provider openai" error.
+8. 20:15:15 / 20:15:39: both tasks deadlettered again (dispatchFailures=4).
+
+The work itself was completed by the user via direct `sessions_spawn` subagent runs, parallel to the AOF task lifecycle that was stuck on a credentials issue.
+
+---
