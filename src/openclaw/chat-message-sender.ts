@@ -1,8 +1,7 @@
 /**
  * Plugin-side chat-message sender — the transport half of the chat-delivery
- * loop. Lives in the OpenClaw gateway process where platform-specific send
- * primitives (`api.runtime.channel.telegram.sendMessageTelegram`, etc.) are
- * actually reachable.
+ * loop. Lives in the OpenClaw gateway process where the outbound adapter
+ * registry is reachable.
  *
  * The daemon renders the message and enqueues a `ChatDeliveryRequest`; the
  * long-polling plugin pulls each request and hands it to `sendChatDelivery`,
@@ -11,12 +10,14 @@
  *      OpenClaw `sessionKey` (`agent:<agentId>:<platform>:<chatType>:<id>[:topic:<topicId>]`).
  *   2. Resolves the recipient address from `delivery.target` (preferred) or
  *      the chatId segment of the sessionKey.
- *   3. Dispatches to the matching plugin-sdk send function via
- *      `api.runtime.channel.<platform>.sendMessage<Platform>`.
+ *   3. Dispatches via the unified outbound adapter API:
+ *      `await api.runtime.channel.outbound.loadAdapter(platform)` → `adapter.sendText({...})`.
  *
- * Platforms are wired on demand — adding Discord/Slack/WhatsApp is a matter
- * of adding an entry to `SEND_FN_BY_PLATFORM`. Unknown platforms throw so the
- * ACK-path reports the failure to the daemon instead of silently dropping.
+ * The legacy per-platform API (`api.runtime.channel.telegram.sendMessageTelegram`)
+ * was consolidated into `runtime.channel.outbound` in recent OpenClaw builds.
+ * The adapter returned by `loadAdapter(id)` exposes `sendText` / `sendMedia` /
+ * `sendPoll` — we use `sendText` here since completion notifications are
+ * always plain text.
  *
  * @module openclaw/chat-message-sender
  */
@@ -27,31 +28,24 @@ import type { OpenClawApi } from "./types.js";
 
 const log = createLogger("chat-message-sender");
 
+interface OutboundSendTextParams {
+  cfg?: unknown;
+  to: string;
+  text: string;
+  threadId?: string | number;
+  accountId?: string;
+  silent?: boolean;
+  replyToId?: string;
+}
+
+interface OutboundAdapter {
+  sendText?: (params: OutboundSendTextParams) => Promise<unknown>;
+  sendMedia?: (params: OutboundSendTextParams & { mediaUrl: string }) => Promise<unknown>;
+}
+
 interface PluginRuntimeChannel {
-  telegram?: {
-    sendMessageTelegram?: (
-      to: string,
-      text: string,
-      opts?: { messageThreadId?: number; silent?: boolean; token?: string },
-    ) => Promise<unknown>;
-  };
-  discord?: {
-    sendMessageDiscord?: (to: string, text: string, opts?: Record<string, unknown>) => Promise<unknown>;
-  };
-  slack?: {
-    sendMessageSlack?: (to: string, text: string, opts?: Record<string, unknown>) => Promise<unknown>;
-  };
-  signal?: {
-    sendMessageSignal?: (to: string, text: string, opts?: Record<string, unknown>) => Promise<unknown>;
-  };
-  whatsapp?: {
-    sendMessageWhatsApp?: (to: string, text: string, opts?: Record<string, unknown>) => Promise<unknown>;
-  };
-  imessage?: {
-    sendMessageIMessage?: (to: string, text: string, opts?: Record<string, unknown>) => Promise<unknown>;
-  };
-  line?: {
-    sendMessageLine?: (to: string, text: string, opts?: Record<string, unknown>) => Promise<unknown>;
+  outbound?: {
+    loadAdapter?: (id: string) => Promise<OutboundAdapter | undefined>;
   };
 }
 
@@ -94,8 +88,13 @@ export async function sendChatDelivery(
   api: OpenClawApi,
   req: ChatDeliveryRequest,
 ): Promise<void> {
-  const runtimeChannel = (api.runtime as { channel?: PluginRuntimeChannel } | undefined)?.channel;
+  const runtime = api.runtime as Record<string, unknown> | undefined;
+  const runtimeChannel = (runtime as { channel?: PluginRuntimeChannel } | undefined)?.channel;
   if (!runtimeChannel) {
+    log.error(
+      { runtimeKeys: runtime ? Object.keys(runtime) : null },
+      "api.runtime.channel not available — dumping runtime shape for diagnosis",
+    );
     throw new Error("api.runtime.channel not available — plugin-sdk version mismatch");
   }
 
@@ -121,57 +120,43 @@ export async function sendChatDelivery(
     "dispatching chat delivery",
   );
 
-  switch (platform) {
-    case "telegram": {
-      const sendFn = runtimeChannel.telegram?.sendMessageTelegram;
-      if (!sendFn) throw new Error("runtime.channel.telegram.sendMessageTelegram not available");
-      const messageThreadId =
-        threadIdRaw !== undefined && threadIdRaw !== ""
-          ? Number.parseInt(threadIdRaw, 10)
-          : undefined;
-      const opts = messageThreadId !== undefined && Number.isFinite(messageThreadId)
-        ? { messageThreadId }
-        : undefined;
-      await sendFn(target, req.message, opts);
-      return;
-    }
-    case "discord": {
-      const sendFn = runtimeChannel.discord?.sendMessageDiscord;
-      if (!sendFn) throw new Error("runtime.channel.discord.sendMessageDiscord not available");
-      await sendFn(target, req.message);
-      return;
-    }
-    case "slack": {
-      const sendFn = runtimeChannel.slack?.sendMessageSlack;
-      if (!sendFn) throw new Error("runtime.channel.slack.sendMessageSlack not available");
-      await sendFn(target, req.message);
-      return;
-    }
-    case "signal": {
-      const sendFn = runtimeChannel.signal?.sendMessageSignal;
-      if (!sendFn) throw new Error("runtime.channel.signal.sendMessageSignal not available");
-      await sendFn(target, req.message);
-      return;
-    }
-    case "whatsapp": {
-      const sendFn = runtimeChannel.whatsapp?.sendMessageWhatsApp;
-      if (!sendFn) throw new Error("runtime.channel.whatsapp.sendMessageWhatsApp not available");
-      await sendFn(target, req.message);
-      return;
-    }
-    case "imessage": {
-      const sendFn = runtimeChannel.imessage?.sendMessageIMessage;
-      if (!sendFn) throw new Error("runtime.channel.imessage.sendMessageIMessage not available");
-      await sendFn(target, req.message);
-      return;
-    }
-    case "line": {
-      const sendFn = runtimeChannel.line?.sendMessageLine;
-      if (!sendFn) throw new Error("runtime.channel.line.sendMessageLine not available");
-      await sendFn(target, req.message);
-      return;
-    }
-    default:
-      throw new Error(`unsupported platform: ${platform}`);
+  // Unified outbound adapter API (post-consolidation plugin-sdk). The legacy
+  // per-platform `runtime.channel.<platform>.sendMessage<Platform>` surface
+  // was replaced by `runtime.channel.outbound.loadAdapter(channelId)` →
+  // `adapter.sendText({...})`.
+  const loadAdapter = runtimeChannel.outbound?.loadAdapter;
+  if (typeof loadAdapter !== "function") {
+    const channelKeys = Object.keys(runtimeChannel as Record<string, unknown>);
+    log.error(
+      { channelKeys },
+      "runtime.channel.outbound.loadAdapter not available — dumping runtime.channel shape",
+    );
+    throw new Error("runtime.channel.outbound.loadAdapter not available");
   }
+
+  const adapter = await loadAdapter(platform);
+  if (!adapter?.sendText) {
+    const channelKeys = Object.keys(runtimeChannel as Record<string, unknown>);
+    const adapterKeys = adapter
+      ? Object.keys(adapter as unknown as Record<string, unknown>)
+      : null;
+    log.error(
+      { channelKeys, adapterKeys, platform },
+      "outbound adapter missing sendText — dumping shape",
+    );
+    throw new Error(`outbound adapter for "${platform}" does not expose sendText`);
+  }
+
+  const cfg = (api.runtime as { config?: { loadConfig?: () => unknown } } | undefined)?.config?.loadConfig?.();
+  const threadId =
+    threadIdRaw !== undefined && threadIdRaw !== ""
+      ? threadIdRaw
+      : undefined;
+
+  await adapter.sendText({
+    cfg,
+    to: target,
+    text: req.message,
+    ...(threadId !== undefined ? { threadId } : {}),
+  });
 }

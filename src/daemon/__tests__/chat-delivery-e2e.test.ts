@@ -139,15 +139,17 @@ describe("chat-delivery E2E (real socket, real long-poll, real Zod)", () => {
       sessionId: "session-e2e-1",
     });
 
-    // Stub OpenClaw api.runtime.channel.telegram — captures the send args.
-    const sendMessageTelegram = vi.fn(async (to: string, text: string, opts?: { messageThreadId?: number }) => ({
+    // Stub the unified outbound-adapter API — loadAdapter(platform) returns an
+    // adapter with sendText. Captures the sendText params.
+    const sendText = vi.fn(async (params: { to: string; text: string; threadId?: string | number }) => ({
       messageId: "tg-msg-1",
-      chatId: to,
-      text,
-      opts,
+      chatId: params.to,
     }));
+    const loadAdapter = vi.fn(async (id: string) =>
+      id === "telegram" ? { sendText } : undefined,
+    );
     const stubApi = {
-      runtime: { channel: { telegram: { sendMessageTelegram } } },
+      runtime: { channel: { outbound: { loadAdapter } } },
       on: () => {},
       registerService: () => {},
       registerTool: () => {},
@@ -177,13 +179,14 @@ describe("chat-delivery E2E (real socket, real long-poll, real Zod)", () => {
     await pluginLoop;
     await transitionPromise;
 
-    // sendMessageTelegram should have been called with the chatId from the
-    // sessionKey and the parsed topic as messageThreadId.
-    expect(sendMessageTelegram).toHaveBeenCalledTimes(1);
-    const call = sendMessageTelegram.mock.calls[0]!;
-    expect(call[0]).toBe("-1003844680528");
-    expect(call[1]).toContain("Task complete");
-    expect(call[2]).toEqual({ messageThreadId: 6 });
+    // loadAdapter("telegram") invoked, then sendText called with chatId +
+    // topic threadId parsed from the sessionKey.
+    expect(loadAdapter).toHaveBeenCalledWith("telegram");
+    expect(sendText).toHaveBeenCalledTimes(1);
+    const sendParams = sendText.mock.calls[0]![0];
+    expect(sendParams.to).toBe("-1003844680528");
+    expect(sendParams.text).toContain("Task complete");
+    expect(sendParams.threadId).toBe("6");
 
     // Subscription should be marked delivered on disk.
     const reloaded = await subStore.get(task.frontmatter.id, sub.id);
