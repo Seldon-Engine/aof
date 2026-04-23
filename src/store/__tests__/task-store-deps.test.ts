@@ -301,4 +301,49 @@ describe("TaskStore dependency management", () => {
       ).rejects.toThrow("terminal state 'cancelled'");
     });
   });
+
+  // Regression: concurrent dependency mutations on the same task lost updates
+  // because addDep/removeDep weren't guarded by the per-task lock that
+  // transition() already uses. See bug-reports.md BUG-004 sub-issue C.
+  describe("concurrent mutations", () => {
+    it("serializes concurrent addDep calls — no lost updates", async () => {
+      const target = await store.create({ title: "Target", createdBy: "test" });
+      const blockers = await Promise.all(
+        Array.from({ length: 5 }, (_, i) =>
+          store.create({ title: `Blocker ${i}`, createdBy: "test" }),
+        ),
+      );
+
+      await Promise.all(
+        blockers.map((b) =>
+          store.addDep(target.frontmatter.id, b.frontmatter.id),
+        ),
+      );
+
+      const reloaded = await store.get(target.frontmatter.id);
+      const expected = blockers.map((b) => b.frontmatter.id).sort();
+      expect([...(reloaded!.frontmatter.dependsOn ?? [])].sort()).toEqual(
+        expected,
+      );
+    });
+
+    it("serializes concurrent addDep + removeDep on the same task", async () => {
+      const target = await store.create({ title: "Target", createdBy: "test" });
+      const keep = await store.create({ title: "Keep", createdBy: "test" });
+      const toRemove = await store.create({ title: "Remove", createdBy: "test" });
+
+      // Pre-seed: target depends on `toRemove`.
+      await store.addDep(target.frontmatter.id, toRemove.frontmatter.id);
+
+      // Race: add `keep` while removing `toRemove`. Both mutations must
+      // persist regardless of interleaving.
+      await Promise.all([
+        store.addDep(target.frontmatter.id, keep.frontmatter.id),
+        store.removeDep(target.frontmatter.id, toRemove.frontmatter.id),
+      ]);
+
+      const reloaded = await store.get(target.frontmatter.id);
+      expect(reloaded!.frontmatter.dependsOn).toEqual([keep.frontmatter.id]);
+    });
+  });
 });

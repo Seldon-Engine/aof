@@ -487,30 +487,42 @@ export class FilesystemTaskStore implements ITaskStore {
     ));
   }
 
-  /** Update task body content (recalculates content hash). */
+  /**
+   * Update task body content (recalculates content hash).
+   *
+   * Guarded by the per-task mutex so body writes can't lose updates when
+   * interleaved with addDep/removeDep/transition/cancel on the same task.
+   */
   async updateBody(id: string, body: string): Promise<Task> {
-    const task = await this.get(id);
-    if (!task) throw new Error(`Task not found: ${id}`);
+    return this.locks.run(id, async () => {
+      const task = await this.get(id);
+      if (!task) throw new Error(`Task not found: ${id}`);
 
-    task.body = body;
-    task.frontmatter.contentHash = contentHash(body);
-    task.frontmatter.updatedAt = new Date().toISOString();
+      task.body = body;
+      task.frontmatter.contentHash = contentHash(body);
+      task.frontmatter.updatedAt = new Date().toISOString();
 
-    const filePath = task.path ?? this.taskPath(id, task.frontmatter.status);
-    await writeFileAtomic(filePath, serializeTask(task));
+      const filePath = task.path ?? this.taskPath(id, task.frontmatter.status);
+      await writeFileAtomic(filePath, serializeTask(task));
 
-    return task;
+      return task;
+    });
   }
 
-  /** Update task metadata fields. */
+  /**
+   * Update task metadata fields.
+   *
+   * Guarded by the per-task mutex so metadata patches don't lose updates
+   * when racing against dep/body/status mutations on the same task.
+   */
   async update(id: string, patch: UpdatePatch): Promise<Task> {
-    return updateTask(
+    return this.locks.run(id, () => updateTask(
       id,
       patch,
       this.get.bind(this),
       this.taskPath.bind(this),
       this.logger as any,
-    );
+    ));
   }
 
   /** Delete a task file (use sparingly — prefer cancel status). */
@@ -571,28 +583,37 @@ export class FilesystemTaskStore implements ITaskStore {
   /**
    * Add a dependency to a task.
    * Makes taskId depend on blockerId (taskId cannot start until blockerId is done).
+   *
+   * Guarded by the per-task mutex: addDep is a read-modify-write on the
+   * frontmatter.dependsOn array, and concurrent unlocked calls lose updates
+   * (both read the same baseline, each pushes its blocker, last write wins).
+   * The lock shares a key with transition()/cancel(), so a concurrent
+   * transition and dependency mutation also serialize correctly.
    */
   async addDep(taskId: string, blockerId: string): Promise<Task> {
-    return addDependency(
+    return this.locks.run(taskId, () => addDependency(
       taskId,
       blockerId,
       this.get.bind(this),
       this.taskPath.bind(this),
       this.logger,
-    );
+    ));
   }
 
   /**
    * Remove a dependency from a task.
+   *
+   * Same rationale as addDep: read-modify-write on dependsOn must be serialized
+   * with any other mutation on the same task to prevent lost updates.
    */
   async removeDep(taskId: string, blockerId: string): Promise<Task> {
-    return removeDependency(
+    return this.locks.run(taskId, () => removeDependency(
       taskId,
       blockerId,
       this.get.bind(this),
       this.taskPath.bind(this),
       this.logger,
-    );
+    ));
   }
 
   /**
