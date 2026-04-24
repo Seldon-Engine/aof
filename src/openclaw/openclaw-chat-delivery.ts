@@ -20,6 +20,7 @@ import type { BaseEvent } from "../schemas/event.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import type { MatrixMessageTool } from "./matrix-notifier.js";
 import { OPENCLAW_CHAT_DELIVERY_KIND } from "./subscription-delivery.js";
+import type { OpenClawChatDeliveryType } from "./subscription-delivery.js";
 
 const log = createLogger("openclaw-chat-delivery");
 
@@ -33,15 +34,6 @@ const ELLIPSIS = "...";
 export interface OpenClawChatDeliveryOptions {
   resolveStoreForTask: (taskId: string) => Promise<ITaskStore | undefined>;
   messageTool: MatrixMessageTool;
-}
-
-interface OpenClawChatDelivery {
-  kind: typeof OPENCLAW_CHAT_DELIVERY_KIND;
-  target?: string;
-  sessionKey?: string;
-  sessionId?: string;
-  channel?: string;
-  threadId?: string;
 }
 
 export class OpenClawChatDeliveryNotifier {
@@ -95,7 +87,7 @@ export class OpenClawChatDeliveryNotifier {
     const { sub, subscriptionStore, task, toStatus, actor, reason, runResult } = args;
     if (!task) return;
 
-    const delivery = sub.delivery as OpenClawChatDelivery | undefined;
+    const delivery = sub.delivery as OpenClawChatDeliveryType | undefined;
     if (!delivery) return;
     const target = delivery.target ?? delivery.sessionKey ?? delivery.sessionId;
     if (!target) return;
