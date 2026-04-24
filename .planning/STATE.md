@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Ready to plan
+status: unknown
 stopped_at: Phase 43 context gathered
-last_updated: "2026-04-18T00:08:52.782Z"
+last_updated: "2026-04-24T14:34:39.571Z"
 progress:
-  total_phases: 3
+  total_phases: 6
   completed_phases: 2
-  total_plans: 13
+  total_plans: 21
   completed_plans: 13
-  percent: 100
+  percent: 62
 ---
 
 # Project State
@@ -56,6 +56,7 @@ All decisions logged in PROJECT.md Key Decisions table. v1.10 decisions archived
 - v1.5: Phases 25-27 (Completion Enforcement, Trace Infrastructure, Trace CLI)
 - v1.8: Phases 28-33 (Schema+Storage, Subscription API, Callback Delivery, Safety+Hardening, Agent Guidance, Callback Wiring Fixes)
 - v1.10: Phases 34-40 (Dead Code, Bug Fixes, Config Registry, Structured Logging, Code Refactoring, Architecture Fixes, Test Infrastructure)
+- Phase 44 added: Deliver completion-notification wake-ups to dispatching agent sessions — close the gap where an orchestrating session calls aof_dispatch but never gets woken up when the task completes; today's scope = Telegram-bound sessions actually resume; stretch = works for any session kind. Out of scope / roadmap: project-wide opt-in subscription (track separately in backlog).
 
 ### Pending Todos
 
@@ -69,3 +70,5 @@ None. All v1.10 blockers resolved.
 
 Last session: 2026-04-17T13:39:04.318Z
 Stopped at: Phase 43 context gathered
+
+**Planned Phase:** 44 (Deliver completion-notification wake-ups to dispatching agent sessions) — 8 plans — 2026-04-24T14:34:39.560Z
