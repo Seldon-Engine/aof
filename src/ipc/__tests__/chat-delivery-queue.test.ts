@@ -5,7 +5,7 @@
  * deliverResult, listener-leak guard matching spawn-queue.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { ChatDeliveryQueue } from "../chat-delivery-queue.js";
 import type { ChatDeliveryRequest } from "../schemas.js";
 
@@ -120,5 +120,47 @@ describe("ChatDeliveryQueue", () => {
       q.deliverResult(id, { success: true });
     }
     expect(q.listenerCount("enqueue")).toBe(0);
+  });
+
+  // --- Phase 44: D-44-TIMEOUT -------------------------------------------------
+  // RED: Plan 05 will add a configurable timeoutMs on enqueueAndAwait with a
+  // 60_000ms default, tagging the rejection with kind="timeout" so the
+  // notifier's existing catch branch writes {error: {kind, message}} into the
+  // subscription attempt ledger. Late deliverResult after a timeout fires must
+  // remain an idempotent no-op (preserves the deliverResult contract at
+  // chat-delivery-queue.ts:95-98).
+
+  it("enqueueAndAwait rejects with kind='timeout' when timeoutMs elapses without deliverResult", async () => {
+    const q = new ChatDeliveryQueue();
+    const { done } = q.enqueueAndAwait(partial(), { timeoutMs: 10 });
+    await expect(done).rejects.toMatchObject({
+      kind: "timeout",
+      message: expect.stringContaining("timed out"),
+    });
+  });
+
+  it("deliverResult after timeout fires is idempotent no-op (no throw)", async () => {
+    const q = new ChatDeliveryQueue();
+    const { id, done } = q.enqueueAndAwait(partial(), { timeoutMs: 10 });
+    // Swallow the expected rejection so it doesn't surface as an unhandled rejection.
+    await done.catch(() => undefined);
+    expect(() => q.deliverResult(id, { success: true })).not.toThrow();
+  });
+
+  it("enqueueAndAwait without opts uses a 60_000ms default timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const q = new ChatDeliveryQueue();
+      const { done } = q.enqueueAndAwait(partial()); // no opts — exercise default
+      const rejected = done.catch((err: Error & { kind?: string }) => err);
+      await vi.advanceTimersByTimeAsync(60_001);
+      const err = await rejected;
+      expect(err).toMatchObject({
+        kind: "timeout",
+        message: expect.stringContaining("timed out"),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
