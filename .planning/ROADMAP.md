@@ -164,6 +164,16 @@ See: `.planning/milestones/v1.10-ROADMAP.md` for full details
 - [x] 43-08-PLAN.md — Wave 4 installer reversal + Migration 007 + --force-daemon deprecation warn
 - [x] 43-09-PLAN.md — Wave 4 checkpoint:human-verify end-to-end on real Mac/Linux + OpenClaw gateway
 
+### Phase 44: Deliver completion-notification wake-ups to dispatching agent sessions
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 43
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 44 to break down)
+
 ## Backlog
 
 ### Phase 999.3: Scheduler action pre-condition envelope — session-end handler dedupe (BACKLOG)
@@ -196,13 +206,3 @@ See: `.planning/milestones/v1.10-ROADMAP.md` for full details
 **Requirements:** TBD
 **Plans:** 0 plans
 - [ ] TBD (promote with /gsd-review-backlog when ready)
-
-### Phase 44: Deliver completion-notification wake-ups to dispatching agent sessions
-
-**Goal:** [To be planned]
-**Requirements**: TBD
-**Depends on:** Phase 43
-**Plans:** 0 plans
-
-Plans:
-- [ ] TBD (run /gsd-plan-phase 44 to break down)
