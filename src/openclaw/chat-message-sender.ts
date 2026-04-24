@@ -28,6 +28,26 @@ import type { OpenClawApi } from "./types.js";
 
 const log = createLogger("chat-message-sender");
 
+/**
+ * Thrown when sendChatDelivery cannot resolve a platform for the delivery — either
+ * parseSessionKey returned undefined (e.g. 4-part subagent sessionKey `agent:X:subagent:Y`)
+ * AND the caller did not set an explicit `delivery.channel`.
+ *
+ * The `kind = "no-platform"` tag is consumed by OpenClawChatDeliveryNotifier's catch
+ * branch to trigger the agent-callback-fallback audit record (Phase 44 D-44-AGENT-CALLBACK-FALLBACK).
+ *
+ * @module openclaw/chat-message-sender
+ */
+export class NoPlatformError extends Error {
+  readonly kind = "no-platform" as const;
+  constructor(public readonly sessionKey: string | undefined) {
+    super(
+      `cannot resolve platform for delivery (sessionKey=${sessionKey ?? "<none>"}, channel=<none>)`,
+    );
+    this.name = "NoPlatformError";
+  }
+}
+
 interface OutboundSendTextParams {
   cfg?: unknown;
   to: string;
@@ -101,9 +121,7 @@ export async function sendChatDelivery(
   const parsed = parseSessionKey(req.delivery.sessionKey);
   const platform = req.delivery.channel ?? parsed?.platform;
   if (!platform) {
-    throw new Error(
-      `cannot resolve platform for delivery (sessionKey=${req.delivery.sessionKey ?? "<none>"}, channel=<none>)`,
-    );
+    throw new NoPlatformError(req.delivery.sessionKey);
   }
 
   const target = req.delivery.target ?? parsed?.chatId;
