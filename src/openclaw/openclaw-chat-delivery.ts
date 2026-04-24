@@ -19,10 +19,11 @@ import { SubscriptionStore } from "../store/subscription-store.js";
 import type { BaseEvent } from "../schemas/event.js";
 import type { ITaskStore } from "../store/interfaces.js";
 import type { MatrixMessageTool } from "./matrix-notifier.js";
+import { OPENCLAW_CHAT_DELIVERY_KIND } from "./subscription-delivery.js";
 
 const log = createLogger("openclaw-chat-delivery");
 
-export const OPENCLAW_CHAT_DELIVERY_KIND = "openclaw-chat";
+export { OPENCLAW_CHAT_DELIVERY_KIND } from "./subscription-delivery.js";
 
 const TRIGGER_STATUSES = new Set(["blocked", "review", "done", "cancelled", "deadletter"]);
 const TERMINAL_STATUSES = new Set(["done", "cancelled", "deadletter"]);

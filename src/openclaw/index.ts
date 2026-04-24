@@ -12,3 +12,5 @@ export type {
   OpenClawHttpRouteDefinition,
   OpenClawApi,
 } from "./types.js";
+export { OpenClawChatDelivery, OPENCLAW_CHAT_DELIVERY_KIND } from "./subscription-delivery.js";
+export type { OpenClawChatDeliveryType } from "./subscription-delivery.js";
