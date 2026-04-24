@@ -23,6 +23,8 @@ import { PluginBridgeAdapter } from "../dispatch/plugin-bridge-adapter.js";
 import { SelectingAdapter } from "../dispatch/selecting-adapter.js";
 import { OpenClawChatDeliveryNotifier } from "../openclaw/openclaw-chat-delivery.js";
 import { buildResolveStoreForTask } from "./resolve-store-for-task.js";
+import { discoverProjects } from "../projects/registry.js";
+import { createProjectStore } from "../projects/store-factory.js";
 
 const log = createLogger("daemon");
 
@@ -194,6 +196,46 @@ export async function startAofDaemon(opts: AOFDaemonOptions): Promise<AOFDaemonC
     messageTool: queueBackedMessageTool,
   });
   logger.addOnEvent((event) => chatNotifier.handleEvent(event));
+
+  // Phase 44 D-44-RECOVERY: boot-time replay of wake-ups lost during a
+  // daemon crash between `transition()` and plugin ACK.
+  //
+  // Enumeration mirrors buildResolveStoreForTask (src/daemon/resolve-store-for-task.ts:84):
+  //   1. Unscoped base store — covers vault-root tasks (projectId: null).
+  //   2. discoverProjects(vaultRoot) -> per-project createProjectStore(...) -> same replay call.
+  //
+  // Fire-and-forget (async IIFE) so daemon IPC start is not blocked by the
+  // replay — T-44-10 mitigation. Per-project failures are caught
+  // individually so one corrupt project cannot block replay for the
+  // others. No skip path: the enumeration helpers are load-bearing for
+  // resolveStoreForTask above and guaranteed present post-Phase 43.
+  (async () => {
+    try {
+      // (1) Unscoped base store first.
+      await chatNotifier.replayUnnotifiedTerminals(store);
+
+      // (2) Every discovered project.
+      const projects = await discoverProjects(opts.dataDir);
+      for (const rec of projects) {
+        try {
+          const { store: projectStore } = await createProjectStore({
+            projectId: rec.id,
+            vaultRoot: opts.dataDir,
+            logger,
+          });
+          await chatNotifier.replayUnnotifiedTerminals(projectStore);
+        } catch (err) {
+          // One broken project must not block replay for the others.
+          log.warn({ err, projectId: rec.id }, "wake-up recovery pass failed for project (non-fatal)");
+        }
+      }
+    } catch (err) {
+      log.warn({ err }, "wake-up recovery pass failed on startup (non-fatal)");
+    }
+  })().catch((err) => {
+    // Safety net — the IIFE already catches, but belt-and-braces.
+    log.warn({ err }, "wake-up recovery pass IIFE rejection");
+  });
 
   // --- Step 2: Start health server on Unix socket ---
   let healthServer: Server | undefined;
