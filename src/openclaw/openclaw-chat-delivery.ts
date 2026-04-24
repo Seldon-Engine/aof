@@ -116,20 +116,43 @@ export class OpenClawChatDeliveryNotifier {
       }
     } catch (err) {
       const failureMessage = err instanceof Error ? err.message : String(err);
-      const kind =
+      const originalKind =
         err && typeof err === "object" && "kind" in err && typeof (err as { kind: unknown }).kind === "string"
           ? ((err as { kind: string }).kind)
           : undefined;
+
+      // Phase 44 D-44-AGENT-CALLBACK-FALLBACK: when the plugin-side
+      // sendChatDelivery throws NoPlatformError (kind="no-platform") because
+      // the delivery sessionKey is a subagent (4-part) key or otherwise
+      // unparseable AND no explicit channel was set, rewrite the attempt's
+      // error.kind to "agent-callback-fallback" so the audit trail captures
+      // the fallback decision. The subscription stays active (NOT "delivered")
+      // — the real wake-up is observably lost today; a future phase will
+      // invoke an agent-callback send on this path.
+      const isNoPlatform = originalKind === "no-platform";
+      const kind = isNoPlatform ? "agent-callback-fallback" : originalKind;
+      const message = isNoPlatform
+        ? `agent-callback fallback (wake-up observably lost): ${failureMessage}`
+        : failureMessage;
+
       await subscriptionStore.appendAttempt(task.frontmatter.id, sub.id, {
         attemptedAt,
         success: false,
         toStatus,
         error: {
           ...(kind !== undefined ? { kind } : {}),
-          message: failureMessage,
+          message,
         },
       });
-      log.error({ err, target, taskId: task.frontmatter.id }, "messageTool.send failed");
+
+      if (isNoPlatform) {
+        log.warn(
+          { err, target, taskId: task.frontmatter.id, subscriptionId: sub.id },
+          "wake-up fell back to agent-callback (no platform for delivery sessionKey)",
+        );
+      } else {
+        log.error({ err, target, taskId: task.frontmatter.id }, "messageTool.send failed");
+      }
     }
   }
 
