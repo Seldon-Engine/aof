@@ -181,6 +181,46 @@ Plans:
 - [x] 44-07-PLAN.md — Wave 3 replayUnnotifiedTerminals recovery pass + wake-up.* structured telemetry
 - [x] 44-08-PLAN.md — Wave 4 full automated sweep + checkpoint:human-verify UAT on live Telegram via OpenClaw gateway
 
+### Phase 45: Wake dispatching sessions via system-event injection
+
+**Goal:** When a dispatched task reaches a terminal state, the dispatching agent session's NEXT TURN includes the completion as context and reacts — not just "a Telegram message appears that a human can point at." Completes the `aof_dispatch → walk-away → task finishes → orchestrator resumes work` loop that Phase 44 set out to deliver but stopped one layer short of.
+
+**Why:** Phase 44 UAT (2026-04-24) proved the AOF-side wake-up mechanism works end-to-end: the `wake-up.delivered` event fires, the subscription records a successful attempt, and the message appears in the dispatcher's Telegram topic. **But the agent doesn't react** — the message is a passive post in the chat channel, not context injected into the next agent turn. Fresh-session test transcript: user observed the completion notification in Telegram; the orchestrator (the same `main` agent that dispatched the task) did not acknowledge or react to it because the payload never entered its conversational context. The core value proposition in PROJECT.md ("tasks always resume and complete end-to-end without human intervention") requires the agent to actually wake up and continue its work — not just that a notification be deliverable for a human to see.
+
+Investigation confirmed the primitive we need exists on OpenClaw's runtime surface AND is already used internally by OpenClaw's own cron service (`task-registry-BJCE3lhL.js` in the installed dist):
+
+```js
+enqueueSystemEvent(text, {
+  sessionKey: ownerKey,
+  contextKey: `task:${task.taskId}`,
+  deliveryContext: owner.requesterOrigin
+});
+```
+
+`runtime.system.enqueueSystemEvent` appends to a session's pending-events queue; `runtime.system.requestHeartbeatNow({ sessionKey, heartbeat: { target: "last" } })` forces the session to process those events on its next turn. Together they are the documented pattern for waking agents from outside the turn cycle. **Fully AOF-side fix — no OpenClaw upstream changes required.**
+
+**Scope (~4-5 plans):**
+- Extend `OpenClawApi` type (`src/openclaw/types.ts`) to include optional `runtime?.system?.enqueueSystemEvent` + `requestHeartbeatNow` + `runHeartbeatOnce`. Optional for graceful degradation on older OpenClaw versions.
+- Extend `OpenClawChatDeliveryNotifier.deliverOne` (or introduce a paired path) to call `enqueueSystemEvent + requestHeartbeatNow` on the dispatcher's sessionKey in addition to — not instead of — the existing chat delivery. `contextKey` = `task:{id}:{toStatus}` for dedupe.
+- Feature-detect: if `runtime.system?.enqueueSystemEvent` is undefined, fall back to chat-only and emit `wake-up.system-event-unavailable` telemetry so the gap is observable during rollout to older gateways.
+- Add telemetry dimensions: `wake-up.system-event-enqueued`, `wake-up.heartbeat-requested`, `wake-up.system-event-unavailable`, and tag existing `wake-up.attempted`/`delivered` with a `channel` field (`chat` | `system-event` | `both`).
+- Reposition the Phase 44 chat-delivery chain as the **observer notification** path (humans in the chat see "Task complete") not the agent wake-up path. Telemetry + docs updated so the two concerns are no longer conflated.
+- Live UAT: rerun the same probe Phase 44 ended with. Success = agent reacts to the completion in the SAME turn without human intervention.
+
+**Relationship to Phase 44:**
+- **Keeps:** subscription persistence schema (`dispatcherAgentId`/`capturedAt`/`pluginId`), `replayUnnotifiedTerminals` recovery pass, TTL removal on invocation-context, 60s queue timeout, `NoPlatformError`/agent-callback-fallback audit trail. All remain load-bearing.
+- **Reclassifies:** the chat-delivery chain from "the wake-up path" to "the observer notification path." Still useful (humans want to see completions in the chat log), but it is not what makes the agent resume.
+- **Supersedes (partially):** D-44-GOAL in its literal reading ("dispatcher receives a wake-up delivery on its captured channel"). D-45-GOAL is the stricter restatement: "dispatcher's next turn actually reacts to the completion as context."
+- **Deferred refactor (NOT this phase, tracked separately):** once Phase 45 ships and we have telemetry on both paths, audit which parts of the chat-delivery chain genuinely serve the observer use case vs which are vestigial from the original wake-up scope. May reveal simplification opportunities. Do not pre-optimize — wait for data.
+
+**Depends on:** Phase 44 (subscription shape, recovery pass, notifier catch branches are all reused). Independent of 999.3/999.4/999.5.
+
+**Requirements:** TBD (lock during /gsd-discuss-phase — expect D-45-GOAL, D-45-PRIMITIVE, D-45-CHANNEL-ORTHOGONALITY, D-45-FEATURE-DETECT, D-45-TELEMETRY, D-45-DEDUP-KEY).
+**Plans:** 0 plans
+- [ ] TBD (run /gsd-discuss-phase 45 then /gsd-plan-phase 45 to break down)
+
+**Reference:** Phase 44 UAT blocker post-mortem at `.planning/phases/44-.../44-BLOCKERS.md`. Fresh-session probe transcript (the "chat delivery worked; context injection back into the live agent turn did not" exchange) captured during the Phase 44 close-out conversation on 2026-04-24. OpenClaw primitive reference: `/opt/homebrew/lib/node_modules/openclaw/dist/plugin-sdk/src/infra/system-events.d.ts` and `heartbeat-wake.d.ts`; cron call-site at `task-registry-BJCE3lhL.js` (installed dist, chunk name may change across upgrades).
+
 ## Backlog
 
 ### Phase 999.3: Scheduler action pre-condition envelope — session-end handler dedupe (BACKLOG)
