@@ -169,17 +169,17 @@ See: `.planning/milestones/v1.10-ROADMAP.md` for full details
 **Goal:** When an orchestrating agent session calls aof_dispatch and the dispatched task reaches a terminal state (done / failed / cancelled), the dispatching session receives a wake-up delivery on its captured channel. In-scope: Telegram-bound orchestrator sessions actually resume. Stretch: subagent sessionKeys fall back to an agent-callback-fallback audit record so the event is persisted and observable even when platform resume is not possible.
 **Requirements:** D-44-GOAL, D-44-PRIMITIVE, D-44-SCHEMA, D-44-IDENTITY, D-44-TTL, D-44-TIMEOUT, D-44-RECOVERY, D-44-AUTOREGISTER, D-44-OBSERVABILITY, D-44-AGENT-CALLBACK-FALLBACK
 **Depends on:** Phase 43
-**Plans:** 8 plans
+**Plans:** 8/8 plans complete
 
 Plans:
-- [ ] 44-01-PLAN.md — Wave 0 RED tests: dispatch-notification enrichment + chat-delivery-queue 60s timeout + tool-invocation-context TTL removal
-- [ ] 44-02-PLAN.md — Wave 0 RED tests: E2E wake-up integration + agent-callback-fallback + notifier-recovery-on-restart
-- [ ] 44-03-PLAN.md — Wave 1 OpenClawChatDelivery Zod schema + mergeDispatchNotificationRecipient enrichment (dispatcherAgentId/capturedAt/pluginId)
-- [ ] 44-04-PLAN.md — Wave 1 remove default TTL from OpenClawToolInvocationContextStore (rely on session_end hook + LRU cap)
-- [ ] 44-05-PLAN.md — Wave 2 ChatDeliveryQueue.enqueueAndAwait 60s default timeout with kind="timeout" error tagging
-- [ ] 44-06-PLAN.md — Wave 3 NoPlatformError in chat-message-sender + agent-callback-fallback audit branch in the notifier
-- [ ] 44-07-PLAN.md — Wave 3 replayUnnotifiedTerminals recovery pass + wake-up.* structured telemetry
-- [ ] 44-08-PLAN.md — Wave 4 full automated sweep + checkpoint:human-verify UAT on live Telegram via OpenClaw gateway
+- [x] 44-01-PLAN.md — Wave 0 RED tests: dispatch-notification enrichment + chat-delivery-queue 60s timeout + tool-invocation-context TTL removal
+- [x] 44-02-PLAN.md — Wave 0 RED tests: E2E wake-up integration + agent-callback-fallback + notifier-recovery-on-restart
+- [x] 44-03-PLAN.md — Wave 1 OpenClawChatDelivery Zod schema + mergeDispatchNotificationRecipient enrichment (dispatcherAgentId/capturedAt/pluginId)
+- [x] 44-04-PLAN.md — Wave 1 remove default TTL from OpenClawToolInvocationContextStore (rely on session_end hook + LRU cap)
+- [x] 44-05-PLAN.md — Wave 2 ChatDeliveryQueue.enqueueAndAwait 60s default timeout with kind="timeout" error tagging
+- [x] 44-06-PLAN.md — Wave 3 NoPlatformError in chat-message-sender + agent-callback-fallback audit branch in the notifier
+- [x] 44-07-PLAN.md — Wave 3 replayUnnotifiedTerminals recovery pass + wake-up.* structured telemetry
+- [x] 44-08-PLAN.md — Wave 4 full automated sweep + checkpoint:human-verify UAT on live Telegram via OpenClaw gateway
 
 ## Backlog
 
