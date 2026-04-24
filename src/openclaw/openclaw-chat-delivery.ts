@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { createLogger } from "../logging/index.js";
 import { readRunResult } from "../recovery/run-artifacts.js";
 import { resolveDeliveryKind, type TaskSubscription } from "../schemas/subscription.js";
+import type { TaskStatus } from "../schemas/task.js";
 import { SubscriptionStore } from "../store/subscription-store.js";
 import type { BaseEvent } from "../schemas/event.js";
 import type { ITaskStore } from "../store/interfaces.js";
@@ -23,6 +24,10 @@ import { OPENCLAW_CHAT_DELIVERY_KIND } from "./subscription-delivery.js";
 import type { OpenClawChatDeliveryType } from "./subscription-delivery.js";
 
 const log = createLogger("openclaw-chat-delivery");
+// Phase 44 D-44-OBSERVABILITY: dedicated channel for structured wake-up.*
+// events so operators (and 999.4 fan-out) can grep lifecycle transitions
+// independently of the existing free-form log lines above.
+const wakeLog = createLogger("wake-up-delivery");
 
 export { OPENCLAW_CHAT_DELIVERY_KIND } from "./subscription-delivery.js";
 
@@ -69,6 +74,7 @@ export class OpenClawChatDeliveryNotifier {
         actor: event.actor,
         reason: typeof event.payload.reason === "string" ? event.payload.reason : undefined,
         runResult,
+        source: "event",
       }).catch((err) => {
         log.error({ err, taskId: event.taskId, subscriptionId: sub.id }, "chat delivery failed");
       });
@@ -83,16 +89,51 @@ export class OpenClawChatDeliveryNotifier {
     actor: string;
     reason?: string;
     runResult: Awaited<ReturnType<typeof readRunResult>> | undefined;
+    /**
+     * Phase 44 D-44-OBSERVABILITY: "event" for the realtime handleEvent path,
+     * "recovery" for the boot-time replayUnnotifiedTerminals pass. Controls
+     * which wake-up.* event name fires on the attempt (recovery-replay vs
+     * attempted).
+     */
+    source: "event" | "recovery";
   }): Promise<void> {
-    const { sub, subscriptionStore, task, toStatus, actor, reason, runResult } = args;
+    const { sub, subscriptionStore, task, toStatus, actor, reason, runResult, source } = args;
     if (!task) return;
 
     const delivery = sub.delivery as OpenClawChatDeliveryType | undefined;
     if (!delivery) return;
     const target = delivery.target ?? delivery.sessionKey ?? delivery.sessionId;
-    if (!target) return;
+    if (!target) {
+      // Phase 44 D-44-OBSERVABILITY: active chat subscription on a trigger
+      // status but with no route at all — nothing to send, but operators
+      // need to see it.
+      wakeLog.debug(
+        {
+          subscriptionId: sub.id,
+          taskId: task.frontmatter.id,
+          toStatus,
+          source,
+          sessionKey: delivery.sessionKey,
+          dispatcherAgentId: delivery.dispatcherAgentId,
+        },
+        "wake-up.skipped-no-route",
+      );
+      return;
+    }
 
     const message = renderMessage({ task, toStatus, actor, reason, runResult });
+
+    wakeLog.info(
+      {
+        subscriptionId: sub.id,
+        taskId: task.frontmatter.id,
+        toStatus,
+        source,
+        sessionKey: delivery.sessionKey,
+        dispatcherAgentId: delivery.dispatcherAgentId,
+      },
+      source === "recovery" ? "wake-up.recovery-replay" : "wake-up.attempted",
+    );
 
     const attemptedAt = new Date().toISOString();
     try {
@@ -114,6 +155,17 @@ export class OpenClawChatDeliveryNotifier {
           deliveredAt: new Date().toISOString(),
         });
       }
+      wakeLog.info(
+        {
+          subscriptionId: sub.id,
+          taskId: task.frontmatter.id,
+          toStatus,
+          source,
+          sessionKey: delivery.sessionKey,
+          dispatcherAgentId: delivery.dispatcherAgentId,
+        },
+        "wake-up.delivered",
+      );
     } catch (err) {
       const failureMessage = err instanceof Error ? err.message : String(err);
       const originalKind =
@@ -131,7 +183,7 @@ export class OpenClawChatDeliveryNotifier {
       // invoke an agent-callback send on this path.
       const isNoPlatform = originalKind === "no-platform";
       const kind = isNoPlatform ? "agent-callback-fallback" : originalKind;
-      const message = isNoPlatform
+      const attemptMessage = isNoPlatform
         ? `agent-callback fallback (wake-up observably lost): ${failureMessage}`
         : failureMessage;
 
@@ -141,9 +193,32 @@ export class OpenClawChatDeliveryNotifier {
         toStatus,
         error: {
           ...(kind !== undefined ? { kind } : {}),
-          message,
+          message: attemptMessage,
         },
       });
+
+      // Phase 44 D-44-OBSERVABILITY: structured telemetry event per failure
+      // shape. `kind` here is the ORIGINAL error kind from the thrown Error
+      // (timeout / no-platform / undefined), NOT the delivery kind.
+      const telemetryEvent =
+        originalKind === "timeout"
+          ? "wake-up.timed-out"
+          : isNoPlatform
+            ? "wake-up.fallback"
+            : "wake-up.failed";
+      wakeLog.warn(
+        {
+          subscriptionId: sub.id,
+          taskId: task.frontmatter.id,
+          toStatus,
+          source,
+          kind: originalKind,
+          message: failureMessage,
+          sessionKey: delivery.sessionKey,
+          dispatcherAgentId: delivery.dispatcherAgentId,
+        },
+        telemetryEvent,
+      );
 
       if (isNoPlatform) {
         log.warn(
@@ -154,6 +229,95 @@ export class OpenClawChatDeliveryNotifier {
         log.error({ err, target, taskId: task.frontmatter.id }, "messageTool.send failed");
       }
     }
+  }
+
+  /**
+   * Phase 44 D-44-RECOVERY: boot-time replay of unnotified terminal subscriptions.
+   *
+   * Fires wake-ups for active subscriptions whose task is already in a terminal
+   * status AND whose `notifiedStatuses` ledger does NOT yet record that terminal
+   * status. Guards against daemon crashes between `transition()` and plugin ACK
+   * where the event-logger callback fired but the ACK never landed (so the
+   * subscription was never marked delivered and no wake-up reached the agent).
+   *
+   * Safe to call multiple times — each call observes the same `notifiedStatuses`
+   * ledger, so the second call short-circuits via the existing `.includes(toStatus)`
+   * filter. Mirrors the shape of `retryPendingDeliveries` in
+   * `src/dispatch/callback-delivery.ts` (same terminal-status gate + active-sub
+   * filter), specialized to the openclaw-chat kind and the notifiedStatuses
+   * dedupe ledger.
+   */
+  async replayUnnotifiedTerminals(store: ITaskStore): Promise<void> {
+    const subscriptionStore = this.createSubscriptionStore(store);
+    let replayed = 0;
+
+    // Iterate per terminal status — task-store.list(filters) takes a single
+    // status at a time (STATUS_DIRS scan otherwise returns every task).
+    for (const terminalStatus of TERMINAL_STATUSES) {
+      let tasks: Awaited<ReturnType<ITaskStore["list"]>>;
+      try {
+        // `terminalStatus` is narrowed from a `Set<string>` — cast to the
+        // TaskStatus union the store.list filter expects.
+        tasks = await store.list({ status: terminalStatus as TaskStatus });
+      } catch (err) {
+        log.warn({ err, terminalStatus }, "replayUnnotifiedTerminals: store.list failed (skipping status)");
+        continue;
+      }
+
+      for (const task of tasks) {
+        const toStatus = task.frontmatter.status;
+        // Defense-in-depth: list(status) should only return tasks of that
+        // status, but drift between frontmatter and directory has surfaced
+        // before (6fbcb18 partial-rename hardening).
+        if (!TERMINAL_STATUSES.has(toStatus)) continue;
+
+        let active: TaskSubscription[];
+        try {
+          active = await subscriptionStore.list(task.frontmatter.id, { status: "active" });
+        } catch (err) {
+          log.warn(
+            { err, taskId: task.frontmatter.id },
+            "replayUnnotifiedTerminals: subscriptionStore.list failed (skipping task)",
+          );
+          continue;
+        }
+
+        const candidates = active.filter(
+          (s) =>
+            resolveDeliveryKind(s) === OPENCLAW_CHAT_DELIVERY_KIND
+            && !s.notifiedStatuses.includes(toStatus),
+        );
+        if (candidates.length === 0) continue;
+
+        const runResult = await readRunResult(store, task.frontmatter.id).catch(() => undefined);
+
+        for (const sub of candidates) {
+          try {
+            await this.deliverOne({
+              sub,
+              subscriptionStore,
+              task,
+              toStatus,
+              // Recovery path has no originating transition event — use a
+              // synthetic actor so downstream log/message rendering has a
+              // recognizable provenance marker.
+              actor: "system:recovery",
+              reason: undefined,
+              runResult,
+              source: "recovery",
+            });
+            replayed += 1;
+          } catch (err) {
+            log.error(
+              { err, taskId: task.frontmatter.id, subscriptionId: sub.id },
+              "replayUnnotifiedTerminals: deliverOne failed",
+            );
+          }
+        }
+      }
+    }
+
+    wakeLog.info({ replayed }, "wake-up.recovery-pass-complete");
   }
 
   private createSubscriptionStore(store: ITaskStore): SubscriptionStore {
