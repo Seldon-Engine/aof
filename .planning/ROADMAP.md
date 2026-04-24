@@ -213,3 +213,23 @@ Plans:
 **Requirements:** TBD
 **Plans:** 0 plans
 - [ ] TBD (promote with /gsd-review-backlog when ready)
+
+### Phase 999.5: Stale-OpenClaw-worker detection in deploy flow (BACKLOG)
+
+**Goal:** Detect `openclaw` processes whose load time predates the most recent OpenClaw install (`/opt/homebrew/lib/node_modules/openclaw/` mtime) or AOF deploy (`~/.aof/dist/daemon/index.js` mtime) and interactively offer to kill them. Runs as a post-deploy step in `scripts/deploy.sh` and is also callable standalone as `scripts/check-stale-workers.sh`. Closes the "silently mixed version landscape" hole surfaced by the Phase 44 UAT: OpenClaw's in-place `npm install -g openclaw@latest` leaves pre-upgrade worker processes running with stale chunk references in Node's module cache, and the AOF daemon's IPC layer load-balances across them — producing intermittent, hard-to-correlate wake-up failures.
+
+**Why:** Phase 44 UAT Scenario A on 2026-04-24 surfaced 36 stale `openclaw` processes (24 pre-OpenClaw-upgrade + 12 post-upgrade but pre-AOF-kickstart) eating ~25% of RAM on a fresh VM. The `review` wake-up succeeded (hit the fresh gateway); the `done` wake-up 500ms later failed twice — once with `Telegram bot token missing for account "default"` (stale worker didn't have `TELEGRAM_BOT_TOKEN` from `op run`-sourced env) and once with `Cannot find module './send-DlzbQJQs.js'` (stale worker's Node module cache still referenced pre-upgrade chunk hashes). Pattern is documented in CLAUDE.md §Build & Release "zombie agent caveat" but that text only covers per-session agent processes, not the whole worker pool, and requires manual `ps … | grep … | kill` hygiene that's easy to skip. Automating it in `scripts/deploy.sh` closes the gap structurally. Upstream OpenClaw fixes (IPC version negotiation, postinstall worker-kill hook) are not options because we don't control the OpenClaw codebase.
+
+**Scope (small):**
+- New `scripts/check-stale-workers.sh` — detects `openclaw` processes whose `lstart` epoch is earlier than `max(install_mtime, aof_deploy_mtime)`, prints a table of PIDs + start times, and (when stdin is a TTY) interactively prompts `kill all? [y/N]`. No new CLI flags per project convention (flag sprawl hygiene). Non-TTY use = report-only exit code 0/1.
+- Wire into `scripts/deploy.sh` as an advisory post-deploy step, after the existing dual-kickstart hint. Advisory only — deploy itself always succeeds.
+- Update CLAUDE.md §Build & Release: the zombie-agent caveat + dual-launchctl-kickstart section gets a new subsection pointing users at the script. Also clarify that "zombie openclaw-agent" (per-session, CLAUDE.md already covers) and "stale openclaw worker" (whole-gateway-subsystem, new) are different failure modes.
+- Regression test: a small shell-test under `tests/integration/` that stubs `ps` output and verifies the script's detection logic + prompt flow.
+
+**Depends on:** None — standalone operational hygiene. Independent of Phase 44 (44 is what surfaced the need, but the fix is fully decoupled).
+
+**Requirements:** TBD (derive during /gsd-discuss-phase; expect D-999.5-DETECT, D-999.5-PROMPT-DEFAULT, D-999.5-NON-TTY-EXIT, D-999.5-DOCS)
+**Plans:** 0 plans
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
+**Reference:** Phase 44 UAT blocker post-mortem at `.planning/phases/44-deliver-completion-notification-wake-ups-to-dispatching-agen/44-BLOCKERS.md` has the full diagnostic trail.
