@@ -21,7 +21,24 @@ type StoredRecipient = {
   expiresAt: number;
 };
 
-const DEFAULT_ROUTE_TTL_MS = 60 * 60 * 1000;
+/**
+ * Default route TTL is effectively disabled (Phase 44 / D-44-TTL).
+ *
+ * Historically this was `60 * 60 * 1000` (1h) — but that wall-clock window is
+ * shorter than many dispatch→completion cycles, which meant captured
+ * dispatcher routes were dropped before the corresponding task finished,
+ * silently losing completion-notification wake-ups (44-RESEARCH.md §F1).
+ *
+ * Default eviction is now LRU-cap + explicit `clearSessionRoute` (fired by
+ * the `session_end` hook at `src/openclaw/adapter.ts:72-73`). The wall-clock
+ * TTL is retained only as an explicit test-only seam — passing `routeTtlMs`
+ * to the constructor still produces the old behaviour (pruneExpired keeps
+ * working for finite values). With `Number.POSITIVE_INFINITY`, every entry's
+ * `expiresAt` becomes `Infinity`, so the `entry.expiresAt <= now` check in
+ * `pruneExpired` / `getRecipient` is never true and eviction is effectively
+ * a no-op on the default path.
+ */
+const DEFAULT_ROUTE_TTL_MS = Number.POSITIVE_INFINITY;
 const DEFAULT_MAX_SESSION_ROUTES = 2048;
 const DEFAULT_MAX_TOOL_CALLS = 2048;
 
