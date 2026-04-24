@@ -23,6 +23,15 @@ import type { ChatDeliveryRequest, ChatDeliveryResultPost } from "./schemas.js";
 
 const log = createLogger("chat-delivery-queue");
 
+/**
+ * Default bound on how long `enqueueAndAwait` will block waiting for the
+ * plugin to POST a delivery result. Mitigates CLAUDE.md's "chat-delivery
+ * chain blocks on plugin ACK" fragility warning — without this cap a slow
+ * or broken plugin stalls the `EventLogger` callback indefinitely. Per
+ * Phase 44 D-44-TIMEOUT.
+ */
+const DEFAULT_TIMEOUT_MS = 60_000;
+
 interface Waiter {
   resolve: () => void;
   reject: (err: Error) => void;
@@ -36,23 +45,59 @@ export class ChatDeliveryQueue extends EventEmitter {
   /**
    * Enqueue a chat delivery. Generates `id = randomUUID()`, emits `"enqueue"`,
    * and returns a promise that resolves when the plugin POSTs a successful
-   * result — or rejects on plugin-reported failure / queue reset.
+   * result — or rejects on plugin-reported failure / queue reset / timeout.
+   *
+   * The optional `opts.timeoutMs` bounds how long `done` will stay pending
+   * before rejecting with `Error & { kind: "timeout" }`. When undefined the
+   * module-level `DEFAULT_TIMEOUT_MS` (60s) applies. Pass `Infinity` or `0` to
+   * disable the timer entirely (useful in tests that assert "no timeout
+   * happens" without racing real time). A late `deliverResult` call after a
+   * timeout fires is an idempotent no-op — the existing `if (!waiter) return`
+   * guard in `deliverResult` covers this because the waiter was already
+   * removed when the timer fired.
    */
-  enqueueAndAwait(partial: Omit<ChatDeliveryRequest, "id">): {
+  enqueueAndAwait(
+    partial: Omit<ChatDeliveryRequest, "id">,
+    opts?: { timeoutMs?: number },
+  ): {
     id: string;
     done: Promise<void>;
   } {
     const id = randomUUID();
     const full: ChatDeliveryRequest = { id, ...partial };
     this.pending.set(id, full);
+    const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
     const done = new Promise<void>((resolve, reject) => {
-      this.waiters.set(id, { resolve, reject });
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+        timer = setTimeout(() => {
+          if (this.waiters.has(id)) {
+            this.waiters.delete(id);
+            this.pending.delete(id);
+            this.claimed.delete(id);
+            const err = new Error(`chat delivery timed out after ${timeoutMs}ms`);
+            (err as Error & { kind?: string }).kind = "timeout";
+            reject(err);
+          }
+        }, timeoutMs);
+      }
+
+      this.waiters.set(id, {
+        resolve: () => {
+          if (timer !== undefined) clearTimeout(timer);
+          resolve();
+        },
+        reject: (e: Error) => {
+          if (timer !== undefined) clearTimeout(timer);
+          reject(e);
+        },
+      });
     });
 
     this.emit("enqueue", full);
     log.debug(
-      { id, subscriptionId: full.subscriptionId, taskId: full.taskId },
+      { id, subscriptionId: full.subscriptionId, taskId: full.taskId, timeoutMs },
       "chat delivery enqueued",
     );
     return { id, done };
