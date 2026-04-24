@@ -795,27 +795,33 @@ enqueueAndAwait(partial: Omit<ChatDeliveryRequest, "id">, opts?: { timeoutMs?: n
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+> All four items closed by Phase 44 discuss-phase decisions (D-44-GOAL, D-44-PRIMITIVE, D-44-PARTITION-SCOPE, D-44-AGENT-CALLBACK-FALLBACK). Retained here for historical traceability. If a future phase re-opens any of these, add a new sibling section rather than editing in place.
 
 1. **Which specific wake-up gap has the user seen fail in production?**
    - What we know: the one-sentence STATE.md scope says "Telegram-bound sessions actually resume" is in-scope, which implies the user has seen Telegram sessions FAIL to resume. But Phase 43's e2e test suggests they should work.
    - What's unclear: is the failure (a) TTL expiry (§5 Case 1), (b) a subagent case that looks Telegram-like but fails silently (§3 row 3), (c) a daemon-crash / late-transition race, or (d) something else?
    - Recommendation: the discuss-phase MUST clarify this with the user. It changes which RED test Wave 0 leads with.
+   - **RESOLVED (D-44-GOAL + D-44-RECOVERY):** Phase 44 treats the failure surface as a union, not a single case. The locked goal ("dispatching session receives a wake-up on its captured channel") plus D-44-RECOVERY (boot-time replay of unnotified terminals) covers (a) TTL expiry, (c) daemon-crash / late-transition race, and (d) other transient losses in one sweep. (b) subagent case is handled separately by D-44-AGENT-CALLBACK-FALLBACK. Wave 0 leads with the chain of three RED tests from Plan 02 (integration, subagent fallback, recovery) — no single "which gap first" ordering is required.
 
 2. **Does OpenClaw expose any session-resume / session-inbox API?**
    - What we know: `OpenClawAgentRuntime` in our type subset declares `runEmbeddedPiAgent`, `resolveAgentWorkspaceDir`, `resolveAgentDir`, `resolveAgentTimeoutMs`, `ensureAgentWorkspace`, and `session.resolveSessionFilePath`. The last suggests OpenClaw tracks session files — but `resolveSessionFilePath` reads a location; it doesn't offer a write/append/kick primitive.
    - What's unclear: does `runtime.agent.session` expose anything else in newer builds?
    - Recommendation: Phase 44 planner or discuss-phase should `grep -rn "runtime.agent.session" ~/.openclaw/...` on the user's install to verify what's actually available.
+   - **RESOLVED (D-44-PRIMITIVE):** Phase 44 scope is locked to the existing chat-message primitive (`runtime.channel.outbound.loadAdapter(platform).sendText`). Any new session-resume / session-inbox API surface is explicitly OUT of Phase 44 scope and deferred to a follow-up phase. §11 Q1 records the rationale (shipping the Telegram case now via the verified primitive; not gating on an unverified OpenClaw plugin-sdk surface).
 
 3. **How should the subscription expose "couldn't deliver — here's why" to the calling agent?**
    - What we know: `TaskSubscription.failureReason` + `attempts[].error` record failure, but the **dispatcher is an agent that might not read subscriptions.json** — it reads tool-call responses.
    - What's unclear: is there a tool (`aof_subscription_status` or similar) the dispatcher should poll? Or is the contract "you dispatched, the daemon tried, if you didn't get a message, you check via `aof_task_get`"?
    - Recommendation: add a `aof_task_get` response field surfacing "last wake-up attempt status" for the dispatcher's convenience. Low-cost addition.
+   - **RESOLVED (D-44-OBSERVABILITY):** Phase 44 exposes failure surface via structured log events (`wake-up.attempted`, `wake-up.delivered`, `wake-up.timed-out`, `wake-up.fallback`, `wake-up.recovery-replay`) plus the existing `TaskSubscription.attempts[]` ledger. A new `aof_task_get`-facing "last wake-up attempt" field is explicitly deferred — 999.4 owns that surface. Dispatcher agents that need the signal today read subscriptions.json or the log stream.
 
 4. **Should Phase 44 care about "multiple agents dispatch the SAME task" or is dispatch always unique per task?**
    - What we know: `aofDispatch` creates a new task each call with a freshly minted `TASK-NNN` ID. Two agents dispatching the "same logical task" get two different task IDs.
    - But: `aof_task_subscribe` allows N agents to subscribe to M existing tasks. In principle N dispatchers could subscribe after-the-fact to a shared task.
    - Recommendation: Phase 44 scope is explicitly about the dispatcher that CREATED the task, not N arbitrary subscribers. Confirm with user; today's `subscriberId = "notify:openclaw-chat"` tag already makes the "N subscribers" case degenerate.
+   - **RESOLVED (D-44-PARTITION-SCOPE + D-44-IDENTITY):** Phase 44 scope is ONE subscription per dispatched task, keyed by the single `dispatcherAgentId` captured at `aof_dispatch` time. Multi-dispatcher fan-out (N subscribers -> M tasks) is explicitly a 999.4 concern; Phase 44 preserves the `subscriberId = "notify:openclaw-chat"` tag for today's dedupe semantics and adds `dispatcherAgentId` orthogonally in the delivery payload (§11 Q6).
 
 ---
 
