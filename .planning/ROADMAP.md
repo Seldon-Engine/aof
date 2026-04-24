@@ -184,3 +184,25 @@ See: `.planning/milestones/v1.10-ROADMAP.md` for full details
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
 **Reference:** Full design doc at `.planning/fix-c-scheduler-ownership.md` (commit 693379a).
+
+### Phase 999.4: Opt-in project-wide completion subscription (BACKLOG)
+
+**Goal:** Let an agent session subscribe to an entire AOF project's completion stream so it receives a notification whenever ANY task in the project completes (or transitions to a terminal state) — not just tasks it dispatched itself. Explicitly opt-in: a session calls `aof_project_subscribe(project, granularity="completion")` (or similar) to enter the stream, and unsubscribes to leave. Complements per-task subscriptions that already exist.
+
+**Why:** Project-orchestrator agents want to react to the project's overall progress without having to remember every task id they dispatched. Useful for roll-up-summary patterns ("when the last task in this project ships, post a changelog to the channel"), project-level watchdogs, and cross-team observers that weren't the original dispatcher but still need to stay in sync.
+
+**Depends on:** Phase 44 — the per-session delivery mechanism (session-inbox wake-up) must land first, because project-wide subscriptions amplify the same delivery problem: one task completion → potentially many subscribers, each needing a reliable session-level wake-up. Phase 44 also nails down the subscription-registration shape; 999.4 extends that shape to a project scope.
+
+**Requirements:** TBD
+**Plans:** 0 plans
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
+### Phase 44: Deliver completion-notification wake-ups to dispatching agent sessions
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 43
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 44 to break down)
