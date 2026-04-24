@@ -195,7 +195,6 @@ export async function startAofDaemon(opts: AOFDaemonOptions): Promise<AOFDaemonC
     resolveStoreForTask,
     messageTool: queueBackedMessageTool,
   });
-  logger.addOnEvent((event) => chatNotifier.handleEvent(event));
 
   // Phase 44 D-44-RECOVERY: boot-time replay of wake-ups lost during a
   // daemon crash between `transition()` and plugin ACK.
@@ -209,6 +208,19 @@ export async function startAofDaemon(opts: AOFDaemonOptions): Promise<AOFDaemonC
   // individually so one corrupt project cannot block replay for the
   // others. No skip path: the enumeration helpers are load-bearing for
   // resolveStoreForTask above and guaranteed present post-Phase 43.
+  //
+  // WR-01 + WR-02 (Phase 44 review): the live `logger.addOnEvent`
+  // attachment happens INSIDE this IIFE, AFTER all replay walks resolve.
+  // This serializes replay → live so that a new `task.transitioned`
+  // event arriving during the boot window cannot race the still-running
+  // replay on the same subscription's `notifiedStatuses` ledger (read +
+  // check + write is not atomic across the two flows). Non-terminal
+  // transitions that fire during the boot window are not missed: the
+  // replay only covers terminal statuses, and once the live listener
+  // attaches it picks up any subsequent transitions. Terminal transitions
+  // that happen to fire during the replay window are safely handled by
+  // the replay's own terminal scan — which the live listener would have
+  // delivered anyway.
   (async () => {
     try {
       // (1) Unscoped base store first.
@@ -232,6 +244,10 @@ export async function startAofDaemon(opts: AOFDaemonOptions): Promise<AOFDaemonC
     } catch (err) {
       log.warn({ err }, "wake-up recovery pass failed on startup (non-fatal)");
     }
+    // Only start listening to new events once recovery has drained.
+    // Keeping this attach inside the IIFE (post-replay) closes the
+    // double-fire window flagged in WR-01 + WR-02.
+    logger.addOnEvent((event) => chatNotifier.handleEvent(event));
   })().catch((err) => {
     // Safety net — the IIFE already catches, but belt-and-braces.
     log.warn({ err }, "wake-up recovery pass IIFE rejection");
