@@ -59,7 +59,7 @@ created: 2026-04-24
 | L17 | Recovery path: `replayUnnotifiedTerminals` automatically inherits new behavior because it routes through `deliverOne` | D-45-DEDUP-INTERACTION-WITH-RECOVERY | unit | `src/openclaw/__tests__/notifier-recovery-on-restart.test.ts` (extend existing Phase 44 coverage) | `npm test -- src/openclaw/__tests__/notifier-recovery-on-restart` | ⬜ pending |
 | L18 | Recovery dedup: replaying a previously-attempted terminal does not re-queue the system event past OpenClaw's lastText dedup; AOF's `notifiedStatuses` ledger remains the load-bearing dedup | D-45-DEDUP-INTERACTION-WITH-RECOVERY | unit | `src/openclaw/__tests__/notifier-recovery-on-restart.test.ts` | `npm test -- src/openclaw/__tests__/notifier-recovery-on-restart` | ⬜ pending |
 | L19 | Capability detection forwarding (plugin → daemon): `POST /v1/plugin/capability` (or equivalent — planner decides exact route) carries `systemEvent: true|false`; daemon caches per pluginId | D-45-FEATURE-DETECT (transport) | unit + integration | `src/daemon/__tests__/plugin-capability.test.ts` (new) | `npm test -- src/daemon/__tests__/plugin-capability` | ⬜ pending |
-| L20 | E2E dispatch path: dispatch a task in a test harness, transition it to `done`, assert the IPC envelope sent to the plugin contains both channels | D-45-GOAL (mechanical) | E2E | `tests/e2e/wake-up-dispatcher.test.ts` (extend) | `npm run test:e2e -- wake-up-dispatcher` | ⬜ pending |
+| L20 | E2E dispatch path: dispatch a task in a test harness, transition it to `done`, assert the IPC envelope sent to the plugin contains both channels | D-45-GOAL (mechanical) | integration | `tests/integration/wake-up-dispatcher.test.ts` (extend) | `AOF_INTEGRATION=1 npx vitest run tests/integration/wake-up-dispatcher.test.ts --config tests/integration/vitest.config.ts` | ⬜ pending |
 
 ---
 
@@ -73,7 +73,7 @@ The first plan (Wave 0) MUST install RED test files before any production code i
 - [ ] `src/openclaw/__tests__/bug-045-agent-unknown.test.ts` — create regression test for L12 (RED)
 - [ ] `src/ipc/__tests__/schemas.test.ts` — extend with new cases for L2, L3 (RED)
 - [ ] `src/daemon/__tests__/plugin-capability.test.ts` — create for L19 (RED)
-- [ ] `tests/e2e/wake-up-dispatcher.test.ts` — extend for L20 (RED)
+- [ ] `tests/integration/wake-up-dispatcher.test.ts` — extend for L20 (RED)
 
 *Framework already installed (vitest). No new framework setup needed.*
 

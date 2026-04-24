@@ -714,13 +714,19 @@ The Hook Point §"How the daemon knows the capability" recommends Option (a): `P
 
 **Plan-phase decision needed.** Recommendation: explicit capability post (cleaner, easier to test, matches existing IPC patterns).
 
+**RESOLVED:** Option (a) — POST /v1/plugin/capability (implemented in Plan 03 Task 2 + Plan 04 Task 2).
+
 ### Open Question OQ2: Should the chat-delivery one-liner template include the title at all?
 
 The current Phase 44 template includes `task.frontmatter.title` (multi-line). The proposed one-line template `✓ TASK-NNN ({status}) — {title}` keeps it. For tasks with very long titles in a busy group chat, this could become noisy. Alternatives: truncate title to 80 chars; omit title and rely on TASK-ID for lookup. CONTEXT.md leaves the exact wording as Claude's Discretion — recommend keeping title with a 120-char truncation to balance grep-ability and noise.
 
+**RESOLVED:** Title kept with 120-char truncation (Plan 04 Task 1a `truncate` helper + renderMessage rewrite).
+
 ### Open Question OQ3: `deliveryContext` vs no-`deliveryContext` for `enqueueSystemEvent`?
 
 OpenClaw cron Pattern A passes `deliveryContext: owner.requesterOrigin`. Cron Pattern B does NOT. Reading the system-events module: `deliveryContext` is recorded on each event; when the heartbeat fires, `resolveSystemEventDeliveryContext` merges the contexts of all queued events to determine where to deliver. For Phase 45's case (single dispatcher session, single chat target), passing `deliveryContext` ensures the agent's next turn output goes to the same chat. **Recommendation: always pass it** when `delivery.channel` is set (see §OpenClaw Cron Call-Site §"On `deliveryContext`" for derivation). Plan-phase should lock this.
+
+**RESOLVED:** Always pass deliveryContext when delivery.channel is set (Plan 04 Task 1b deliveryContext derivation in deliverOne body).
 
 ---
 
