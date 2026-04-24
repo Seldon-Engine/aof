@@ -215,9 +215,13 @@ enqueueSystemEvent(text, {
 
 **Depends on:** Phase 44 (subscription shape, recovery pass, notifier catch branches are all reused). Independent of 999.3/999.4/999.5.
 
-**Requirements:** TBD (lock during /gsd-discuss-phase — expect D-45-GOAL, D-45-PRIMITIVE, D-45-CHANNEL-ORTHOGONALITY, D-45-FEATURE-DETECT, D-45-TELEMETRY, D-45-DEDUP-KEY).
-**Plans:** 0 plans
-- [ ] TBD (run /gsd-discuss-phase 45 then /gsd-plan-phase 45 to break down)
+**Requirements:** D-45-GOAL, D-45-PRIMITIVE, D-45-CHANNEL-ORTHOGONALITY, D-45-MESSAGE-BREVITY, D-45-BUG-AGENT-UNKNOWN, D-45-HEARTBEAT-POLICY, D-45-HEARTBEAT-TARGET, D-45-FEATURE-DETECT, D-45-FALLBACK-WARNING, D-45-DEDUP-KEY, D-45-DEDUP-INTERACTION-WITH-RECOVERY, D-45-NOTIFYON-GATING, D-45-TELEMETRY, D-45-TELEMETRY-DIMENSION (locked in 45-CONTEXT.md)
+**Plans:** 5 plans
+- [ ] 45-01-PLAN.md — Wave 0 RED tests for all 20 validation lanes (L1-L20): IPC schemas, plugin sender, daemon notifier, recovery, bug-045, plugin-capability route, integration
+- [ ] 45-02-PLAN.md — Wave 1 type extension + IPC envelope schemas (OpenClawSystemRuntime + ChatDeliveryRequest.systemEvent/.heartbeat + PluginCapabilityPost + IpcDeps.setPluginCapability)
+- [ ] 45-03-PLAN.md — Wave 2 plugin-side execution (sendChatDelivery invokes runtime.system; chat-delivery-poller forwards per-channel ACK; adapter feature-detects + posts capability)
+- [ ] 45-04-PLAN.md — Wave 3 daemon-side notifier rewrite (deliverOne envelope + renderMessage one-line + telemetry + channel dimension; POST /v1/plugin/capability route; daemon capability cache); full automated sweep
+- [ ] 45-05-PLAN.md — Wave 4 manual UAT runbook (45-UAT.md) + checkpoint:human-verify on live OpenClaw + Telegram
 
 **Reference:** Phase 44 UAT blocker post-mortem at `.planning/phases/44-.../44-BLOCKERS.md`. Fresh-session probe transcript (the "chat delivery worked; context injection back into the live agent turn did not" exchange) captured during the Phase 44 close-out conversation on 2026-04-24. OpenClaw primitive reference: `/opt/homebrew/lib/node_modules/openclaw/dist/plugin-sdk/src/infra/system-events.d.ts` and `heartbeat-wake.d.ts`; cron call-site at `task-registry-BJCE3lhL.js` (installed dist, chunk name may change across upgrades).
 
