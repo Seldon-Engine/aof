@@ -91,10 +91,13 @@ export function parseSessionKey(key: string | undefined): ParsedSessionKey | und
   const chatId = parts[4];
   if (!chatId) return undefined;
   let threadId: string | undefined;
-  // Optional `:topic:<topicId>` suffix
-  const topicIdx = parts.indexOf("topic", 5);
-  if (topicIdx > 0 && parts.length > topicIdx + 1) {
-    threadId = parts[topicIdx + 1];
+  // Optional `:topic:<topicId>` suffix — anchored at exact positions
+  // [5]="topic", [6]="<topicId>" per the sessionKey schema's positional
+  // convention. A linear `indexOf("topic", 5)` would silently mis-bind
+  // threadId when a chatId or chatType segment literally equals "topic"
+  // (WR-03). Anchoring is explicit and removes the ambiguity.
+  if (parts.length >= 7 && parts[5] === "topic") {
+    threadId = parts[6];
   }
   return { platform, chatId, threadId };
 }
