@@ -32,6 +32,12 @@ export function mergeDispatchNotificationRecipient(
 
   if (!explicit && !captured) return params;
 
+  // Phase 44 identity enrichment (dispatcherAgentId/capturedAt/pluginId) only
+  // applies on the pure auto-capture path. When the caller passes an explicit
+  // notifyOnCompletion object, they own the delivery shape — do not inject
+  // Phase 44 fields on top. Existing (pre-Phase-44) captured fields
+  // (target/sessionKey/sessionId/channel/threadId) remain additive from
+  // captured beneath the explicit overrides for backwards compatibility.
   const delivery: Record<string, unknown> = {
     ...(captured
       ? {
@@ -40,6 +46,13 @@ export function mergeDispatchNotificationRecipient(
           sessionId: captured.sessionId,
           channel: captured.channel,
           threadId: captured.threadId,
+          ...(explicit
+            ? {}
+            : {
+                dispatcherAgentId: captured.actor,
+                capturedAt: captured.capturedAt,
+                pluginId: "openclaw",
+              }),
         }
       : {}),
     ...explicitRest,
