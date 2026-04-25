@@ -24,6 +24,14 @@ describe("Task Seeder", () => {
     await harness.cleanup();
   });
 
+  // Phase 46 / Bug 2B: aof_dispatch (which the seeder calls) now requires
+  // a routing target (agent | team | role). Each seed entry below that
+  // exercises successful task creation includes an `agent` field. The
+  // "handles seeding errors gracefully" case is updated to expect the
+  // routing failure (instead of the empty-title failure) for the entry
+  // whose original failure mode (empty title) is now superseded — but
+  // we keep the empty-title entry to lock in title-validation order.
+
   describe("seedTasks (programmatic)", () => {
     it("seeds multiple tasks from array", async () => {
       const seeds: TaskSeedEntry[] = [
@@ -36,6 +44,7 @@ describe("Task Seeder", () => {
           title: "Task 2",
           brief: "Second task",
           priority: "high",
+          agent: "test-agent",
         },
       ];
 
@@ -57,14 +66,17 @@ describe("Task Seeder", () => {
         {
           title: "Valid task",
           brief: "Good task",
+          agent: "test-agent",
         },
         {
           title: "", // Invalid: empty title
           brief: "Bad task",
+          agent: "test-agent",
         },
         {
           title: "Another valid task",
           brief: "Good task 2",
+          agent: "test-agent",
         },
       ];
 
@@ -79,8 +91,8 @@ describe("Task Seeder", () => {
 
     it("supports dry run mode", async () => {
       const seeds: TaskSeedEntry[] = [
-        { title: "Task 1", brief: "Test" },
-        { title: "Task 2", brief: "Test" },
+        { title: "Task 1", brief: "Test", agent: "test-agent" },
+        { title: "Task 2", brief: "Test", agent: "test-agent" },
       ];
 
       const result = await seedTasks(seeds, harness.store, harness.logger, {
@@ -135,6 +147,7 @@ seeds:
   - title: "YAML Task 2"
     brief: "Second task from YAML"
     priority: "high"
+    agent: "test-agent"
 `;
       await writeFile(seedFile, yamlContent, "utf-8");
 
@@ -156,11 +169,13 @@ seeds:
           {
             title: "JSON Task 1",
             brief: "First JSON task",
+            agent: "test-agent",
           },
           {
             title: "JSON Task 2",
             brief: "Second JSON task",
             priority: "low",
+            agent: "test-agent",
           },
         ],
       };
@@ -196,6 +211,7 @@ version: 1
 seeds:
   - title: "Dry run task"
     brief: "Should not be created"
+    agent: "test-agent"
 `;
       await writeFile(seedFile, yamlContent, "utf-8");
 
@@ -246,8 +262,8 @@ seeds:
   describe("BUG-002 Acceptance Criteria", () => {
     it("seeding produces task files in correct directories", async () => {
       const seeds: TaskSeedEntry[] = [
-        { title: "Test 1", brief: "Brief 1" },
-        { title: "Test 2", brief: "Brief 2" },
+        { title: "Test 1", brief: "Brief 1", agent: "test-agent" },
+        { title: "Test 2", brief: "Brief 2", agent: "test-agent" },
       ];
 
       const result = await seedTasks(seeds, harness.store, harness.logger);
@@ -277,7 +293,7 @@ seeds:
 
     it("find command returns seeded task files", async () => {
       await seedTasks(
-        [{ title: "Findable task", brief: "Should be found" }],
+        [{ title: "Findable task", brief: "Should be found", agent: "test-agent" }],
         harness.store,
         harness.logger
       );
@@ -303,6 +319,7 @@ seeds:
       const seeds: TaskSeedEntry[] = Array.from({ length: 50 }, (_, i) => ({
         title: `Task ${i + 1}`,
         brief: `Brief for task ${i + 1}`,
+        agent: "test-agent",
       }));
 
       const result = await seedTasks(seeds, harness.store, harness.logger);
@@ -316,9 +333,9 @@ seeds:
 
     it("preserves seed order", async () => {
       const seeds: TaskSeedEntry[] = [
-        { title: "Alpha", brief: "First" },
-        { title: "Beta", brief: "Second" },
-        { title: "Gamma", brief: "Third" },
+        { title: "Alpha", brief: "First", agent: "test-agent" },
+        { title: "Beta", brief: "Second", agent: "test-agent" },
+        { title: "Gamma", brief: "Third", agent: "test-agent" },
       ];
 
       const result = await seedTasks(seeds, harness.store, harness.logger);

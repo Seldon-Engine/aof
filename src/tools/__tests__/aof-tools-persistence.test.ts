@@ -22,6 +22,11 @@ describe("BUG-003: AOF tool persistence", () => {
     await harness.cleanup();
   });
 
+  // Phase 46 / Bug 2B: aof_dispatch now requires a routing target
+  // (agent | team | role). Each call below passes `agent: "test-actor"`
+  // so the persistence-layer behavior under test is exercised. Routing
+  // semantics are tested in bug-046d-routing-required.test.ts.
+
   it("aofDispatch creates task file on disk", async () => {
     const result = await aofDispatch(
       { store: harness.store, logger: harness.logger },
@@ -29,6 +34,7 @@ describe("BUG-003: AOF tool persistence", () => {
         title: "Persistence Test",
         brief: "Test task creation",
         actor: "test-actor",
+        agent: "test-actor",
       }
     );
 
@@ -50,6 +56,7 @@ describe("BUG-003: AOF tool persistence", () => {
         title: "Status Report Test",
         brief: "Should appear in status report",
         actor: "test-actor",
+        agent: "test-actor",
       }
     );
 
@@ -71,6 +78,7 @@ describe("BUG-003: AOF tool persistence", () => {
         title: "Update Test",
         brief: "Original brief",
         actor: "test-actor",
+        agent: "test-actor",
       }
     );
 
@@ -100,6 +108,7 @@ describe("BUG-003: AOF tool persistence", () => {
         title: "Transition Test",
         brief: "Test status transition",
         actor: "test-actor",
+        agent: "test-actor",
       }
     );
 
@@ -133,6 +142,7 @@ describe("BUG-003: AOF tool persistence", () => {
         title: "Complete Test",
         brief: "Test completion",
         actor: "test-actor",
+        agent: "test-actor",
       }
     );
 
@@ -169,18 +179,21 @@ describe("BUG-003: AOF tool persistence", () => {
       title: "Task 1",
       brief: "First task",
       actor: "test-actor",
+      agent: "test-actor",
     });
 
     await aofDispatch({ store: harness.store, logger: harness.logger }, {
       title: "Task 2",
       brief: "Second task",
       actor: "test-actor",
+      agent: "test-actor",
     });
 
     await aofDispatch({ store: harness.store, logger: harness.logger }, {
       title: "Task 3",
       brief: "Third task",
       actor: "test-actor",
+      agent: "test-actor",
     });
 
     // Status report should show all 3
@@ -197,6 +210,7 @@ describe("BUG-003: AOF tool persistence", () => {
           title: `Concurrent Task ${index + 1}`,
           brief: `Parallel dispatch ${index + 1}`,
           actor: "test-actor",
+          agent: "test-actor",
         }),
       ),
     );
@@ -209,6 +223,9 @@ describe("BUG-003: AOF tool persistence", () => {
   });
 
   it("rejects malformed notifyOnCompletion deliveries before persisting task state", async () => {
+    // Phase 46 / Bug 2B: pass `agent` so this test exercises notifyOnCompletion
+    // validation (the gate under test) rather than tripping the new
+    // routing-required gate first.
     await expect(
       aofDispatch(
         { store: harness.store, logger: harness.logger },
@@ -216,6 +233,7 @@ describe("BUG-003: AOF tool persistence", () => {
           title: "Malformed notification",
           brief: "Should fail fast",
           actor: "test-actor",
+          agent: "test-actor",
           notifyOnCompletion: { target: "telegram:-1" } as any,
         },
       ),
@@ -231,12 +249,14 @@ describe("BUG-003: AOF tool persistence", () => {
       title: "Ready Task",
       brief: "Stays ready",
       actor: "test-actor",
+      agent: "test-actor",
     });
 
     const task2 = await aofDispatch({ store: harness.store, logger: harness.logger }, {
       title: "In Progress Task",
       brief: "Will move",
       actor: "test-actor",
+      agent: "test-actor",
     });
 
     await aofTaskUpdate({ store: harness.store, logger: harness.logger }, {

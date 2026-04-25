@@ -38,6 +38,11 @@ describe("aof_dispatch dependsOn validation", () => {
     await rm(tmpDir, { recursive: true, force: true });
   });
 
+  // NOTE: each call below passes `agent: "main"` so it bypasses the
+  // Phase 46 / Bug 2B routing-required rejection (added in
+  // src/tools/project-tools.ts) and exercises ONLY the dependsOn
+  // validation path under test here.
+
   it("rejects dispatch when dependsOn references nonexistent tasks", async () => {
     await expect(
       aofDispatch(
@@ -46,6 +51,7 @@ describe("aof_dispatch dependsOn validation", () => {
           title: "orphan-blocker task",
           brief: "depends on tasks that don't exist",
           actor: "main",
+          agent: "main",
           dependsOn: ["TASK-2099-99-99-997", "TASK-2099-99-99-998"],
         },
       ),
@@ -60,6 +66,7 @@ describe("aof_dispatch dependsOn validation", () => {
           title: "multi-bogus",
           brief: "several missing blockers",
           actor: "main",
+          agent: "main",
           dependsOn: ["TASK-2099-99-99-001", "TASK-2099-99-99-002"],
         },
       ),
@@ -80,6 +87,7 @@ describe("aof_dispatch dependsOn validation", () => {
         title: "well-formed task",
         brief: "depends on a real task",
         actor: "main",
+        agent: "main",
         dependsOn: [blocker.frontmatter.id],
       },
     );
@@ -99,6 +107,7 @@ describe("aof_dispatch dependsOn validation", () => {
           title: "should-not-persist",
           brief: "rejected",
           actor: "main",
+          agent: "main",
           dependsOn: ["TASK-2099-99-99-997"],
         },
       ),
@@ -115,6 +124,7 @@ describe("aof_dispatch dependsOn validation", () => {
         title: "no-deps",
         brief: "no blockers",
         actor: "main",
+        agent: "main",
       },
     );
 

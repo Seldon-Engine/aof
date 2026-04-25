@@ -59,12 +59,17 @@ describe("BUG-002: AOF tool event emission", () => {
     // (no intermediate backlog→ready step). The result is a single
     // task.created event stamped with status "ready" — no separate
     // task.transitioned event is emitted because no transition happens.
+    //
+    // Phase 46 / Bug 2B: routing target now required at create-time, so
+    // each dispatch call below passes `agent: "test-agent"` to satisfy
+    // that gate; this suite tests event/FS effects, not routing semantics.
     const result = await aofDispatch(
       { store, logger },
       {
         title: "Test Task",
         brief: "Test brief",
         actor: "test-actor",
+        agent: "test-agent",
       }
     );
 
@@ -90,6 +95,7 @@ describe("BUG-002: AOF tool event emission", () => {
         title: "Update Test",
         brief: "Test",
         actor: "test-actor",
+        agent: "test-agent",
       }
     );
 
@@ -124,6 +130,7 @@ describe("BUG-002: AOF tool event emission", () => {
         title: "Complete Test",
         brief: "Test",
         actor: "test-actor",
+        agent: "test-agent",
       }
     );
 
@@ -178,7 +185,7 @@ describe("BUG-002: AOF tool event emission", () => {
   it("ODD filesystem: task in ready dir after aofDispatch", async () => {
     const result = await aofDispatch(
       { store, logger },
-      { title: "FS Test Task", brief: "ODD filesystem check", actor: "test-actor" }
+      { title: "FS Test Task", brief: "ODD filesystem check", actor: "test-actor", agent: "test-agent" }
     );
 
     // ODD: filesystem state — task exists in tasks/ready/
@@ -191,7 +198,7 @@ describe("BUG-002: AOF tool event emission", () => {
   it("ODD filesystem: task in in-progress dir after aofTaskUpdate", async () => {
     const { taskId } = await aofDispatch(
       { store, logger },
-      { title: "FS Update Task", brief: "ODD update check", actor: "test-actor" }
+      { title: "FS Update Task", brief: "ODD update check", actor: "test-actor", agent: "test-agent" }
     );
     capturedEvents.length = 0;
 
@@ -207,7 +214,7 @@ describe("BUG-002: AOF tool event emission", () => {
   it("ODD filesystem: task in done dir after aofTaskComplete", async () => {
     const { taskId } = await aofDispatch(
       { store, logger },
-      { title: "FS Complete Task", brief: "ODD complete check", actor: "test-actor" }
+      { title: "FS Complete Task", brief: "ODD complete check", actor: "test-actor", agent: "test-agent" }
     );
     await store.transition(taskId, "in-progress");
     await store.transition(taskId, "review");
