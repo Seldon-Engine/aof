@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: unknown
 stopped_at: Phase 45 context gathered
-last_updated: "2026-04-24T19:50:40.240Z"
+last_updated: "2026-04-25T02:26:29.089Z"
 progress:
-  total_phases: 7
+  total_phases: 8
   completed_phases: 3
-  total_plans: 26
+  total_plans: 32
   completed_plans: 21
-  percent: 81
+  percent: 66
 ---
 
 # Project State
@@ -72,4 +72,4 @@ None. All v1.10 blockers resolved.
 Last session: --stopped-at
 Stopped at: Phase 45 context gathered
 
-**Planned Phase:** 45 (Wake dispatching sessions via system-event injection) — 5 plans — 2026-04-24T19:50:40.234Z
+**Planned Phase:** 46 (Daemon state freshness — fix project discovery one-shot bug + status/location atomicity + log rotation + task-creation routing validation) — 6 plans — 2026-04-25T02:26:29.083Z
