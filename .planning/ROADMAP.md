@@ -240,11 +240,11 @@ enqueueSystemEvent(text, {
 
 **Depends on:** Fix A (v1.14.8) — already shipped. Independent of Phase 42 / 999.2.
 
-**Requirements:** TBD (derive from .planning/fix-c-scheduler-ownership.md during /gsd-discuss-phase)
+**Requirements:** D-999.3-SCOPE, D-999.3-RELEASE, D-999.3-ENVELOPE, D-999.3-BACKWARDS-COMPAT, D-999.3-LOCK, D-999.3-MISMATCH-RETURN, D-999.3-OBSERVABILITY, D-999.3-SCHEDULER-POPULATION, D-999.3-MATCH-FN, D-999.3-TEST-MATRIX (locked in 999.3-CONTEXT.md, 2026-04-25)
 **Plans:** 0 plans
-- [ ] TBD (promote with /gsd-review-backlog when ready)
+- [ ] TBD (planning in progress)
 
-**Reference:** Full design doc at `.planning/fix-c-scheduler-ownership.md` (commit 693379a).
+**Reference:** Full design doc at `.planning/fix-c-scheduler-ownership.md` (commit 693379a). Locked decisions in `.planning/phases/999.3-scheduler-action-preconditions-session-end-dedupe/999.3-CONTEXT.md`.
 
 ### Phase 999.4: Opt-in project-wide completion subscription (BACKLOG)
 
