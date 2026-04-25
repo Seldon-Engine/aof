@@ -705,29 +705,29 @@ openclaw agent --session-id <sid> --message "/aof_dispatch title='test' brief='t
 | A5 | The plugin's invocation-context store's `captured.actor` (which is `agentId` from the OpenClaw event) is reliably populated when an OpenClaw agent calls `aof_dispatch` — i.e., the `before_tool_call` event always carries `agentId`. | Pattern 6 (defense-in-depth) | Medium — Phase 44 added this mapping but corner cases (channel-relayed messages, system-injected dispatches) may not have agentId. Mitigation: keep daemon-side IPC injection as primary fix; plugin-side fallback is additive. `[ASSUMED]` |
 | A6 | `loadProjectManifest(ctx.store, projectId)` is safe to call from `aofDispatch` — `ctx.store` is the project-scoped store post-Phase-43 IPC route resolution, so the manifest read is local. | Pattern 5 | Low — verified via `src/projects/manifest.ts:115-130` (loadProjectManifest takes any ITaskStore + projectId). `[VERIFIED: src/projects/manifest.ts]` |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Should the rotation file be `<dataDir>/logs/aof.log` or `<dataDir>/logs/daemon.log`?**
+1. **Should the rotation file be `<dataDir>/logs/aof.log` or `<dataDir>/logs/daemon.log`?** — RESOLVED: aof.log filename in Plan 04
    - What we know: launchd already redirects to `daemon-stderr.log` in same directory. Naming `aof.log` separates structured-pino-output from launchd-captured-stderr cleanly.
    - What's unclear: dashboards / external log shippers may scrape `daemon-stderr.log` today and expect that path.
    - Recommendation: Plan should choose `aof.log` (clear separation) and call out the change in release notes.
 
-2. **Is the `metadataPatch` extension to `TransitionOpts` the right shape, or should we add a sibling `transitionWithMetadata(id, status, patch, opts)` method on ITaskStore?**
+2. **Is the `metadataPatch` extension to `TransitionOpts` the right shape, or should we add a sibling `transitionWithMetadata(id, status, patch, opts)` method on ITaskStore?** — RESOLVED: opts.metadataPatch on TransitionOpts in Plan 01
    - What we know: CONTEXT.md grants discretion. The patch-in-opts shape requires no interface change and reuses the same critical section.
    - What's unclear: if other callers grow similar needs (cancel-with-metadata, block-with-metadata), the opts pattern doesn't generalize.
    - Recommendation: ship `metadataPatch` in `TransitionOpts` for Phase 46. Promote to first-class API only when a second caller emerges.
 
-3. **Should reconciliation move-on-init also handle the duplicate-file case (same task ID in two dirs)?**
+3. **Should reconciliation move-on-init also handle the duplicate-file case (same task ID in two dirs)?** — RESOLVED: deferred — see Plan 02 must_haves rationale; runtime get() self-heal already covers, init walk relies on lint() and pre-v1.14.8 duplicates are unlikely on production installs
    - What we know: `get(id)` already self-heals via mtime (lines 313-346). If `init()`'s reconciliation walk uses `parseTaskFile` directly (Pitfall 4 fix), it iterates each path independently — duplicates are not detected.
    - What's unclear: are duplicates possible at startup? Pre-v1.14.8 installs may have left some.
    - Recommendation: Plan should add a "duplicate detection" pass to reconciliation that mirrors `get()`'s mtime-wins logic, deleting older copies. Defensive, cheap.
 
-4. **Does the per-poll rediscovery affect the existing `pollAllProjects` "<root>" base store iteration?**
+4. **Does the per-poll rediscovery affect the existing `pollAllProjects` "<root>" base store iteration?** — RESOLVED: idempotency confirmed in Plan 03
    - What we know: Line 444 explicitly polls `this.store` (the unscoped base store) before iterating `projectStores`. Rediscovery only mutates `projectStores`, never `this.store`.
    - What's unclear: should the rediscovery skip `_inbox` (always re-added) or treat it as a normal project?
    - Recommendation: discoverProjects() always returns `_inbox` (registry.ts:60-62 always-include logic). Rediscovery is idempotent — `_inbox` is found, already in map, no-op. No special-case needed.
 
-5. **Should empty-routing rejection be enforced via Zod refinement, raising at envelope-parse time rather than handler time?**
+5. **Should empty-routing rejection be enforced via Zod refinement, raising at envelope-parse time rather than handler time?** — RESOLVED: handler-level rejection in Plan 05 (matches existing aofDispatch dependsOn validation pattern)
    - What we know: Zod refinement would reject earlier (before storeResolution) — slightly faster failure, slightly cleaner stack trace.
    - What's unclear: Zod `.refine()` doesn't have access to `ctx.store` for project-owner defaulting. The defaulting MUST happen in handler. Splitting validation across schema (reject-empty) + handler (default-from-owner) creates two failure paths.
    - Recommendation: Single rejection point in handler, after defaulting attempt. Keep schema permissive.
