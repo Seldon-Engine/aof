@@ -280,10 +280,15 @@ enqueueSystemEvent(text, {
 
 ### Phase 46: Daemon state freshness — fix project discovery one-shot bug + status/location atomicity + log rotation + task-creation routing validation
 
-**Goal:** [To be planned]
-**Requirements**: TBD
+**Goal:** Fix the four daemon-side bugs surfaced by the 2026-04-24 incident cluster (Tier A from `.planning/debug/2026-04-24-daemon-state-and-resource-hygiene.md`): (1A) status/location drift on deadletter transition — make `transitionToDeadletter` atomic via `metadataPatch` opt and add a startup reconciliation pass at `FilesystemTaskStore.init()` to heal pre-existing drift; (1C) bounded log rotation via `pino-roll@4` (50 MB × 5, no gzip per addendum Q1) and drop `fd:2` so launchd's stderr capture stops growing (per addendum Q2); (2A) per-poll project rediscovery so projects created post-startup become live within one poll cycle (no more 21-min silent-dispatch); (2B) routing-target validation at `aof_dispatch` create time with optional default from `project.owner.lead`/`owner.team`, treating `"system"` (case-insensitive) as a sentinel per addendum Q3; (2C) envelope-actor injection at `/v1/tool/invoke` plus plugin-side defense-in-depth so plugin-originated tasks land with `createdBy` reflecting the calling agent id (not "unknown"). Out of scope (held for Phase 47): per-poll log verbosity reduction (Bug 1D) and auth-precondition fail-fast (Bug 1E).
+**Requirements**: BUG-046-1A-ATOMIC, BUG-046-1A-RECONCILE, BUG-046-1C, BUG-046-2A, BUG-046-2B, BUG-046-2C
 **Depends on:** Phase 45
-**Plans:** 0 plans
+**Plans:** 6 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 46 to break down)
+- [ ] 46-01-PLAN.md — Wave 1 Bug 1A atomic transition: extend `TransitionOpts.metadataPatch` + collapse `failure-tracker.transitionToDeadletter` to single atomic `store.transition({ metadataPatch })` call
+- [ ] 46-02-PLAN.md — Wave 2 Bug 1A reconciliation: add `reconcileDrift()` to `FilesystemTaskStore.init()` to heal status/location mismatches at boot
+- [ ] 46-03-PLAN.md — Wave 3 Bug 2A: per-poll `rediscoverProjects()` inside `runPoll()` so post-startup projects become live within one poll cycle
+- [ ] 46-04-PLAN.md — Wave 3 Bug 1C: wire `pino-roll@4` transport at 50 MB × 5, drop `fd:2` destination, release worker-thread on `resetLogger()`
+- [ ] 46-05-PLAN.md — Wave 3 Bug 2B: routing-target validation in `aofDispatch` with project-owner defaulting + `"system"` sentinel handling
+- [ ] 46-06-PLAN.md — Wave 3 Bug 2C: envelope-actor injection at `/v1/tool/invoke` + plugin-side `params.actor` fallback to `captured.actor` in `mergeDispatchNotificationRecipient`
