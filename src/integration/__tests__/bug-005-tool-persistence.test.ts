@@ -109,6 +109,7 @@ describe("BUG-005 Regression: Tool Persistence", () => {
           title: "Priority test",
           brief: "Check priority",
           priority: "high",
+          agent: "test-agent",
           actor: "test",
         }
       );
@@ -129,6 +130,7 @@ describe("BUG-005 Regression: Tool Persistence", () => {
           brief: "Check metadata",
           metadata: { customField: "value123", projectId: "proj-001" },
           tags: ["bug", "p0"],
+          agent: "test-agent",
           actor: "test",
         }
       );
@@ -185,6 +187,7 @@ describe("BUG-005 Regression: Tool Persistence", () => {
         {
           title: "Body update test",
           brief: "Original content",
+          agent: "test-agent",
           actor: "test",
         }
       );
@@ -212,6 +215,7 @@ describe("BUG-005 Regression: Tool Persistence", () => {
         {
           title: "Combined update test",
           brief: "Original",
+          agent: "test-agent",
           actor: "test",
         }
       );
@@ -242,6 +246,7 @@ describe("BUG-005 Regression: Tool Persistence", () => {
         {
           title: "Timestamp test",
           brief: "Task body",
+          agent: "test-agent",
           actor: "test",
         }
       );
@@ -333,6 +338,7 @@ describe("BUG-005 Regression: Tool Persistence", () => {
         {
           title: "Multi-update test",
           brief: "Version 1",
+          agent: "test-agent",
           actor: "test",
         }
       );
@@ -370,6 +376,7 @@ describe("BUG-005 Regression: Tool Persistence", () => {
         {
           title: "Event log test",
           brief: "Check events",
+          agent: "test-agent",
           actor: "test",
         }
       );
@@ -393,6 +400,7 @@ describe("BUG-005 Regression: Tool Persistence", () => {
         {
           title: "Transition event test",
           brief: "Check transition events",
+          agent: "test-agent",
           actor: "test",
         }
       );

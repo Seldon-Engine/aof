@@ -68,6 +68,11 @@ describe("aof_dispatch timeoutMs override", () => {
     ).toThrow();
   });
 
+  // NOTE: each handler-invoking test below passes `agent: "main"` to
+  // bypass the Phase 46 / Bug 2B routing-required rejection added in
+  // src/tools/project-tools.ts. The tests here cover timeoutMs persistence
+  // and clamping, not routing semantics.
+
   it("persists timeoutMs onto task frontmatter metadata", async () => {
     const result = await aofDispatch(
       { store, logger },
@@ -75,6 +80,7 @@ describe("aof_dispatch timeoutMs override", () => {
         title: "Long research task",
         brief: "Takes ~45 minutes",
         actor: "main",
+        agent: "main",
         timeoutMs: 45 * 60 * 1000,
       },
     );
@@ -90,6 +96,7 @@ describe("aof_dispatch timeoutMs override", () => {
         title: "Short task",
         brief: "Uses default timeout",
         actor: "main",
+        agent: "main",
       },
     );
 
@@ -106,6 +113,7 @@ describe("aof_dispatch timeoutMs override", () => {
         title: "Clamped",
         brief: "Clamped",
         actor: "main",
+        agent: "main",
         // Bypass the schema by casting — simulates a legacy caller.
         timeoutMs: MAX_DISPATCH_TIMEOUT_MS * 10,
       } as Parameters<typeof aofDispatch>[1],

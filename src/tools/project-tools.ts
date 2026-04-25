@@ -8,6 +8,7 @@ import { SubscriptionDelivery } from "../schemas/subscription.js";
 import { compactResponse, type ToolResponseEnvelope } from "./envelope.js";
 import type { ToolContext } from "./types.js";
 import { createSubscriptionStore, validateSubscriberAgent } from "./subscription-tools.js";
+import { loadProjectManifest } from "../projects/manifest.js";
 
 /**
  * Zod schema for aof_dispatch input (shared between MCP and OpenClaw).
@@ -75,6 +76,14 @@ export interface AOFDispatchInput {
   tags?: string[];
   /** Identity of the agent or user creating the task; defaults to "unknown". */
   actor?: string;
+  /**
+   * Project ID hint for the new task. When set, takes precedence over
+   * `ctx.projectId` for project-owner defaulting (Phase 46 / Bug 2B).
+   * Mirrors the `project` field on `dispatchSchema` — previously implicit
+   * via the schema and forwarded by adapters, now explicit on the TS
+   * interface so the handler can read it safely.
+   */
+  project?: string;
   /** Subscribe to task notifications at dispatch time. */
   subscribe?: "completion" | "all";
   /**
@@ -161,6 +170,58 @@ export async function aofDispatch(
     throw new Error("Task brief/description is required");
   }
 
+  // Phase 46 / Bug 2B: routing-target validation + project-owner defaulting.
+  //
+  // A task with neither agent nor team nor role can never dispatch —
+  // src/dispatch/task-dispatcher.ts:191-250 refuses tags-only routing
+  // and the failure counter is NOT incremented for this path, so the
+  // task sits in ready/ forever re-evaluated every poll. On 2026-04-25
+  // this silently stranded 5 growth-lead tasks for 21 minutes before
+  // the dispatching agent gave up.
+  //
+  // Reject at create-time so the caller gets a named error instead of
+  // a silent sit-in-ready. Before rejecting, try to default from the
+  // project owner — agents creating tasks in their own project's
+  // namespace shouldn't have to repeat the routing every time.
+  //
+  // "system" is a sentinel used by the _inbox placeholder (and by any
+  // project with no real human-meaningful owner set, e.g. the
+  // event-calendar-2026 project from the 2026-04-24 incident). Per
+  // CONTEXT.md addendum Q3, treat it case-insensitively as "no real
+  // owner — do not default" so we don't swap one silent routing
+  // failure for another.
+  let agent = input.agent;
+  let team = input.team;
+  let role = input.role;
+
+  if (!agent && !team && !role) {
+    const projectId = input.project ?? ctx.projectId;
+    if (projectId) {
+      try {
+        const manifest = await loadProjectManifest(ctx.store, projectId);
+        const lead = manifest?.owner?.lead;
+        const ownerTeam = manifest?.owner?.team;
+        if (lead && lead.toLowerCase() !== "system") {
+          agent = lead;
+        } else if (ownerTeam && ownerTeam.toLowerCase() !== "system") {
+          team = ownerTeam;
+        }
+      } catch {
+        // Manifest load failure is non-fatal; fall through to rejection.
+        // loadProjectManifest returns null on read/parse errors and logs
+        // a warn itself, so we don't re-log here.
+      }
+    }
+  }
+
+  if (!agent && !team && !role) {
+    throw new Error(
+      "Task creation requires a routing target. " +
+      "Provide one of: agent, team, role. Tags-only routing is not supported " +
+      "(would never dispatch — see Phase 46 / Bug 2B).",
+    );
+  }
+
   // Validate dependsOn: every referenced task must exist in the store before
   // the new task is created. Silently accepting bogus IDs produced tasks in
   // a permanently-blocked dependency state that dep_remove couldn't clean up
@@ -204,11 +265,10 @@ export async function aofDispatch(
     title: input.title.trim(),
     body: brief.trim(),
     priority,
-    routing: {
-      agent: input.agent,
-      team: input.team,
-      role: input.role,
-    },
+    // Phase 46 / Bug 2B: use the (possibly project-owner-defaulted) locals
+    // instead of raw input, so the defaulted routing lands in the created
+    // task's frontmatter.
+    routing: { agent, team, role },
     dependsOn: input.dependsOn,
     parentId: input.parentId,
     metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
