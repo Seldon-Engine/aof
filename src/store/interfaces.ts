@@ -101,7 +101,20 @@ export interface ITaskStore {
   transition(
     id: string,
     newStatus: TaskStatus,
-    opts?: { reason?: string; agent?: string; blockers?: string[] },
+    opts?: {
+      reason?: string;
+      agent?: string;
+      blockers?: string[];
+      /**
+       * Phase 46 / Bug 1A: metadata fields merged into
+       * `frontmatter.metadata` in the SAME atomic write as the file
+       * move. Used by `failure-tracker.transitionToDeadletter` to stamp
+       * deadletter cause fields without a separate `save()` call (which
+       * would create a partial-state window between the stamp and the
+       * move — the spin-loop bug from the 2026-04-24 incident).
+       */
+      metadataPatch?: Record<string, unknown>;
+    },
   ): Promise<Task>;
 
   /**
