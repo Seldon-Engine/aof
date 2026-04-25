@@ -57,6 +57,7 @@ All decisions logged in PROJECT.md Key Decisions table. v1.10 decisions archived
 - v1.8: Phases 28-33 (Schema+Storage, Subscription API, Callback Delivery, Safety+Hardening, Agent Guidance, Callback Wiring Fixes)
 - v1.10: Phases 34-40 (Dead Code, Bug Fixes, Config Registry, Structured Logging, Code Refactoring, Architecture Fixes, Test Infrastructure)
 - Phase 44 added: Deliver completion-notification wake-ups to dispatching agent sessions — close the gap where an orchestrating session calls aof_dispatch but never gets woken up when the task completes; today's scope = Telegram-bound sessions actually resume; stretch = works for any session kind. Out of scope / roadmap: project-wide opt-in subscription (track separately in backlog).
+- Phase 46 added: Daemon state freshness — fix project discovery one-shot bug + status/location atomicity + log rotation + task-creation routing validation. Tier A scope from .planning/debug/2026-04-24-daemon-state-and-resource-hygiene.md (bugs 1A, 1C, 2A, 2B, 2C). Out of scope: Tier B (verbosity reduction, auth-precondition fail-fast — held for Phase 47).
 
 ### Pending Todos
 

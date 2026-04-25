@@ -277,3 +277,13 @@ enqueueSystemEvent(text, {
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
 **Reference:** Phase 44 UAT blocker post-mortem at `.planning/phases/44-deliver-completion-notification-wake-ups-to-dispatching-agen/44-BLOCKERS.md` has the full diagnostic trail.
+
+### Phase 46: Daemon state freshness — fix project discovery one-shot bug + status/location atomicity + log rotation + task-creation routing validation
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 45
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 46 to break down)
