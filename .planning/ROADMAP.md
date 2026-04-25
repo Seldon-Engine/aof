@@ -241,10 +241,16 @@ enqueueSystemEvent(text, {
 **Depends on:** Fix A (v1.14.8) — already shipped. Independent of Phase 42 / 999.2.
 
 **Requirements:** D-999.3-SCOPE, D-999.3-RELEASE, D-999.3-ENVELOPE, D-999.3-BACKWARDS-COMPAT, D-999.3-LOCK, D-999.3-MISMATCH-RETURN, D-999.3-OBSERVABILITY, D-999.3-SCHEDULER-POPULATION, D-999.3-MATCH-FN, D-999.3-TEST-MATRIX (locked in 999.3-CONTEXT.md, 2026-04-25)
-**Plans:** 0 plans
-- [ ] TBD (planning in progress)
+**Plans:** 7 plans
+- [ ] 999.3-01-PLAN.md — Wave 0 schema + helper + Wave 0 RED tests (EventType extension, SchedulerAction.expected?, precondition.ts module, lock-reentrancy proof)
+- [ ] 999.3-02-PLAN.md — Wave 1 handleStaleHeartbeat precondition wrap + bug-2026-04-15 incident regression
+- [ ] 999.3-03-PLAN.md — Wave 1 handleExpireLease (inside existing wrap) + handlePromote (new wrap) precondition gates
+- [ ] 999.3-04-PLAN.md — Wave 1 executeAssignAction precondition gate (inside existing wrap; handleAssign boundary untouched to avoid double-wrap deadlock per RESEARCH §V1/V3 + R1)
+- [ ] 999.3-05-PLAN.md — Wave 1 handleSlaViolation precondition wrap (handleAlert untouched per RESEARCH §V2)
+- [ ] 999.3-06-PLAN.md — Wave 2 scheduler-side population at all 5 in-scope sites (hop-timeout out of scope per V2)
+- [ ] 999.3-07-PLAN.md — Wave 3 backwards-compat sweep + Fix A regression preservation + L13 integration sweep + UAT checkpoint (v1.18.0 release)
 
-**Reference:** Full design doc at `.planning/fix-c-scheduler-ownership.md` (commit 693379a). Locked decisions in `.planning/phases/999.3-scheduler-action-preconditions-session-end-dedupe/999.3-CONTEXT.md`.
+**Reference:** Full design doc at `.planning/fix-c-scheduler-ownership.md` (commit 693379a). Locked decisions in `.planning/phases/999.3-scheduler-action-preconditions-session-end-dedupe/999.3-CONTEXT.md`. Research at `999.3-RESEARCH.md`. Validation strategy at `999.3-VALIDATION.md`.
 
 ### Phase 999.4: Opt-in project-wide completion subscription (BACKLOG)
 
