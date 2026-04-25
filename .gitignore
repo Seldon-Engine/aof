@@ -56,3 +56,6 @@ convert_tasks.py
 # Agent work receipts / one-off status docs
 WORK-SESSION.md
 DEPLOY-TRACKER.md
+
+# Claude Code local session state
+.claude/
