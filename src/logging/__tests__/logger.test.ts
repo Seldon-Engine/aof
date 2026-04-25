@@ -2,15 +2,24 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "node:stream";
 import pino from "pino";
 import { resetConfig } from "../../config/registry.js";
-import { createLogger, resetLogger } from "../index.js";
+import {
+  createLogger,
+  resetLogger,
+  __setLoggerTransportForTests,
+} from "../index.js";
 
 describe("Logger Factory", () => {
   beforeEach(() => {
     resetConfig({ core: { logLevel: "debug" } });
     resetLogger();
+    // Phase 46 / Bug 1C: inject a synchronous PassThrough so the
+    // singleton getRootLogger() path doesn't spawn the pino-roll
+    // worker thread inside vitest (orphan-worker hazard).
+    __setLoggerTransportForTests(new PassThrough());
   });
 
   afterEach(() => {
+    __setLoggerTransportForTests(null);
     resetLogger();
     resetConfig();
   });
