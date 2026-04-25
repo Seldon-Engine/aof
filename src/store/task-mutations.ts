@@ -110,6 +110,13 @@ export async function updateTask(
 export interface TransitionOpts {
   reason?: string;
   agent?: string;
+  /**
+   * Phase 46 / Bug 1A — see `ITaskStore.transition` opts.metadataPatch.
+   * Fields merged into `task.frontmatter.metadata` BEFORE the new-location
+   * `writeFileAtomic`, so the metadata stamp and the file move happen
+   * inside the same per-task TaskLocks critical section.
+   */
+  metadataPatch?: Record<string, unknown>;
 }
 
 export type { TaskStoreHooks } from "./interfaces.js";
@@ -162,6 +169,24 @@ export async function transitionTask(
   task.frontmatter.status = newStatus;
   task.frontmatter.updatedAt = now;
   task.frontmatter.lastTransitionAt = now;
+
+  // Phase 46 / Bug 1A: apply caller-supplied metadata patch atomically
+  // with the rename. Used by failure-tracker.transitionToDeadletter to
+  // stamp deadletter cause fields (deadletterReason, deadletterLastError,
+  // deadletterErrorClass, deadletterAt, deadletterFailureCount) inside
+  // the same per-task-mutex critical section as the file move, so the
+  // pre-Phase-46 partial-state window between save() and transition()
+  // becomes structurally impossible. Patch is applied BEFORE the
+  // writeFileAtomic call below so the new-location file lands with the
+  // patched frontmatter on first write. The idempotent early-return at
+  // line 151 deliberately skips the patch — failure-tracker only calls
+  // transition for non-no-op transitions, so this is fine.
+  if (opts?.metadataPatch) {
+    task.frontmatter.metadata = {
+      ...task.frontmatter.metadata,
+      ...opts.metadataPatch,
+    };
+  }
 
   // Clear lease on terminal states and when returning to ready
   if (newStatus === "done" || newStatus === "ready" || newStatus === "backlog") {
