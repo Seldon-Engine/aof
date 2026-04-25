@@ -322,7 +322,75 @@ Manual smoke test (run on the live install after deploy):
 
 </deferred>
 
+## Addendum — Open questions resolved (2026-04-24, post-research)
+
+The phase researcher flagged three open questions during research. Resolved
+inline below — these are LOCKED additions to the decisions above.
+
+### Q1 — Gzip on log rotation
+
+**Original CONTEXT decision:** "50 MB / 5 files / gzip on rotation"
+
+**Researcher finding:** `pino-roll@4` has no native gzip. To get gzip we'd
+need to swap to `rotating-file-stream` + a custom adapter, or post-rotate
+with an external script.
+
+**Resolved decision:** **Drop the gzip requirement.** Ship `pino-roll`
+with `size: '50M', limit: { count: 5 }`. The 250 MB worst-case (5 files
+× 50 MB ungzipped) is fine — bounded and predictable, which is the real
+goal. Gzip is a nice-to-have and can be added later as an optimization
+without breaking anything.
+
+### Q2 — `fd: 2` (launchd-redirected stderr) handling
+
+**The actual 172 MB log incident** wasn't pino's output — it was launchd's
+stderr redirection at `~/Library/LaunchAgents/ai.openclaw.aof.plist`
+capturing pino's writes to fd 2 into `~/.aof/data/logs/daemon-stderr.log`.
+Just adding `pino-roll` for pino's own output won't fix the incident if
+pino keeps writing to fd 2 in parallel.
+
+**Resolved decision:** **Drop `fd: 2` from pino's destinations**
+(Researcher's Option A). Pino writes only to the rotated file path. The
+launchd plist's `StandardErrorPath` then captures only fatal startup errors
+(uncaught exceptions before pino is wired) — which is the appropriate
+purpose for stderr. After this, `daemon-stderr.log` should grow only on
+crashes, not during normal operation.
+
+The plan that ships log rotation MUST cover both halves: (a) wire
+`pino-roll` for pino's output, (b) remove `fd: 2` from any multistream
+destination so pino stops fanout to launchd-captured stderr.
+
+### Q3 — `owner.team` / `owner.lead` defaulting when value is `"system"`
+
+**Context:** Project `event-calendar-2026` (the failing project from
+Incident 2) had `owner.team: system` and `lead: system` in `project.yaml`.
+If `aof_task_create` defaults `routing.team` from `owner.team`, defaulting
+to `"system"` could route to a team that doesn't exist in the org chart
+— silently swapping one routing failure for another.
+
+**Resolved decision:** **Treat `"system"` as a sentinel meaning "no real
+owner team / lead."** When defaulting:
+
+- If `owner.team === "system"` (case-insensitive) → do NOT default; fall
+  through to the empty-routing rejection path (Bug 2B).
+- If `owner.lead === "system"` (case-insensitive) → do NOT default;
+  fall through to empty-routing rejection.
+- For any other value → default normally.
+
+Rationale: `system` is the placeholder used when no human-meaningful
+owner has been set. Defaulting from it would pretend a routing target
+exists when it doesn't. Cleaner to surface the missing-routing error to
+the caller.
+
+### Implication for plan structure
+
+Researcher's six-plan breakdown stands. The `system`-sentinel handling
+goes into the Bug 2B plan (routing validation). The `fd: 2` handling
+goes into the Bug 1C plan (log rotation). Gzip is removed from the
+acceptance criteria of the Bug 1C plan.
+
 ---
 
 *Phase: 46-daemon-state-freshness*
 *Context gathered: 2026-04-24 via direct authoring from debug record*
+*Addendum (open questions resolved): 2026-04-24 post-research*
