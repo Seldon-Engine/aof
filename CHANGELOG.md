@@ -1,5 +1,43 @@
 # Changelog
 
+## [1.17.0](https://github.com/d0labs/aof/compare/v1.16.3...v1.17.0) (2026-04-25)
+
+### Features
+
+* **44-03:** enrich mergeDispatchNotificationRecipient with dispatcher identity ([cca9e0e](https://github.com/d0labs/aof/commit/cca9e0eddb65455d267dfd2081cce8c49df208b0))
+* **44-03:** promote OpenClawChatDelivery to a first-class Zod schema ([3bc842a](https://github.com/d0labs/aof/commit/3bc842ac3562ad15f1cfbf742b0b1a456f82a917))
+* **44-04:** disable default wall-clock TTL on OpenClawToolInvocationContextStore ([c77aee6](https://github.com/d0labs/aof/commit/c77aee6cb324bda2da5f6e19b6c8317d7a375e72))
+* **44-05:** bound chat-delivery queue with 60s default ack timeout ([f4abaa4](https://github.com/d0labs/aof/commit/f4abaa4e3d47c39fb64fe89d0565282762792962))
+* **44-06:** introduce NoPlatformError in chat-message-sender ([fcafdb3](https://github.com/d0labs/aof/commit/fcafdb323e0742d5b0419f34ad86b861ed66954a))
+* **44-06:** record agent-callback-fallback attempt for no-platform errors ([999e7f1](https://github.com/d0labs/aof/commit/999e7f120023fbee29b4043411f39ac031a2aa43))
+* **44-07:** add replayUnnotifiedTerminals + wake-up.* telemetry ([3210b51](https://github.com/d0labs/aof/commit/3210b515c0f9a4d379738a10ba3c83b4312d01aa))
+* **44-07:** wire replayUnnotifiedTerminals into daemon bootstrap ([bde9e15](https://github.com/d0labs/aof/commit/bde9e15c762d898d58c6d143908e9a98ad70ad3a))
+
+### Bug Fixes
+
+* **44-01:** WR-01+WR-02 serialize wake-up replay before attaching live listener ([04dd8b7](https://github.com/d0labs/aof/commit/04dd8b75788ff028e4a051a4e644392e2276dc8e))
+* **44-02:** WR-03 anchor parseSessionKey topic suffix to index 5 ([43d65a4](https://github.com/d0labs/aof/commit/43d65a423adbccc29d46783c18fc6f98d588f1d2))
+* **45:** revise plans based on checker feedback (Blockers [#1](https://github.com/d0labs/aof/issues/1)-2 + Warnings [#3](https://github.com/d0labs/aof/issues/3)-7 + Suggestions [#8](https://github.com/d0labs/aof/issues/8)-10) ([f1f1c1d](https://github.com/d0labs/aof/commit/f1f1c1deb97b4bcff4a4b889275539db0281181d)), closes [#1-2](https://github.com/d0labs/aof/issues/1-2) [#3-7](https://github.com/d0labs/aof/issues/3-7) [#8-10](https://github.com/d0labs/aof/issues/8-10) [#2](https://github.com/d0labs/aof/issues/2) [#4](https://github.com/d0labs/aof/issues/4) [#5](https://github.com/d0labs/aof/issues/5) [#6](https://github.com/d0labs/aof/issues/6) [#7](https://github.com/d0labs/aof/issues/7) [#8-10](https://github.com/d0labs/aof/issues/8-10)
+* **dispatch:** create task directly in ready/, skip backlog intermediate ([0ab4001](https://github.com/d0labs/aof/commit/0ab4001eb9178542a965dd99a36e45b38584fbc1))
+* **dispatch:** stamp deadletter cause into task frontmatter + document superseded cancel path ([1a90da1](https://github.com/d0labs/aof/commit/1a90da181ec6d3540f016a93d7e1d960fc4d42ed))
+* **dispatch:** validate dependsOn IDs against store at dispatch time ([5340610](https://github.com/d0labs/aof/commit/5340610e2d9e3c3392f9b035de1ec706cbcd648e))
+* **openclaw:** pass auth: \"gateway\" on registerHttpRoute calls ([c683c71](https://github.com/d0labs/aof/commit/c683c71fb06721eca4cbffecd4d2a50d805b8999))
+* **store:** guard addDep/removeDep/update/updateBody with per-task lock ([94e794d](https://github.com/d0labs/aof/commit/94e794d2344f5a6c3e310ca2ded4b181337e3ba2))
+* **tools:** aof_task_dep_remove tolerates nonexistent blocker IDs ([00cd869](https://github.com/d0labs/aof/commit/00cd869e4201211cd825a4078b5ae3d76ba1c778))
+
+### Refactor
+
+* **44-03:** replace local OpenClawChatDelivery interface with Zod-inferred type ([dd50362](https://github.com/d0labs/aof/commit/dd50362f181fb2e55a52509bb55df34d230b93e3))
+
+### Tests
+
+* **44-01:** add Phase 44 RED test for default-TTL removal ([c18a12c](https://github.com/d0labs/aof/commit/c18a12c6282cc1413ef7ff7e35d2b064f3b6ad44))
+* **44-01:** add Phase 44 RED tests for ChatDeliveryQueue timeout ([695f3e0](https://github.com/d0labs/aof/commit/695f3e081facdd6cc7eb41ab106826de05d233f9))
+* **44-01:** add Phase 44 RED tests for dispatch-notification identity enrichment ([9f7dd33](https://github.com/d0labs/aof/commit/9f7dd33bcae71840ca87063adae85437eb42b1bb))
+* **44-02:** add RED integration test for dispatcher wake-up E2E ([8720547](https://github.com/d0labs/aof/commit/872054765a2b656f9e89a404e7bbb73afcc3c097))
+* **44-02:** add RED test for notifier-startup recovery pass ([8cc9dfb](https://github.com/d0labs/aof/commit/8cc9dfb19c68c4270b1643d46fc2bf0154c92254))
+* **44-02:** add RED test for subagent-sessionKey agent-callback-fallback ([9396dd6](https://github.com/d0labs/aof/commit/9396dd6188ac0280c838524dfde4b7cd593354e0))
+
 ## [1.16.3](https://github.com/d0labs/aof/compare/v1.16.2...v1.16.3) (2026-04-23)
 
 ### Bug Fixes
