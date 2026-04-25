@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: milestone
 status: unknown
 stopped_at: Phase 45 context gathered
-last_updated: "2026-04-25T02:26:29.089Z"
+last_updated: "2026-04-25T15:50:01.231Z"
 progress:
   total_phases: 8
   completed_phases: 3
@@ -20,12 +20,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-16)
 
 **Core value:** Tasks never get dropped -- they survive gateway restarts, API failures, rate limits, and agent crashes, always resuming and completing end-to-end without human intervention.
-**Current focus:** Phase 42 — installer-mode-exclusivity
+**Current focus:** Phase 46 — daemon-state-freshness-fix-project-discovery-one-shot-bug-st
 
 ## Current Position
 
-Phase: 999.3
-Plan: Not started
+Phase: 46 (daemon-state-freshness-fix-project-discovery-one-shot-bug-st) — EXECUTING
+Plan: 1 of 6
 No active milestone. v1.10 Codebase Cleanups shipped 2026-03-16.
 Next step: `/gsd:new-milestone` to define next milestone.
 

@@ -286,9 +286,9 @@ enqueueSystemEvent(text, {
 **Plans:** 6 plans
 
 Plans:
-- [ ] 46-01-PLAN.md — Wave 1 Bug 1A atomic transition: extend `TransitionOpts.metadataPatch` + collapse `failure-tracker.transitionToDeadletter` to single atomic `store.transition({ metadataPatch })` call
-- [ ] 46-02-PLAN.md — Wave 2 Bug 1A reconciliation: add `reconcileDrift()` to `FilesystemTaskStore.init()` to heal status/location mismatches at boot
-- [ ] 46-03-PLAN.md — Wave 3 Bug 2A: per-poll `rediscoverProjects()` inside `runPoll()` so post-startup projects become live within one poll cycle
-- [ ] 46-04-PLAN.md — Wave 3 Bug 1C: wire `pino-roll@4` transport at 50 MB × 5, drop `fd:2` destination, release worker-thread on `resetLogger()`
-- [ ] 46-05-PLAN.md — Wave 3 Bug 2B: routing-target validation in `aofDispatch` with project-owner defaulting + `"system"` sentinel handling
-- [ ] 46-06-PLAN.md — Wave 3 Bug 2C: envelope-actor injection at `/v1/tool/invoke` + plugin-side `params.actor` fallback to `captured.actor` in `mergeDispatchNotificationRecipient`
+- [x] 46-01-PLAN.md — Wave 1 Bug 1A atomic transition: extend `TransitionOpts.metadataPatch` + collapse `failure-tracker.transitionToDeadletter` to single atomic `store.transition({ metadataPatch })` call
+- [x] 46-02-PLAN.md — Wave 2 Bug 1A reconciliation: add `reconcileDrift()` to `FilesystemTaskStore.init()` to heal status/location mismatches at boot
+- [x] 46-03-PLAN.md — Wave 3 Bug 2A: per-poll `rediscoverProjects()` inside `runPoll()` so post-startup projects become live within one poll cycle
+- [x] 46-04-PLAN.md — Wave 3 Bug 1C: wire `pino-roll@4` transport at 50 MB × 5, drop `fd:2` destination, release worker-thread on `resetLogger()`
+- [x] 46-05-PLAN.md — Wave 3 Bug 2B: routing-target validation in `aofDispatch` with project-owner defaulting + `"system"` sentinel handling
+- [x] 46-06-PLAN.md — Wave 3 Bug 2C: envelope-actor injection at `/v1/tool/invoke` + plugin-side `params.actor` fallback to `captured.actor` in `mergeDispatchNotificationRecipient`
