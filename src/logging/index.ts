@@ -21,6 +21,7 @@
 
 import pino, { type Logger, type DestinationStream } from "pino";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import { getConfig } from "../config/registry.js";
 import { resolveDataDir } from "../config/paths.js";
 
@@ -64,24 +65,22 @@ function getRootLogger(): Logger {
   if (root) return root;
 
   const { core } = getConfig();
-  const logsDir = join(resolveDataDir(), "logs");
 
   // Phase 46 / Bug 1C: pino-roll worker-thread transport for bounded
-  // log disk use. mkdir: true is mandatory — without it pino-roll
-  // throws on first write inside the worker thread, silently dropping
-  // every log line (RESEARCH.md Pitfall 1). size: 50m × count: 5
-  // caps disk use at ~250 MB worst-case; gzip is intentionally not
-  // enabled (pino-roll lacks native support; 250 MB raw is within
-  // user-approved budget per CONTEXT.md addendum Q1).
-  //
-  // fd:2 is NOT a destination here. CONTEXT.md addendum Q2: leaving
-  // pino on fd:2 would keep the launchd-captured daemon-stderr.log
-  // growth path open. Drop fd:2 entirely; launchd's stderr capture
-  // becomes a rare-event channel (Node-level uncaught crashes still
-  // write to it via Node's default handler).
-  const transport: DestinationStream =
-    testTransportOverride ??
-    pino.transport({
+  // log disk use in production. In vitest the worker-thread loader
+  // can't resolve `pino-roll` from the worker context (and would leak
+  // workers per file anyway), so default to a discard sink unless a
+  // test has injected its own override via __setLoggerTransportForTests.
+  let transport: DestinationStream;
+  if (testTransportOverride) {
+    transport = testTransportOverride;
+  } else if (process.env["VITEST"] === "true") {
+    const sink = new PassThrough();
+    sink.resume();
+    transport = sink;
+  } else {
+    const logsDir = join(resolveDataDir(), "logs");
+    transport = pino.transport({
       target: "pino-roll",
       options: {
         file: join(logsDir, "aof.log"),
@@ -90,6 +89,7 @@ function getRootLogger(): Logger {
         mkdir: true,
       },
     });
+  }
   dest = transport;
 
   root = pino(
