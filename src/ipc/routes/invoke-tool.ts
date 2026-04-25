@@ -162,8 +162,23 @@ export const handleInvokeTool: RouteHandler = async (req, res, deps) => {
   };
 
   // --- Dispatch ---
+  // Phase 46 / Bug 2C: inject envelope.actor into inner.data when the
+  // caller didn't supply one. Closes the createdBy: "unknown" gap on
+  // plugin-originated aof_dispatch — the OpenClaw plugin sets envelope.actor
+  // from the invocation context, but the daemon-side route never
+  // propagated it down to the handler input, so the handler's
+  // `input.actor ?? "unknown"` fallback always won.
+  //
+  // Precedence: explicit params.actor (caller-supplied) > envelope.actor
+  // (authenticated IPC identity) > handler default ("unknown" for
+  // aof_dispatch, "mcp" for MCP path). MCP path is unaffected because
+  // MCP constructs its own envelope with its own `actor: "mcp"`.
+  const enrichedParams: typeof inner.data =
+    actor && (inner.data as { actor?: string }).actor === undefined
+      ? ({ ...(inner.data as Record<string, unknown>), actor } as typeof inner.data)
+      : inner.data;
   try {
-    const result = await def.handler(ctx, inner.data);
+    const result = await def.handler(ctx, enrichedParams);
     sendJson(res, 200, { result });
   } catch (err) {
     const kind = classifyError(err);
