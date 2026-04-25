@@ -280,6 +280,67 @@ export class AOFService {
   }
 
   /**
+   * Phase 46 / Bug 2A: rediscover projects on each poll to catch
+   * directories created after daemon boot. Called as the first step of
+   * runPoll() — serialized via this.pollQueue, so rediscovery
+   * happens-before the same invocation's pollAllProjects() and never
+   * races with it (PATTERNS.md Pitfall 2).
+   *
+   * Pre-Phase-46 behavior: initializeProjects() ran once at boot and
+   * this.projectStores was a frozen snapshot. A project created after
+   * boot was invisible until daemon restart — on 2026-04-24 this
+   * silently swallowed 5 tasks for 21 minutes before the dispatching
+   * agent gave up. This method makes the registry self-healing.
+   *
+   * Cost: one readdir of <vaultRoot>/Projects/ + one readFile per
+   * project.yaml. Microseconds even with dozens of projects. If
+   * profiling ever shows this in a hot path, an fs watcher can be
+   * added as an optimization (CONTEXT.md).
+   *
+   * The _inbox project is always returned by discoverProjects() (see
+   * src/projects/registry.ts), so rediscovery is idempotent for it —
+   * the knownIds check below handles it naturally.
+   */
+  private async rediscoverProjects(): Promise<void> {
+    if (!this.vaultRoot) return;
+
+    const discovered = await discoverProjects(this.vaultRoot);
+    const discoveredIds = new Set(discovered.map((p) => p.id));
+
+    // Add new projects (skip those with manifest errors — same as init).
+    for (const project of discovered) {
+      if (this.projectStores.has(project.id) || project.error) continue;
+
+      const store = new FilesystemTaskStore(project.path, {
+        projectId: project.id,
+        hooks: this.createStoreHooks(project.path),
+        logger: this.logger,
+      });
+      await store.init(); // Phase 46 / Plan 02 reconcileDrift runs here too
+      this.projectStores.set(project.id, store);
+      svcLog.info(
+        { projectId: project.id, op: "rediscover" },
+        "registered new project",
+      );
+    }
+
+    // Remove vanished projects. In-flight tasks under a removed project
+    // surface during their next per-task operation as "task not found";
+    // the lease/orphan reconciliation in reconcileOrphans() handles
+    // cleanup. No new lock needed — pollQueue serialization covers the
+    // "iterating this.projectStores mid-poll" race.
+    for (const id of this.projectStores.keys()) {
+      if (!discoveredIds.has(id)) {
+        this.projectStores.delete(id);
+        svcLog.info(
+          { projectId: id, op: "rediscover" },
+          "deregistered vanished project",
+        );
+      }
+    }
+  }
+
+  /**
    * Reclaim orphaned tasks that were mid-transition during a crash.
    *
    * On startup, ALL in-progress tasks are considered orphaned because
@@ -392,6 +453,11 @@ export class AOFService {
     const timeoutId = setTimeout(() => controller.abort(), this.pollTimeoutMs);
 
     try {
+      // Phase 46 / Bug 2A: catch projects created after boot. Must run
+      // inside runPoll() (serialized via pollQueue) so rediscovery
+      // happens-before the same invocation's pollAllProjects().
+      await this.rediscoverProjects();
+
       const pollPromise = this.vaultRoot && this.projectStores.size > 0
         ? this.pollAllProjects()
         : this.poller(this.store, this.logger, this.schedulerConfig);
