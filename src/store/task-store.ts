@@ -145,10 +145,130 @@ export class FilesystemTaskStore implements ITaskStore {
     return `${prefix}${next}`;
   }
 
-  /** Ensure all status directories exist. */
+  /** Ensure all status directories exist, then reconcile any on-disk drift. */
   async init(): Promise<void> {
     for (const status of STATUS_DIRS) {
       await mkdir(join(this.tasksDir, status), { recursive: true });
+    }
+    await this.reconcileDrift();
+  }
+
+  /**
+   * Phase 46 / Bug 1A (reconciliation half): heal on-disk drift between
+   * frontmatter.status and directory location. Filesystem is the source
+   * of truth for location; frontmatter is the source of truth for WHICH
+   * status the task should have. When they disagree — e.g. because a
+   * pre-Phase-46 partial transition crashed between `save()` and
+   * `transition()`, or because an external process moved a file — this
+   * pass rewrites the on-disk layout to match frontmatter.
+   *
+   * Reuses `this.lint()` → `lintTasks()` which already detects and
+   * reports "Status mismatch:" issues via the same directory walk.
+   * Runs ONCE per init() (not per poll) per CONTEXT.md: "It's a
+   * self-heal pass for past drift, not a continuous correction loop."
+   *
+   * PATTERNS.md Pitfall 4: we do NOT call `this.get(id)` inside the
+   * loop — get() has its own mtime-wins self-heal that deletes files
+   * mid-walk. lintTasks uses parseTaskFile directly on each enumerated
+   * path, so `issues` is a safe snapshot.
+   *
+   * Companion directory is moved alongside the .md on a best-effort
+   * basis. ENOENT (no companion dir) is fine; any other rename failure
+   * is logged and we keep going — the .md move already succeeded and
+   * is the critical half.
+   *
+   * Threat T-46-02-01 (path traversal via crafted frontmatter.status):
+   * mitigated by the `STATUS_DIRS.includes(targetStatus)` check before
+   * computing newPath. STATUS_DIRS is a hardcoded `readonly` array;
+   * any value not in it triggers the warn-log branch and leaves the
+   * file in place.
+   */
+  private async reconcileDrift(): Promise<void> {
+    const issues = await this.lint();
+    for (const { task, issue } of issues) {
+      if (!issue.startsWith("Status mismatch:")) continue;
+
+      const targetStatus = task.frontmatter.status;
+      if (!STATUS_DIRS.includes(targetStatus)) {
+        storeLog.warn(
+          { taskId: task.frontmatter.id, status: targetStatus, op: "reconcile" },
+          "frontmatter status not in known dirs — leaving file in place",
+        );
+        continue;
+      }
+
+      const oldPath = task.path;
+      if (!oldPath) {
+        storeLog.warn(
+          { taskId: task.frontmatter.id, op: "reconcile" },
+          "task has no path — cannot reconcile",
+        );
+        continue;
+      }
+
+      // Phase 46 / threat T-46-02-05: derive currentStatus from the
+      // `issue` string returned by lintTasks. This regex is brittle —
+      // if `task-validation.ts` ever changes the "Status mismatch:"
+      // string format, this parse silently degrades to undefined and
+      // companion-dir rename is skipped (the .md still moves correctly,
+      // so no data loss; just an orphaned companion dir until the next
+      // restart when reconciliation runs again on a now-already-moved
+      // file with no drift). A more robust alternative is to parse the
+      // current status from `oldPath` itself (split on `/tasks/` and
+      // read the next segment) — switch to that if the issue-string
+      // format changes.
+      const match = issue.match(/but file in '(\w[\w-]*)\/'/);
+      const currentStatus =
+        match && STATUS_DIRS.includes(match[1] as TaskStatus)
+          ? (match[1] as TaskStatus)
+          : undefined;
+
+      const newPath = this.taskPath(task.frontmatter.id, targetStatus);
+      try {
+        await mkdir(join(this.tasksDir, targetStatus), { recursive: true });
+        await rename(oldPath, newPath);
+
+        // Best-effort companion dir rename. ENOENT is fine — most
+        // tasks created via failure-tracker / older paths don't have
+        // companion dirs at all.
+        if (currentStatus) {
+          const oldDir = this.taskDir(task.frontmatter.id, currentStatus);
+          const newDir = this.taskDir(task.frontmatter.id, targetStatus);
+          try {
+            await rename(oldDir, newDir);
+          } catch (err) {
+            const code = (err as NodeJS.ErrnoException).code;
+            if (code !== "ENOENT") {
+              storeLog.warn(
+                { taskId: task.frontmatter.id, err, op: "reconcile" },
+                "companion directory rename failed (non-fatal, .md already moved)",
+              );
+            }
+          }
+        }
+
+        storeLog.info(
+          {
+            taskId: task.frontmatter.id,
+            from: oldPath,
+            to: newPath,
+            op: "reconcile",
+          },
+          "reconciled task file to match frontmatter status",
+        );
+      } catch (err) {
+        storeLog.error(
+          {
+            taskId: task.frontmatter.id,
+            err,
+            oldPath,
+            newPath,
+            op: "reconcile",
+          },
+          "failed to reconcile task file",
+        );
+        // Do not throw — one bad file should not block the rest of init().
+      }
     }
   }
 
