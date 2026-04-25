@@ -1,5 +1,38 @@
 # Changelog
 
+## [1.17.1](https://github.com/d0labs/aof/compare/v1.17.0...v1.17.1) (2026-04-25)
+
+### Features
+
+* **46-01:** extend TransitionOpts.metadataPatch for atomic stamp+rename ([7de2633](https://github.com/d0labs/aof/commit/7de2633874e096853808e3756f62bf5ab5b7be99)), closes [#1](https://github.com/d0labs/aof/issues/1) [#2](https://github.com/d0labs/aof/issues/2) [#3](https://github.com/d0labs/aof/issues/3) [#1](https://github.com/d0labs/aof/issues/1)
+
+### Bug Fixes
+
+* **46-01:** address checker SUGGESTION — vi.mock for named imports ([21cdb93](https://github.com/d0labs/aof/commit/21cdb9344f182a6687964107642ac905d4baf36d))
+* **46-01:** collapse transitionToDeadletter to single atomic store.transition call (BUG-046a) ([a5546d7](https://github.com/d0labs/aof/commit/a5546d70f7981cadad47b9a7a96d922a5e3eae64))
+* **46-02:** add startup reconciliation pass to FilesystemTaskStore.init() (BUG-046a) ([ab6f4bd](https://github.com/d0labs/aof/commit/ab6f4bd7994995bd6c261a0f54afd106eb8313a8))
+* **46-02:** address checker BLOCKER + WARNINGs — Q3 deferral, T-46-02-05, wave flatten ([d141e11](https://github.com/d0labs/aof/commit/d141e115efce0a7fc1af3f5960952174dcb97dd6))
+* **46-03:** address checker WARNING — flatten wave to enable parallel exec ([92f6d62](https://github.com/d0labs/aof/commit/92f6d627ff91857e4b379324b2daddf5aeeb3ac1))
+* **46-03:** rediscover projects on each poll to catch post-init creations (BUG-046b) ([769c4bf](https://github.com/d0labs/aof/commit/769c4bf954d381f7320eb63f47302fe04bdca79e))
+* **46-04:** address checker WARNINGs + SUGGESTION — logger test strategy, fatal log follow-up ([f8b711c](https://github.com/d0labs/aof/commit/f8b711c621ab225d38e65b48206fe0a81e8198f3))
+* **46-04:** skip pino-roll worker transport in vitest env ([c643c24](https://github.com/d0labs/aof/commit/c643c24b5d735a471d1a8c5bbf0440d7740f2a90))
+* **46-04:** wire pino-roll transport, drop fd:2 destination (BUG-046c) ([60c4a9d](https://github.com/d0labs/aof/commit/60c4a9dfba6a441b065a1e36e09bf177f37538e3))
+* **46-05:** address checker WARNING — flatten wave to enable parallel exec ([b06f5f8](https://github.com/d0labs/aof/commit/b06f5f893bd921d20b7412c011c1083815c4a9f2))
+* **46-05:** reject empty-routing at aof_dispatch; default from project owner (BUG-046d) ([30fdf2d](https://github.com/d0labs/aof/commit/30fdf2da0dcf34b31cdd76116696fad5cae42804))
+* **46-06:** address checker WARNING + SUGGESTION — reorder rationale, complete StoredRecipient mock ([45a8283](https://github.com/d0labs/aof/commit/45a82839075efa0951a58cee8111a1a4bec1657d))
+* **46-06:** inject envelope actor into inner.data at /v1/tool/invoke (BUG-046e) ([b17a153](https://github.com/d0labs/aof/commit/b17a153f0c173aa30ff708abc1d68c3d2f9e5a42))
+* **46-06:** plugin-side defense-in-depth actor fallback from captured.actor (BUG-046e) ([f96d27c](https://github.com/d0labs/aof/commit/f96d27c852715ca0a1052063d4e79fbc77141caf))
+* **46:** mark RESEARCH Open Questions RESOLVED — Dimension 11 gate ([a39aa83](https://github.com/d0labs/aof/commit/a39aa832b3e1b1b5e2ad5699ec3834cda9a554e9))
+
+### Tests
+
+* **46-01:** add RED regression for atomic transitionToDeadletter (BUG-046a) ([8db8a7c](https://github.com/d0labs/aof/commit/8db8a7c25fc1943999275a373bc50975dc1fbc82))
+* **46-02:** add RED regression for startup reconciliation (BUG-046a) ([160d493](https://github.com/d0labs/aof/commit/160d493cb31765fbffa829b257cbb1bcc8773a40))
+* **46-03:** add RED integration test for post-init project rediscovery (BUG-046b) ([46757d6](https://github.com/d0labs/aof/commit/46757d62629dc3f93382fdc6a8f237a4b5a61ce2))
+* **46-04:** add RED config-sniff regression for pino-roll wiring (BUG-046c) ([23ee0e3](https://github.com/d0labs/aof/commit/23ee0e3b1328b04ede71d8dc5e5f88a2719caf54))
+* **46-05:** add RED regression for aof_dispatch routing validation (BUG-046d) ([edd35f6](https://github.com/d0labs/aof/commit/edd35f6e1a67c0d56e500d34361c0ed365de193a))
+* **46-06:** add RED regression for envelope + plugin actor propagation (BUG-046e) ([fa7bae4](https://github.com/d0labs/aof/commit/fa7bae4bb82ec4149df3518d463bca55739e2d71))
+
 ## [1.17.0](https://github.com/d0labs/aof/compare/v1.16.3...v1.17.0) (2026-04-25)
 
 ### Features
