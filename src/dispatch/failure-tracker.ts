@@ -77,24 +77,32 @@ export async function transitionToDeadletter(
   const deadletterReason =
     errorClass === "permanent" ? "permanent_error" : "max_dispatch_failures";
 
-  // BUG-005: stamp the deadletter cause into the task's own frontmatter
-  // metadata, not just the event log. Coordinators triaging a deadlettered
-  // task via `aof_status_report` or a direct file read need the failure
-  // summary on the task itself; chasing the cause through events.jsonl is
-  // operationally painful, especially during incidents where many tasks
-  // deadletter for the same reason (e.g. a shared upstream auth outage).
-  task.frontmatter.metadata = {
-    ...task.frontmatter.metadata,
-    deadletterReason,
-    deadletterLastError: lastFailureReason,
-    deadletterErrorClass: errorClass,
-    deadletterAt: deadletteredAt,
-    deadletterFailureCount: failureCount,
-  };
-  await store.save(task);
-
-  // Transition task to deadletter status
-  await store.transition(taskId, "deadletter");
+  // BUG-005 + BUG-046a (Phase 46 / Bug 1A): stamp the deadletter cause
+  // into the task's own frontmatter metadata atomically with the file
+  // move. Coordinators triaging via `aof_status_report` or a direct
+  // file read need the failure summary on the task itself; chasing the
+  // cause through events.jsonl is operationally painful, especially
+  // during incidents where many tasks deadletter for the same reason
+  // (e.g. a shared upstream auth outage).
+  //
+  // Phase 46 collapsed this from two separate awaits (`store.save(task)`
+  // then `store.transition(...)`) into a single `store.transition` call
+  // with `metadataPatch`. The pre-Phase-46 split allowed a crash, ENOSPC,
+  // or rename failure between the two operations to leave the file in
+  // tasks/ready/ with frontmatter.status: deadletter — the spin-loop
+  // bug from the 2026-04-24 incident (5 ghost tasks + 172 MB log).
+  // Atomic application via the existing TaskLocks per-task mutex makes
+  // the partial-state structurally impossible.
+  await store.transition(taskId, "deadletter", {
+    reason: deadletterReason,
+    metadataPatch: {
+      deadletterReason,
+      deadletterLastError: lastFailureReason,
+      deadletterErrorClass: errorClass,
+      deadletterAt: deadletteredAt,
+      deadletterFailureCount: failureCount,
+    },
+  });
 
   // Log deadletter event with full failure chain (FOUND-04)
   // Uses "task.deadlettered" as canonical event type (backward compat: "task.deadletter" still in schema)
