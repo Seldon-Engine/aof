@@ -238,4 +238,4 @@ Tasks never get dropped — they survive gateway restarts, API failures, rate li
 | `--force-daemon` demoted to deprecated no-op (v1.15 D-04) | Preserves v1.14 CI/script compatibility for one release cycle; flag removed in future | ✓ Good |
 
 ---
-*Last updated: 2026-04-17 after v1.15 Phase 43 shipped*
+*Last updated: 2026-04-25 after Phase 46 (daemon state freshness — atomic deadletter transition + startup reconciliation, project rediscovery, bounded log rotation, routing validation, plugin actor injection)*
