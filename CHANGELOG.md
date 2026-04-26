@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.3](https://github.com/d0labs/aof/compare/v1.17.2...v1.17.3) (2026-04-26)
+
+### Bug Fixes
+
+* **dispatch:** auto-include missing agent in project participants instead of blocking ([d8f1046](https://github.com/d0labs/aof/commit/d8f1046fb9db860b6e17c7275036721d8f5ac03e))
+* **store:** replace per-store task ID counter with nanoid suffix to prevent cross-store collisions ([fbcdda8](https://github.com/d0labs/aof/commit/fbcdda8944d64882d239c66c42cfb2360de168ec))
+
 ## [1.17.2](https://github.com/d0labs/aof/compare/v1.17.1...v1.17.2) (2026-04-26)
 
 ### Features
