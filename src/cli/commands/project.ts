@@ -3,7 +3,6 @@
  * Registers project lifecycle commands (init, create-project, integrate, eject, migrations).
  */
 
-import { join } from "node:path";
 import { homedir } from "node:os";
 import type { Command } from "commander";
 import { integrateWithOpenClaw, detectOpenClawConfig } from "../../packaging/integration.js";
@@ -24,8 +23,7 @@ export function registerProjectCommands(program: Command): void {
     .option("--lead <lead>", "Owner lead (defaults to 'system')", "system")
     .option("--parent <id>", "Parent project ID for hierarchical projects")
     .option("--template", "Scaffold with memory directory and README template", false)
-    .option("--participants <agents...>", "Initial participant agent IDs")
-    .action(async (id: string, opts: { title?: string; type: string; team: string; lead: string; parent?: string; template: boolean; participants?: string[] }) => {
+    .action(async (id: string, opts: { title?: string; type: string; team: string; lead: string; parent?: string; template: boolean }) => {
       const { createProject } = await import("../../projects/create.js");
       const root = program.opts()["root"] as string;
 
@@ -36,11 +34,7 @@ export function registerProjectCommands(program: Command): void {
           const rl = createInterface({ input: process.stdin, output: process.stdout });
           try {
             const name = await rl.question("Project name: ");
-            const participantsStr = await rl.question("Initial participants (comma-separated agent IDs, or empty): ");
             opts.title = name || id;
-            if (participantsStr.trim()) {
-              opts.participants = participantsStr.split(",").map(s => s.trim()).filter(Boolean);
-            }
           } finally {
             rl.close();
           }
@@ -53,7 +47,6 @@ export function registerProjectCommands(program: Command): void {
           owner: { team: opts.team, lead: opts.lead },
           parentId: opts.parent,
           template: opts.template,
-          participants: opts.participants,
         });
 
         console.log(`Project created: ${id}`);
@@ -63,9 +56,6 @@ export function registerProjectCommands(program: Command): void {
         console.log(`   Directories: ${result.directoriesCreated.join(", ")}`);
         if (result.manifest.parentId) {
           console.log(`   Parent: ${result.manifest.parentId}`);
-        }
-        if (result.manifest.participants.length > 0) {
-          console.log(`   Participants: ${result.manifest.participants.join(", ")}`);
         }
       } catch (error) {
         console.error(`Failed to create project: ${(error as Error).message}`);
@@ -100,49 +90,13 @@ export function registerProjectCommands(program: Command): void {
           continue;
         }
         if (p.manifest) {
-          const participants = p.manifest.participants?.length ?? 0;
           const statusMarker = p.manifest.status === "active" ? "+" : "-";
-          console.log(`  ${statusMarker} ${p.id} -- ${p.manifest.title} (${p.manifest.type}, ${participants} participants)`);
+          console.log(`  ${statusMarker} ${p.id} -- ${p.manifest.title} (${p.manifest.type})`);
         } else {
           console.log(`  ? ${p.id} -- (manifest unreadable)`);
         }
       }
       console.log("");
-    });
-
-  // --- project-add-participant ---
-  program
-    .command("project-add-participant <project> <agent>")
-    .description("Add an agent to a project's participant list")
-    .action(async (projectId: string, agentId: string) => {
-      const { resolveProject } = await import("../../projects/index.js");
-      const { readFile } = await import("node:fs/promises");
-      const { join } = await import("node:path");
-      const { parse } = await import("yaml");
-      const { writeProjectManifest } = await import("../../projects/manifest.js");
-      const root = program.opts()["root"] as string;
-
-      try {
-        const resolution = await resolveProject(projectId, root);
-        const manifestPath = join(resolution.projectRoot, "project.yaml");
-        const content = await readFile(manifestPath, "utf-8");
-        const manifest = parse(content);
-
-        if (!manifest.participants) manifest.participants = [];
-
-        if (manifest.participants.includes(agentId)) {
-          console.log(`Agent "${agentId}" is already a participant in project "${projectId}".`);
-          return;
-        }
-
-        manifest.participants.push(agentId);
-        await writeProjectManifest(resolution.projectRoot, manifest);
-
-        console.log(`Added "${agentId}" to project "${projectId}" (${manifest.participants.length} total participants).`);
-      } catch (error) {
-        console.error(`Failed to add participant: ${(error as Error).message}`);
-        process.exitCode = 1;
-      }
     });
 
   // --- integrate ---

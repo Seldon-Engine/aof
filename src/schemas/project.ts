@@ -176,8 +176,6 @@ export const ProjectManifest = z.object({
   type: ProjectType,
   /** Owner metadata. */
   owner: ProjectOwner,
-  /** Agent/human participants. */
-  participants: z.array(z.string()).default([]),
   /** Optional parent project ID for hierarchical projects. */
   parentId: z.string().optional(),
   /** Routing config. */

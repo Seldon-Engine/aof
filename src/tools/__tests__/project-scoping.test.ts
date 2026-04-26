@@ -1,48 +1,25 @@
 /**
- * Project scoping tests — ToolContext propagation and participant filtering.
+ * Project scoping tests — ToolContext propagation and store resolution.
  *
- * Tests PROJ-01/02/03: project-scoped store resolution, participant filtering
- * in dispatch, backward compatibility for tasks without project context.
+ * The "Participant filtering in dispatch" describe block (4 tests for PROJ-03)
+ * was removed 2026-04-26 along with the project.participants field.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { stringify as stringifyYaml } from "yaml";
 import { FilesystemTaskStore } from "../../store/task-store.js";
 import type { ITaskStore } from "../../store/interfaces.js";
-import { EventLogger } from "../../events/logger.js";
-import { buildDispatchActions } from "../../dispatch/task-dispatcher.js";
-import type { DispatchConfig } from "../../dispatch/task-dispatcher.js";
-import type { Task } from "../../schemas/task.js";
 
 describe("Project scoping", () => {
   let tmpDir: string;
   let store: ITaskStore;
-  let logger: EventLogger;
-
-  const dispatchConfig: DispatchConfig = {
-    dataDir: "",
-    dryRun: true,
-    defaultLeaseTtlMs: 600_000,
-  };
-
-  const defaultMetrics = {
-    currentInProgress: 0,
-    blockedBySubtasks: new Set<string>(),
-    circularDeps: new Set<string>(),
-    occupiedResources: new Map<string, string>(),
-    inProgressTasks: [] as Task[],
-  };
 
   beforeEach(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "aof-project-scope-"));
     store = new FilesystemTaskStore(tmpDir, { projectId: "test-project" });
     await store.init();
-    const eventsDir = join(tmpDir, "events");
-    await mkdir(eventsDir, { recursive: true });
-    logger = new EventLogger(eventsDir);
   });
 
   afterEach(async () => {
@@ -86,180 +63,4 @@ describe("Project scoping", () => {
     });
   });
 
-  describe("Participant filtering in dispatch", () => {
-    /**
-     * Helper: write a project manifest to disk so loadProjectManifest can read it.
-     */
-    async function writeProjectManifest(
-      projectRoot: string,
-      manifest: Record<string, unknown>,
-    ): Promise<void> {
-      const manifestPath = join(projectRoot, "project.yaml");
-      await writeFile(manifestPath, stringifyYaml(manifest), "utf-8");
-    }
-
-    it("allows agent that IS in the participants list", async () => {
-      await writeProjectManifest(tmpDir, {
-        id: "test-project",
-        title: "Test Project",
-        status: "active",
-        type: "swe",
-        owner: { agent: "lead" },
-        participants: ["agent-a", "agent-b"],
-        routing: {},
-        memory: {},
-        links: {},
-      });
-
-      const task = await store.create({
-        title: "Allowed agent task",
-        createdBy: "test",
-        routing: { agent: "agent-a" },
-      });
-      await store.transition(task.frontmatter.id, "ready");
-
-      const readyTasks = await store.list({ status: "ready" });
-      const allTasks = await store.list();
-
-      const actions = await buildDispatchActions(
-        readyTasks,
-        allTasks,
-        store,
-        dispatchConfig,
-        defaultMetrics,
-        null,
-        new Map(),
-      );
-
-      const assignActions = actions.filter(a => a.type === "assign");
-      expect(assignActions).toHaveLength(1);
-      expect(assignActions[0]!.agent).toBe("agent-a");
-    });
-
-    it("auto-includes agent NOT in the participants list and proceeds with assign (relaxed 2026-04-26)", async () => {
-      // Pre-relaxation: missing-participant produced an alert and the task sat in ready.
-      // Now: missing-participant triggers an in-place manifest update and proceeds.
-      // Participants is observability/audit, not auth.
-      await writeProjectManifest(tmpDir, {
-        id: "test-project",
-        title: "Test Project",
-        status: "active",
-        type: "swe",
-        owner: { agent: "lead" },
-        participants: ["agent-a", "agent-b"],
-        routing: {},
-        memory: {},
-        links: {},
-      });
-
-      const task = await store.create({
-        title: "Auto-include agent task",
-        createdBy: "test",
-        routing: { agent: "agent-c" },
-      });
-      await store.transition(task.frontmatter.id, "ready");
-
-      const readyTasks = await store.list({ status: "ready" });
-      const allTasks = await store.list();
-
-      const actions = await buildDispatchActions(
-        readyTasks,
-        allTasks,
-        store,
-        dispatchConfig,
-        defaultMetrics,
-        null,
-        new Map(),
-      );
-
-      // No participant-mismatch alert anymore.
-      const participantAlerts = actions.filter(
-        a => a.type === "alert" && a.reason?.includes("not a participant")
-      );
-      expect(participantAlerts).toHaveLength(0);
-
-      // Assign action emitted as if agent-c had been listed all along.
-      const assignActions = actions.filter(a => a.type === "assign");
-      expect(assignActions).toHaveLength(1);
-      expect(assignActions[0]!.agent).toBe("agent-c");
-
-      // Manifest is updated on disk so subsequent polls see the agent immediately.
-      const { loadProjectManifest } = await import("../../projects/manifest.js");
-      const manifest = await loadProjectManifest(store, "test-project");
-      expect(manifest?.participants).toEqual(["agent-a", "agent-b", "agent-c"]);
-    });
-
-    it("allows any agent when participants list is empty (unrestricted)", async () => {
-      await writeProjectManifest(tmpDir, {
-        id: "test-project",
-        title: "Test Project",
-        status: "active",
-        type: "swe",
-        owner: { agent: "lead" },
-        participants: [],
-        routing: {},
-        memory: {},
-        links: {},
-      });
-
-      const task = await store.create({
-        title: "Unrestricted task",
-        createdBy: "test",
-        routing: { agent: "any-agent" },
-      });
-      await store.transition(task.frontmatter.id, "ready");
-
-      const readyTasks = await store.list({ status: "ready" });
-      const allTasks = await store.list();
-
-      const actions = await buildDispatchActions(
-        readyTasks,
-        allTasks,
-        store,
-        dispatchConfig,
-        defaultMetrics,
-        null,
-        new Map(),
-      );
-
-      const assignActions = actions.filter(a => a.type === "assign");
-      expect(assignActions).toHaveLength(1);
-      expect(assignActions[0]!.agent).toBe("any-agent");
-    });
-
-    it("assigns normally when task has no project ID (backward compat)", async () => {
-      // Create a store without a project ID to simulate global store
-      const globalDir = await mkdtemp(join(tmpdir(), "aof-global-"));
-      const globalStore = new FilesystemTaskStore(globalDir);
-      await globalStore.init();
-
-      try {
-        const task = await globalStore.create({
-          title: "Global task",
-          createdBy: "test",
-          routing: { agent: "any-agent" },
-        });
-        await globalStore.transition(task.frontmatter.id, "ready");
-
-        const readyTasks = await globalStore.list({ status: "ready" });
-        const allTasks = await globalStore.list();
-
-        const actions = await buildDispatchActions(
-          readyTasks,
-          allTasks,
-          globalStore,
-          dispatchConfig,
-          defaultMetrics,
-          null,
-          new Map(),
-        );
-
-        const assignActions = actions.filter(a => a.type === "assign");
-        expect(assignActions).toHaveLength(1);
-        expect(assignActions[0]!.agent).toBe("any-agent");
-      } finally {
-        await rm(globalDir, { recursive: true, force: true });
-      }
-    });
-  });
 });

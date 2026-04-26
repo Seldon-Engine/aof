@@ -43,10 +43,8 @@ import {
 import {
   projectCreateSchema,
   projectListSchema,
-  projectAddParticipantSchema,
   aofProjectCreate,
   aofProjectList,
-  aofProjectAddParticipant,
 } from "./project-management-tools.js";
 
 /**
@@ -173,11 +171,5 @@ export const toolRegistry: ToolRegistry = {
     description: "List all projects on this AOF instance.",
     schema: projectListSchema,
     handler: async (ctx, input) => aofProjectList(ctx, input),
-  },
-
-  aof_project_add_participant: {
-    description: "Add an agent to a project's participant list.",
-    schema: projectAddParticipantSchema,
-    handler: async (ctx, input) => aofProjectAddParticipant(ctx, input),
   },
 };

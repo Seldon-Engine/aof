@@ -239,25 +239,20 @@ function buildAgentTeamMap(chart: OrgChart): Map<string, string | undefined> {
 
 /**
  * Determine which agents are enrolled in a project.
- * Enrolled if: agent in participants OR agent.team matches owner.team.
+ * Enrolled if: agent.team matches owner.team. (Project participants list
+ * was removed 2026-04-26 — was an authorization gate that produced no
+ * actionable signal. Cross-team memory access can be solved via a different
+ * mechanism if/when it actually surfaces as a need.)
  */
 function getEnrolledAgents(
-  manifest: { owner: { team: string }; participants: string[] },
+  manifest: { owner: { team: string } },
   agentTeams: Map<string, string | undefined>
 ): string[] {
   const enrolled = new Set<string>();
-
-  // Add explicit participants
-  for (const participantId of manifest.participants) {
-    enrolled.add(participantId);
-  }
-
-  // Add agents from owner team
   for (const [agentId, team] of agentTeams) {
     if (team === manifest.owner.team) {
       enrolled.add(agentId);
     }
   }
-
   return Array.from(enrolled).sort();
 }

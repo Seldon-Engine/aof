@@ -105,7 +105,6 @@ describe("OpenClaw adapter (thin-bridge, Phase 43)", () => {
       "aof_task_unsubscribe",
       "aof_project_create",
       "aof_project_list",
-      "aof_project_add_participant",
     ]);
 
     // HTTP routes preserved as IPC proxies (Open Q4), each registered with

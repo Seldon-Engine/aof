@@ -69,7 +69,6 @@ const projectCreateInputSchema = z.object({
   id: z.string(),
   title: z.string().optional(),
   type: z.enum(["swe", "ops", "research", "admin", "personal", "other"]).optional(),
-  participants: z.array(z.string()).optional(),
 });
 
 const projectListInputSchema = z.object({});
@@ -308,7 +307,7 @@ export async function handleAofTaskDepRemove(ctx: AofMcpContext, input: Record<s
 
 export async function handleAofProjectCreate(ctx: AofMcpContext, input: z.infer<typeof projectCreateInputSchema>) {
   const { createProject } = await import("../projects/create.js");
-  const result = await createProject(input.id, { vaultRoot: ctx.vaultRoot, title: input.title, type: input.type, participants: input.participants, template: true });
+  const result = await createProject(input.id, { vaultRoot: ctx.vaultRoot, title: input.title, type: input.type, template: true });
   return { projectId: result.projectId, projectRoot: result.projectRoot, directoriesCreated: result.directoriesCreated };
 }
 

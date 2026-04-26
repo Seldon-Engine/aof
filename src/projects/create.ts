@@ -23,7 +23,6 @@ export interface CreateProjectOptions {
     lead: string;
   };
   parentId?: string;
-  participants?: string[];
   template?: boolean;
 }
 
@@ -105,7 +104,6 @@ export async function createProject(
     type: opts.type ?? "other",
     owner: opts.owner ?? { team: "system", lead: "system" },
     parentId: opts.parentId,
-    participants: opts.participants,
   });
 
   await writeProjectManifest(projectRoot, manifest);
@@ -120,17 +118,11 @@ export async function createProject(
 
     const title = opts.title ?? id;
     const type = opts.type ?? "other";
-    const participantsList = manifest.participants.length > 0
-      ? manifest.participants.map(p => `- ${p}`).join("\n")
-      : "No participants assigned yet";
 
     const readme = `# ${title}
 
 **Type:** ${type}
 **Status:** active
-
-## Participants
-${participantsList}
 
 ## Tasks
 Tasks for this project live in \`tasks/\`.

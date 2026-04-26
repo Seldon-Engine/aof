@@ -165,7 +165,6 @@ function createInboxPlaceholder(projectsRoot: string): ProjectRecord {
       status: "active",
       type: "admin",
       owner: { team: "ops", lead: "system" },
-      participants: [],
       routing: { intake: { default: "Tasks/Backlog" }, mailboxes: { enabled: true } },
       memory: {
         tiers: { bronze: "cold", silver: "warm", gold: "warm" },

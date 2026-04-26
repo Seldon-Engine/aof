@@ -12,6 +12,7 @@ describe("ProjectManifest", () => {
         team: "swe",
         lead: "swe-pm",
       },
+      // Legacy `participants` field is silently dropped by Zod's default strip mode.
       participants: ["swe-backend", "swe-qa"],
     };
 
@@ -20,7 +21,7 @@ describe("ProjectManifest", () => {
     expect(result.title).toBe("Email Autopilot");
     expect(result.status).toBe("active");
     expect(result.type).toBe("swe");
-    expect(result.participants).toEqual(["swe-backend", "swe-qa"]);
+    expect(result).not.toHaveProperty("participants");
   });
 
   it("applies default values for optional fields", () => {
@@ -36,7 +37,6 @@ describe("ProjectManifest", () => {
 
     const result = ProjectManifest.parse(raw);
     expect(result.status).toBe("active");
-    expect(result.participants).toEqual([]);
     expect(result.routing.intake.default).toBe("Tasks/Backlog");
     expect(result.memory.tiers.bronze).toBe("cold");
     expect(result.memory.tiers.silver).toBe("warm");

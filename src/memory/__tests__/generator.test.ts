@@ -173,35 +173,9 @@ const makeProject = (id: string, overrides: Record<string, unknown>): ProjectRec
 };
 
 describe("generateMemoryConfigWithProjects", () => {
-  it("adds project warm paths for explicit participants", () => {
-    const chart = makeChartWithTeams({
-      memoryPools: {
-        hot: { path: "Resources/OpenClaw/_Core" },
-        warm: [],
-        cold: [],
-      },
-    });
-
-    const projects: ProjectRecord[] = [
-      makeProject("aof", {
-        owner: { team: "engineering", lead: "swe-backend" },
-        participants: ["researcher"],
-      }),
-    ];
-
-    const result = generateMemoryConfigWithProjects(chart, projects, { vaultRoot: "/vault" });
-
-    // researcher is participant
-    const researcherPaths = result.config.agents["researcher"].memorySearch.extraPaths;
-    expect(researcherPaths).toContain("/vault/Projects/aof/Artifacts/Silver");
-    expect(researcherPaths).toContain("/vault/Projects/aof/Artifacts/Gold");
-
-    // main is not enrolled
-    expect(result.config.agents["main"]?.memorySearch.extraPaths).not.toContain(
-      "/vault/Projects/aof/Artifacts/Silver"
-    );
-  });
-
+  // Project-participant enrollment was removed 2026-04-26 along with the
+  // project.participants field. Memory enrollment is now derived solely from
+  // owner.team membership; cross-team agents do not get warm paths.
   it("adds project warm paths for owner team members", () => {
     const chart = makeChartWithTeams({
       memoryPools: {
@@ -232,33 +206,6 @@ describe("generateMemoryConfigWithProjects", () => {
 
     // researcher is NOT in engineering team
     expect(result.config.agents["researcher"]?.memorySearch.extraPaths || []).not.toContain(
-      "/vault/Projects/aof/Artifacts/Silver"
-    );
-  });
-
-  it("combines enrollment via participant and team", () => {
-    const chart = makeChartWithTeams({
-      memoryPools: {
-        hot: { path: "Resources/OpenClaw/_Core" },
-        warm: [],
-        cold: [],
-      },
-    });
-
-    const projects: ProjectRecord[] = [
-      makeProject("aof", {
-        owner: { team: "engineering", lead: "swe-backend" },
-        participants: ["researcher"],
-      }),
-    ];
-
-    const result = generateMemoryConfigWithProjects(chart, projects, { vaultRoot: "/vault" });
-
-    // Both swe-backend (team) and researcher (participant) should be enrolled
-    expect(result.config.agents["swe-backend"].memorySearch.extraPaths).toContain(
-      "/vault/Projects/aof/Artifacts/Silver"
-    );
-    expect(result.config.agents["researcher"].memorySearch.extraPaths).toContain(
       "/vault/Projects/aof/Artifacts/Silver"
     );
   });

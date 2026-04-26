@@ -21,9 +21,6 @@ import { loadOrgChart } from "../org/loader.js";
 import { orgChartPath } from "../config/paths.js";
 
 export { executeAssignAction, loadProjectManifest } from "./assign-executor.js";
-import { loadProjectManifest } from "./assign-executor.js";
-import { writeProjectManifest } from "../projects/manifest.js";
-import { join } from "node:path";
 
 const log = createLogger("task-dispatcher");
 
@@ -207,50 +204,11 @@ export async function buildDispatchActions(
       }
     }
 
-    // PROJ-03 (relaxed 2026-04-26): if the targeted agent isn't yet listed in
-    // project.participants, auto-include them and proceed. Participants is an
-    // observability/audit list of "who has touched this project", not an auth
-    // gate — AOF prioritizes ergonomics over enforcement. Pre-relaxation, a
-    // missing participant produced a warn-level alert every poll cycle and the
-    // task sat in `ready` forever (TASK-2026-04-25-002 / opreto-design-system,
-    // 23h of alert spam). Auto-inclusion is self-healing: next poll sees the
-    // updated list and skips this branch.
-    const projectId = task.frontmatter.project;
-    if (projectId && targetAgent) {
-      const manifest = await loadProjectManifest(store, projectId);
-      if (
-        manifest?.participants &&
-        manifest.participants.length > 0 &&
-        !manifest.participants.includes(targetAgent)
-      ) {
-        manifest.participants.push(targetAgent);
-        const manifestRoot =
-          store.projectId && store.projectId === projectId
-            ? store.projectRoot
-            : join(store.projectRoot, "projects", projectId);
-        try {
-          await writeProjectManifest(manifestRoot, manifest);
-          log.info(
-            {
-              taskId: task.frontmatter.id,
-              projectId,
-              agent: targetAgent,
-              participants: manifest.participants,
-              op: "auto-include-participant",
-            },
-            "auto-included agent in project participants"
-          );
-        } catch (err) {
-          // Best-effort — proceed with dispatch even if manifest write fails.
-          // The check is informational, not load-bearing.
-          log.warn(
-            { err, projectId, agent: targetAgent, op: "auto-include-participant" },
-            "failed to update project manifest; proceeding with dispatch anyway"
-          );
-        }
-      }
-      // Empty / missing participants list = unrestricted access (preserved).
-    }
+    // PROJ-03 removed 2026-04-26: project.participants no longer exists.
+    // AOF is single-user multi-agent; an authorization gate at dispatch time
+    // produced no actionable signal (silent log spam) and the auto-include
+    // alternative made the field a passive audit list nobody consumed.
+    // Routing now flows directly from task.frontmatter to the executor.
 
     if (targetAgent) {
       actions.push({

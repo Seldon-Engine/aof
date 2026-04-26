@@ -22,7 +22,6 @@ export interface BuildProjectManifestOptions {
     team: string;
     lead: string;
   };
-  participants?: string[];
   parentId?: string;
   routing?: ProjectManifest["routing"];
   memory?: ProjectManifest["memory"];
@@ -52,7 +51,6 @@ export function buildProjectManifest(
       status: opts.status ?? "active",
       type: opts.type ?? "admin",
       owner: opts.owner ?? { team: "system", lead: "system" },
-      participants: opts.participants ?? [],
       ...(opts.parentId && { parentId: opts.parentId }),
       routing: opts.routing ?? {
         intake: { default: "Tasks/Backlog" },
@@ -80,7 +78,6 @@ export function buildProjectManifest(
     status: opts.status ?? "active",
     type: opts.type,
     owner: opts.owner,
-    participants: opts.participants ?? [],
     ...(opts.parentId && { parentId: opts.parentId }),
     routing: opts.routing ?? {
       intake: { default: "Tasks/Backlog" },

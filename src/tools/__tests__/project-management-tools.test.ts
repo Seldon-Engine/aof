@@ -1,21 +1,20 @@
 /**
- * Tests for project-management tools (aof_project_create / _list /
- * _add_participant). Validates schema shapes and handler behaviour against a
- * real `vaultRoot` on tmp disk.
+ * Tests for project-management tools (aof_project_create / aof_project_list).
+ *
+ * `aof_project_add_participant` was removed 2026-04-26 along with the
+ * project.participants field — its corresponding describe block is gone.
  */
 
-import { mkdtemp, rm, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { parse as parseYaml } from "yaml";
 import {
   projectCreateSchema,
   projectListSchema,
-  projectAddParticipantSchema,
   aofProjectCreate,
   aofProjectList,
-  aofProjectAddParticipant,
 } from "../project-management-tools.js";
 import type { ToolContext } from "../types.js";
 import { FilesystemTaskStore } from "../../store/task-store.js";
@@ -68,15 +67,6 @@ describe("project-management-tools", () => {
 
     it("projectListSchema accepts empty object", () => {
       expect(projectListSchema.parse({})).toEqual({});
-    });
-
-    it("projectAddParticipantSchema requires project + agent", () => {
-      expect(() => projectAddParticipantSchema.parse({})).toThrow();
-      expect(() => projectAddParticipantSchema.parse({ project: "a" })).toThrow();
-      expect(() => projectAddParticipantSchema.parse({ agent: "a" })).toThrow();
-      expect(
-        projectAddParticipantSchema.parse({ project: "a", agent: "b" }),
-      ).toEqual({ project: "a", agent: "b" });
     });
   });
 
@@ -137,65 +127,4 @@ describe("project-management-tools", () => {
     });
   });
 
-  describe("aofProjectAddParticipant", () => {
-    async function seedProject(
-      ctx: ToolContext & { vaultRoot: string },
-      id: string,
-    ): Promise<string> {
-      const projectRoot = join(ctx.vaultRoot, "Projects", id);
-      await mkdir(projectRoot, { recursive: true });
-      await writeFile(
-        join(projectRoot, "project.yaml"),
-        stringifyYaml({
-          id,
-          title: id,
-          status: "active",
-          type: "ops",
-          owner: { team: "team-x", lead: "lead-x" },
-          participants: [],
-          routing: {},
-          memory: {},
-          links: {},
-        }),
-        "utf-8",
-      );
-      return projectRoot;
-    }
-
-    it("appends a new participant to the manifest", async () => {
-      const ctx = await buildCtx(tmpDir);
-      const projectRoot = await seedProject(ctx, "gamma");
-
-      const result = (await aofProjectAddParticipant(ctx, {
-        project: "gamma",
-        agent: "agent-a",
-      })) as { success: boolean; participants: string[] };
-
-      expect(result.success).toBe(true);
-      expect(result.participants).toEqual(["agent-a"]);
-
-      const manifest = parseYaml(
-        await readFile(join(projectRoot, "project.yaml"), "utf-8"),
-      );
-      expect(manifest.participants).toEqual(["agent-a"]);
-    });
-
-    it("is idempotent when participant already present", async () => {
-      const ctx = await buildCtx(tmpDir);
-      await seedProject(ctx, "delta");
-
-      await aofProjectAddParticipant(ctx, {
-        project: "delta",
-        agent: "agent-b",
-      });
-      const result = (await aofProjectAddParticipant(ctx, {
-        project: "delta",
-        agent: "agent-b",
-      })) as { success: boolean; message?: string; participants: string[] };
-
-      expect(result.success).toBe(true);
-      expect(result.message).toMatch(/already/i);
-      expect(result.participants).toEqual(["agent-b"]);
-    });
-  });
 });

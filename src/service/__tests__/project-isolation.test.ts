@@ -34,12 +34,10 @@ describe("Project Isolation -- End-to-End", { timeout: 30_000 }, () => {
       vaultRoot,
       title: "Test Alpha Project",
       type: "swe",
-      participants: ["agent-a", "agent-b"],
       template: true,
     });
 
     expect(result.projectId).toBe("test-alpha");
-    expect(result.manifest.participants).toEqual(["agent-a", "agent-b"]);
     expect(existsSync(join(result.projectRoot, "tasks"))).toBe(true);
     expect(existsSync(join(result.projectRoot, "memory"))).toBe(true);
     expect(existsSync(join(result.projectRoot, "README.md"))).toBe(true);
@@ -48,8 +46,6 @@ describe("Project Isolation -- End-to-End", { timeout: 30_000 }, () => {
     // Verify README content
     const readme = readFileSync(join(result.projectRoot, "README.md"), "utf-8");
     expect(readme).toContain("Test Alpha Project");
-    expect(readme).toContain("agent-a");
-    expect(readme).toContain("agent-b");
   });
 
   it("creates a second project for isolation testing", async () => {
@@ -59,12 +55,10 @@ describe("Project Isolation -- End-to-End", { timeout: 30_000 }, () => {
       vaultRoot,
       title: "Test Beta Project",
       type: "research",
-      participants: ["agent-c"],
       template: true,
     });
 
     expect(result.projectId).toBe("test-beta");
-    expect(result.manifest.participants).toEqual(["agent-c"]);
   });
 
   // --- PROJ-05: Project list ---
@@ -144,24 +138,21 @@ describe("Project Isolation -- End-to-End", { timeout: 30_000 }, () => {
     expect(assignActions.some(a => a.agent === "agent-a")).toBe(true);
   });
 
-  // --- PROJ-03: Participant auto-inclusion (relaxed 2026-04-26) ---
-  // Pre-relaxation, a task targeting an agent missing from project.participants
-  // produced an `alert` action and the task sat in `ready` indefinitely. AOF
-  // prioritizes ergonomics over enforcement, so the dispatcher now adds the
-  // agent to participants and proceeds with `assign`.
-  it("dispatcher auto-includes non-participant agent and proceeds with assign", async () => {
+  // PROJ-03 was removed 2026-04-26 along with the project.participants field.
+  // Dispatch routing now flows directly from task.frontmatter to the executor
+  // with no participant gate. Any agent can take any project task; cross-team
+  // task assignments work without prior project setup.
+  it("dispatcher routes any agent to any project task with no participant gate", async () => {
     const { buildDispatchActions } = await import("../../dispatch/task-dispatcher.js");
     const { FilesystemTaskStore } = await import("../../store/task-store.js");
-    const { loadProjectManifest } = await import("../../projects/manifest.js");
 
     const alphaRoot = join(vaultRoot, "Projects", "test-alpha");
     const store = new FilesystemTaskStore(alphaRoot, { projectId: "test-alpha" });
     await store.init();
 
-    // Create a ready task assigned to agent-c (NOT in test-alpha's participants).
     const task = await store.create({
-      title: "Dispatch to non-participant",
-      body: "Should auto-include agent-c",
+      title: "Dispatch to arbitrary agent",
+      body: "Should assign without any participant check",
       routing: { agent: "agent-c" },
       createdBy: "test",
     });
@@ -171,7 +162,7 @@ describe("Project Isolation -- End-to-End", { timeout: 30_000 }, () => {
     const allTasks = await store.list();
 
     const actions = await buildDispatchActions(
-      readyTasks.filter(t => t.frontmatter.title === "Dispatch to non-participant"),
+      readyTasks.filter(t => t.frontmatter.title === "Dispatch to arbitrary agent"),
       allTasks,
       store,
       { dryRun: false, defaultLeaseTtlMs: 30000 },
@@ -186,21 +177,17 @@ describe("Project Isolation -- End-to-End", { timeout: 30_000 }, () => {
       new Map(),
     );
 
-    // No alert for participant mismatch — task gets assigned.
-    const alertActions = actions.filter(
+    // No participant-mismatch alert can ever fire now.
+    const participantAlerts = actions.filter(
       a => a.type === "alert" && a.taskId === task.frontmatter.id && a.reason?.includes("participant")
     );
-    expect(alertActions.length).toBe(0);
+    expect(participantAlerts.length).toBe(0);
 
     const assignActions = actions.filter(
       a => a.type === "assign" && a.taskId === task.frontmatter.id
     );
     expect(assignActions.length).toBe(1);
     expect(assignActions[0]!.agent).toBe("agent-c");
-
-    // Side effect: agent-c is now persisted in the project manifest.
-    const manifest = await loadProjectManifest(store, "test-alpha");
-    expect(manifest?.participants).toContain("agent-c");
   });
 
   // --- PROJ-04: Memory isolation ---
