@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Phase 999.3 context gathered
-last_updated: "2026-04-25T18:11:22.300Z"
+stopped_at: Phase 999.3 rescoped to 1 narrow plan (was 7) — ready to execute
+last_updated: "2026-04-25T19:00:00.000Z"
 progress:
   total_phases: 8
   completed_phases: 4
-  total_plans: 39
+  total_plans: 33
   completed_plans: 27
-  percent: 69
+  percent: 82
 ---
 
 # Project State
@@ -70,6 +70,6 @@ None. All v1.10 blockers resolved.
 ## Session Continuity
 
 Last session: --stopped-at
-Stopped at: Phase 999.3 context gathered
+Stopped at: Phase 999.3 rescoped to 1 narrow plan (was 7) — ready to execute
 
-**Planned Phase:** 999.3 (scheduler-action-preconditions-session-end-dedupe) — 7 plans — 2026-04-25T18:11:22.295Z
+**Planned Phase:** 999.3 (scheduler-action-preconditions-session-end-dedupe) — 1 plan (rescoped 2026-04-25 from 7 plans; original envelope design rejected as preventative engineering for races we have not seen — see 999.3-CONTEXT.md "Rescope Note"). Narrow fix: two precondition guards at the top of handleStaleHeartbeat. Ships v1.18.0 patch. — 2026-04-25T19:00:00.000Z

@@ -227,30 +227,26 @@ enqueueSystemEvent(text, {
 
 ## Backlog
 
-### Phase 999.3: Scheduler action pre-condition envelope — session-end handler dedupe (BACKLOG)
+### Phase 999.3: Stale-heartbeat handler precondition guard (BACKLOG)
 
-**Goal:** Add an `expected` pre-condition envelope to `SchedulerAction` so every state-mutating handler re-verifies its dispatch-time assumptions on entry and no-ops (with a log record) if the world has moved. Eliminates the race where two independent handlers respond to the same underlying session-end signal.
+**Goal:** Add two precondition guards at the top of `handleStaleHeartbeat` so the handler no-ops when its dispatch-time premise no longer holds — status is no longer `in-progress`, or `action.agent` no longer matches the task's current lease agent. Eliminates the wasted-action shape that contributed to the 2026-04-15 race.
 
-**Why:** Production incident on 2026-04-15 (TASK-2026-04-15-010) surfaced concurrent transitions from two unrelated handlers — `completion-enforcement` (assign-helpers.ts, reacting to Promise.race timeout) and `stale-heartbeat` (recovery-handlers.ts, reacting to heartbeat TTL). Both observed the task at `in-progress` and called `store.transition(...)` within the same event-loop tick, leaving the task file in two status directories. Fix A (v1.14.8 per-task mutex) contains the filesystem outcome by serializing the rename; Fix C addresses the design root cause so handlers don't execute at all when their premise is stale.
+**Why:** Production incident on 2026-04-15 (TASK-2026-04-15-010) surfaced concurrent transitions from two unrelated handlers — `completion-enforcement` (assign-helpers.ts, reacting to Promise.race timeout) and `stale-heartbeat` (recovery-handlers.ts, reacting to heartbeat TTL). Both observed the task at `in-progress` and called `store.transition(...)` within the same event-loop tick. Fix A (v1.14.8 per-task transition mutex) contains the filesystem outcome by serializing the rename; this phase stops the second handler from acting on stale intent at all.
 
-**Scope (medium):**
-- Phase 1 (narrow — can ship standalone): `handleStaleHeartbeat` re-reads task status on entry and skips when status is no longer `in-progress` or lease agent differs. Single-handler patch with targeted regression test. ~20 LOC handler + ~50 LOC test. Safe to land as v1.14.10.
-- Phase 2 (general): Add `action.expected: { status?, leaseAgent?, lastTransitionAtBefore? }` to `SchedulerAction`. Populate in `scheduler.ts` when queuing actions. Each of the four state-mutating handlers (`handleStaleHeartbeat`, `handleExpireLease`, `handleAssign`, `handleSlaViolation`/`handlePromote`) early-returns on mismatch with a structured skip log. Backwards-compatible type change (all fields optional). ~100 LOC + ~200 LOC tests. Ships as v1.15.0 minor.
-- Phase 3 (deferred): Action-level idempotency tokens `actionId = hash(type, taskId, lastTransitionAt)` + per-task ring buffer of recently-completed actions. Guards against handler retries during scheduler crashes. Only valuable once persistent action queues exist; premature today.
+**Rescoped 2026-04-25:** Originally locked at 7 plans / 4 waves spanning a `SchedulerAction.expected` envelope across all five state-mutating handlers (~120 LOC prod + ~250 LOC test). User pushback on complexity → re-evaluation: production has shown the race ONCE in ONE handler. The narrow ~17 LOC fix in `handleStaleHeartbeat` matches the evidence; the broader generalization is preventative engineering deferred until production shows the same race shape elsewhere. Original 7-plan scope recoverable from git history up to commit `2e6cc06`.
+
+**Scope (small):**
+- Single-handler patch in `src/dispatch/recovery-handlers.ts`. Two `if`-guards at the function top, immediately after the existing `if (!staleTask)` early-return. Each returns `{ executed: false, failed: false }` and emits a `log.info` via the existing `recovery-handlers` pino logger — no new EventLogger event type, no new helper module, no new schema values.
+- One new bug-NNN regression test (`bug-2026-04-15-stale-heartbeat-precondition.test.ts`) using `createTestHarness`.
+- Two unit tests appended to the existing `recovery-handlers.test.ts` (one per precondition dimension).
 
 **Depends on:** Fix A (v1.14.8) — already shipped. Independent of Phase 42 / 999.2.
 
-**Requirements:** D-999.3-SCOPE, D-999.3-RELEASE, D-999.3-ENVELOPE, D-999.3-BACKWARDS-COMPAT, D-999.3-LOCK, D-999.3-MISMATCH-RETURN, D-999.3-OBSERVABILITY, D-999.3-SCHEDULER-POPULATION, D-999.3-MATCH-FN, D-999.3-TEST-MATRIX (locked in 999.3-CONTEXT.md, 2026-04-25)
-**Plans:** 7 plans
-- [ ] 999.3-01-PLAN.md — Wave 0 schema + helper + Wave 0 RED tests (EventType extension, SchedulerAction.expected?, precondition.ts module, lock-reentrancy proof)
-- [ ] 999.3-02-PLAN.md — Wave 1 handleStaleHeartbeat precondition wrap + bug-2026-04-15 incident regression
-- [ ] 999.3-03-PLAN.md — Wave 1 handleExpireLease (inside existing wrap) + handlePromote (new wrap) precondition gates
-- [ ] 999.3-04-PLAN.md — Wave 1 executeAssignAction precondition gate (inside existing wrap; handleAssign boundary untouched to avoid double-wrap deadlock per RESEARCH §V1/V3 + R1)
-- [ ] 999.3-05-PLAN.md — Wave 1 handleSlaViolation precondition wrap (handleAlert untouched per RESEARCH §V2)
-- [ ] 999.3-06-PLAN.md — Wave 2 scheduler-side population at all 5 in-scope sites (hop-timeout out of scope per V2)
-- [ ] 999.3-07-PLAN.md — Wave 3 backwards-compat sweep + Fix A regression preservation + L13 integration sweep + UAT checkpoint (v1.18.0 release)
+**Requirements:** D-999.3-NARROW-SCOPE, D-999.3-PRECONDITION-GUARD, D-999.3-OBSERVABILITY-VIA-LOG, D-999.3-LEASEAGENT-NULLABLE-COMPARE, D-999.3-RACE-WINDOW-TRADEOFF, D-999.3-RELEASE (locked in 999.3-CONTEXT.md, rescoped 2026-04-25)
+**Plans:** 1 plan
+- [ ] 999.3-01-PLAN.md — Two precondition guards on `handleStaleHeartbeat` + bug-2026-04-15 incident regression test + per-dimension unit-test coverage. Ships as v1.18.0 patch.
 
-**Reference:** Full design doc at `.planning/fix-c-scheduler-ownership.md` (commit 693379a). Locked decisions in `.planning/phases/999.3-scheduler-action-preconditions-session-end-dedupe/999.3-CONTEXT.md`. Research at `999.3-RESEARCH.md`. Validation strategy at `999.3-VALIDATION.md`.
+**Reference:** Original design doc `.planning/fix-c-scheduler-ownership.md` (commit 693379a) — narrow Phase 1 only; Phases 2 and 3 of the doc are deferred. Locked decisions and rescope rationale in `.planning/phases/999.3-scheduler-action-preconditions-session-end-dedupe/999.3-CONTEXT.md`.
 
 ### Phase 999.4: Opt-in project-wide completion subscription (BACKLOG)
 
