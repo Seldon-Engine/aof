@@ -36,6 +36,7 @@ import { registerViewCommands } from "./commands/views.js";
 import { registerSystemCommands } from "./commands/system.js";
 import { registerSetupCommand } from "./commands/setup.js";
 import { registerTraceCommand } from "./commands/trace.js";
+import { registerArtifactCommands } from "./commands/artifacts.js";
 import { DEFAULT_CODE_DIR, normalizePath } from "../config/paths.js";
 import { getConfig } from "../config/registry.js";
 
@@ -209,6 +210,9 @@ registerOrgCommands(program);
 
 // --- views ---
 registerViewCommands(program);
+
+// --- artifacts ---
+registerArtifactCommands(program);
 
 // --- memory ---
 registerMemoryCommands(program);
