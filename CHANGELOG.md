@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.17.4](https://github.com/d0labs/aof/compare/v1.17.3...v1.17.4) (2026-04-26)
+
+### Features
+
+* **TASK-2026-04-26-LvehGFbK:** implement artifact lifecycle v1 ([9bad57f](https://github.com/d0labs/aof/commit/9bad57faf329390185407c3f2d00969a528c8567))
+
+### Refactor
+
+* remove project.participants — dead config, no consumer ([6bd2b5e](https://github.com/d0labs/aof/commit/6bd2b5eb55cc7c704ab110888ced04be56b0c251))
+
 ## [1.17.3](https://github.com/d0labs/aof/compare/v1.17.2...v1.17.3) (2026-04-26)
 
 ### Bug Fixes

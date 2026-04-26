@@ -1,7 +1,7 @@
 {
   "id": "aof",
   "name": "AOF — Agentic Ops Fabric",
-  "version": "1.17.3",
+  "version": "1.17.4",
   "kind": "memory",
   "description": "Deterministic task orchestration layer for multi-agent systems. Provides filesystem-first kanban, context-aware dispatch, org chart governance, and real-time views.",
   "main": "dist/plugin.js",
