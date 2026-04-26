@@ -97,18 +97,17 @@ describe("TaskStore", () => {
     expect(loaded!.body).toBe("Do something");
   });
 
-  it("generates TASK-YYYY-MM-DD-NNN ids", async () => {
+  it("generates TASK-YYYY-MM-DD-XXXXXXXX ids (8-char nanoid suffix)", async () => {
     const task1 = await store.create({ title: "Task 1", createdBy: "main" });
     const task2 = await store.create({ title: "Task 2", createdBy: "main" });
     const today = new Date().toISOString().slice(0, 10);
-    const regex = new RegExp(`^TASK-${today}-\\d{3}$`);
+    // 8-char suffix from a visually-unambiguous alphabet (no 0/O/1/I/l).
+    const regex = new RegExp(`^TASK-${today}-[23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]{8}$`);
 
     expect(task1.frontmatter.id).toMatch(regex);
     expect(task2.frontmatter.id).toMatch(regex);
-
-    const num1 = parseInt(task1.frontmatter.id.slice(-3), 10);
-    const num2 = parseInt(task2.frontmatter.id.slice(-3), 10);
-    expect(num2).toBe(num1 + 1);
+    // Each call must produce a fresh suffix (collision-resistance smoke test).
+    expect(task1.frontmatter.id).not.toBe(task2.frontmatter.id);
   });
 
   it("allocates unique task ids for concurrent creates", async () => {

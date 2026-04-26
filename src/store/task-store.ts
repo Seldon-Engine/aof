@@ -12,8 +12,14 @@
 import { readFile, writeFile, readdir, mkdir, rename, rm, stat } from "node:fs/promises";
 import { join, resolve, basename } from "node:path";
 import writeFileAtomic from "write-file-atomic";
+import { customAlphabet } from "nanoid";
 import { createLogger } from "../logging/index.js";
 import { TaskFrontmatter, Task, isValidTransition } from "../schemas/task.js";
+
+// Visually-unambiguous alphabet (drops 0/O, 1/I/l) — 56 chars × 8 positions ≈ 46 bits.
+// At 1M IDs/day, P(collision within a day) ≈ 7×10⁻⁹.
+// Format: TASK-YYYY-MM-DD-XXXXXXXX. Date prefix preserved for human triage and grep.
+const generateTaskSuffix = customAlphabet("23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz", 8);
 
 const storeLog = createLogger("store");
 import type { TaskStatus } from "../schemas/task.js";
@@ -116,33 +122,16 @@ export class FilesystemTaskStore implements ITaskStore {
     this.logger = opts.logger;
   }
 
-  /** Compute the next TASK-YYYY-MM-DD-NNN identifier. */
-  private async nextTaskId(now: Date): Promise<string> {
-    const date = formatTaskDate(now);
-    const prefix = `TASK-${date}-`;
-    let max = 0;
-
-    for (const status of STATUS_DIRS) {
-      const dir = this.statusDir(status);
-      let entries: string[];
-      try {
-        entries = await readdir(dir);
-      } catch {
-        continue;
-      }
-
-      for (const entry of entries) {
-        if (!entry.startsWith(prefix) || !entry.endsWith(".md")) continue;
-        const suffix = entry.slice(prefix.length, prefix.length + 3);
-        const value = parseInt(suffix, 10);
-        if (!Number.isNaN(value)) {
-          max = Math.max(max, value);
-        }
-      }
-    }
-
-    const next = String(max + 1).padStart(3, "0");
-    return `${prefix}${next}`;
+  /**
+   * Compute the next TASK-YYYY-MM-DD-XXXXXXXX identifier.
+   *
+   * The 8-char nanoid suffix replaces the prior per-store 3-digit counter,
+   * which collided across project-scoped stores (each store enumerated only
+   * its own status dirs, so two stores both minted -001 on the same day).
+   * Date prefix preserved for grep/triage affordance.
+   */
+  private nextTaskId(now: Date): string {
+    return `TASK-${formatTaskDate(now)}-${generateTaskSuffix()}`;
   }
 
   /** Ensure all status directories exist, then reconcile any on-disk drift. */
@@ -365,7 +354,7 @@ export class FilesystemTaskStore implements ITaskStore {
     for (let attempt = 0; attempt < 1000; attempt++) {
       const now = new Date();
       const nowIso = now.toISOString();
-      const id = await this.nextTaskId(now);
+      const id = this.nextTaskId(now);
       const frontmatter = TaskFrontmatter.parse({
         schemaVersion: 1,
         id,
