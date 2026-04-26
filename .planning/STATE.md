@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: unknown
-stopped_at: Phase 999.3 rescoped to 1 narrow plan (was 7) — ready to execute
-last_updated: "2026-04-25T19:00:00.000Z"
+status: phase_complete
+stopped_at: Phase 999.3 complete — ready for v1.18.0 patch release
+last_updated: "2026-04-25T21:15:00.000Z"
 progress:
   total_phases: 8
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 33
-  completed_plans: 27
-  percent: 82
+  completed_plans: 28
+  percent: 85
 ---
 
 # Project State
@@ -70,6 +70,6 @@ None. All v1.10 blockers resolved.
 ## Session Continuity
 
 Last session: --stopped-at
-Stopped at: Phase 999.3 rescoped to 1 narrow plan (was 7) — ready to execute
+Stopped at: Phase 999.3 complete — narrow handleStaleHeartbeat precondition guard shipped, ready for v1.18.0 patch release
 
-**Planned Phase:** 999.3 (scheduler-action-preconditions-session-end-dedupe) — 1 plan (rescoped 2026-04-25 from 7 plans; original envelope design rejected as preventative engineering for races we have not seen — see 999.3-CONTEXT.md "Rescope Note"). Narrow fix: two precondition guards at the top of handleStaleHeartbeat. Ships v1.18.0 patch. — 2026-04-25T19:00:00.000Z
+**Completed Phase:** 999.3 (scheduler-action-preconditions-session-end-dedupe) — 1 plan, executed 2026-04-25. 24 LOC source + 192 LOC test across 4 atomic commits (RED → GREEN → coverage → SUMMARY). Bug regression `bug-2026-04-15-stale-heartbeat-precondition.test.ts` GREEN; Fix A regression preserved; full unit suite 3011/3014. UAT skipped per user direction (regression test plus existing handler/Fix A coverage carries verification load). — 2026-04-25T21:15:00.000Z
