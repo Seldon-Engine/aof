@@ -35,6 +35,30 @@ export async function handleStaleHeartbeat(
     return { executed: false, failed: false };
   }
 
+  // Phase 999.3 — precondition guard for the 2026-04-15 race (TASK-2026-04-15-010).
+  // The action was queued because the task was in-progress with an expired heartbeat.
+  // If another path (e.g. assign-helpers' completion enforcement) already moved it,
+  // skip — the world has changed and our recovery would be acting on stale intent.
+  if (staleTask.frontmatter.status !== "in-progress") {
+    log.info(
+      { taskId: action.taskId, actualStatus: staleTask.frontmatter.status, op: "staleHeartbeat" },
+      "task no longer in-progress — another path acted; skipping stale heartbeat"
+    );
+    return { executed: false, failed: false };
+  }
+  if (action.agent && staleTask.frontmatter.lease?.agent !== action.agent) {
+    log.info(
+      {
+        taskId: action.taskId,
+        expectedAgent: action.agent,
+        actualAgent: staleTask.frontmatter.lease?.agent ?? null,
+        op: "staleHeartbeat",
+      },
+      "lease re-assigned to different agent; skipping stale heartbeat"
+    );
+    return { executed: false, failed: false };
+  }
+
   // Read correlation ID from task metadata for event logging
   const staleCorrelationId = staleTask.frontmatter.metadata?.correlationId as string | undefined;
 
