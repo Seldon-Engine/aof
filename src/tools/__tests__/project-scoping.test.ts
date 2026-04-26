@@ -136,7 +136,10 @@ describe("Project scoping", () => {
       expect(assignActions[0]!.agent).toBe("agent-a");
     });
 
-    it("blocks agent NOT in the participants list with alert", async () => {
+    it("auto-includes agent NOT in the participants list and proceeds with assign (relaxed 2026-04-26)", async () => {
+      // Pre-relaxation: missing-participant produced an alert and the task sat in ready.
+      // Now: missing-participant triggers an in-place manifest update and proceeds.
+      // Participants is observability/audit, not auth.
       await writeProjectManifest(tmpDir, {
         id: "test-project",
         title: "Test Project",
@@ -150,7 +153,7 @@ describe("Project scoping", () => {
       });
 
       const task = await store.create({
-        title: "Blocked agent task",
+        title: "Auto-include agent task",
         createdBy: "test",
         routing: { agent: "agent-c" },
       });
@@ -169,15 +172,21 @@ describe("Project scoping", () => {
         new Map(),
       );
 
-      const alertActions = actions.filter(a => a.type === "alert");
-      expect(alertActions).toHaveLength(1);
-      expect(alertActions[0]!.reason).toContain("agent-c");
-      expect(alertActions[0]!.reason).toContain("not a participant");
-      expect(alertActions[0]!.reason).toContain("test-project");
+      // No participant-mismatch alert anymore.
+      const participantAlerts = actions.filter(
+        a => a.type === "alert" && a.reason?.includes("not a participant")
+      );
+      expect(participantAlerts).toHaveLength(0);
 
-      // Verify NO assign action was created
+      // Assign action emitted as if agent-c had been listed all along.
       const assignActions = actions.filter(a => a.type === "assign");
-      expect(assignActions).toHaveLength(0);
+      expect(assignActions).toHaveLength(1);
+      expect(assignActions[0]!.agent).toBe("agent-c");
+
+      // Manifest is updated on disk so subsequent polls see the agent immediately.
+      const { loadProjectManifest } = await import("../../projects/manifest.js");
+      const manifest = await loadProjectManifest(store, "test-project");
+      expect(manifest?.participants).toEqual(["agent-a", "agent-b", "agent-c"]);
     });
 
     it("allows any agent when participants list is empty (unrestricted)", async () => {
