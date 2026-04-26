@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.17.2](https://github.com/d0labs/aof/compare/v1.17.1...v1.17.2) (2026-04-26)
+
+### Features
+
+* **999.3-01:** guard handleStaleHeartbeat against stale-status + lease-reassignment races ([54c7b04](https://github.com/d0labs/aof/commit/54c7b04268a5df3c8824118817cc83e3b0ae10b8))
+
+### Tests
+
+* **999.3-01:** per-precondition coverage for handleStaleHeartbeat guards ([a740adb](https://github.com/d0labs/aof/commit/a740adb814cec5befeb301fd29b548fb0138b1fa))
+* **999.3-01:** RED stale_heartbeat precondition incident regression ([c93f6ea](https://github.com/d0labs/aof/commit/c93f6ea601f9a4369c28ffffca6039436b712684))
+
 ## [1.17.1](https://github.com/d0labs/aof/compare/v1.17.0...v1.17.1) (2026-04-25)
 
 ### Features
