@@ -161,4 +161,64 @@ describe("handleStaleHeartbeat", () => {
     const result = await handleStaleHeartbeat(makeAction(), store, logger, config);
     expect(result.failed).toBe(false);
   });
+
+  // Phase 999.3 — precondition guards (TASK-2026-04-15-010 race shape).
+  it("skips when status is no longer in-progress (precondition guard)", async () => {
+    const store = makeStore({
+      frontmatter: {
+        id: "task-1",
+        title: "Test",
+        status: "blocked", // race winner already moved it
+        createdBy: "test",
+        createdAt: new Date().toISOString(),
+        dependsOn: [],
+        metadata: {},
+      },
+      body: "",
+    });
+    const logger = makeLogger();
+    const config: SchedulerConfig = { dataDir: "/tmp", dryRun: false, defaultLeaseTtlMs: 60000 };
+
+    const result = await handleStaleHeartbeat(makeAction(), store, logger, config);
+
+    expect(result).toEqual({ executed: false, failed: false });
+    expect(store.transition).not.toHaveBeenCalled();
+    expect(readRunResult).not.toHaveBeenCalled();
+  });
+
+  it("skips when lease was reassigned to a different agent (precondition guard)", async () => {
+    const store = makeStore({
+      frontmatter: {
+        id: "task-1",
+        title: "Test",
+        status: "in-progress",
+        createdBy: "test",
+        createdAt: new Date().toISOString(),
+        dependsOn: [],
+        lease: {
+          agent: "agent-2", // currently held by agent-2
+          acquiredAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          renewCount: 0,
+        },
+        metadata: {},
+      },
+      body: "",
+    });
+    const logger = makeLogger();
+    const config: SchedulerConfig = { dataDir: "/tmp", dryRun: false, defaultLeaseTtlMs: 60000 };
+    const action: SchedulerAction = {
+      type: "stale_heartbeat",
+      taskId: "task-1",
+      taskTitle: "Test",
+      agent: "agent-1", // queued for agent-1
+      reason: "stale heartbeat",
+    };
+
+    const result = await handleStaleHeartbeat(action, store, logger, config);
+
+    expect(result).toEqual({ executed: false, failed: false });
+    expect(store.transition).not.toHaveBeenCalled();
+    expect(readRunResult).not.toHaveBeenCalled();
+  });
 });
