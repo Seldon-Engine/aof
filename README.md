@@ -67,14 +67,13 @@ See the **[Getting Started Guide](docs/guide/getting-started.md)** for a complet
 - **[Getting Started](docs/guide/getting-started.md)** - Install, configure, and orchestrate your first agent team
 - **[Configuration Reference](docs/guide/configuration.md)** - Org chart schema, AOF config, OpenClaw plugin wiring
 - **[CLI Reference](docs/guide/cli-reference.md)** - Complete command reference (auto-generated)
-- **[Upgrading](UPGRADING.md)** - Version-to-version upgrade notes (v1.15 notes on the daemon being mandatory)
-- **[Full User Guide](docs/README.md)** - All user-facing docs
+- **[Upgrading](UPGRADING.md)** - Migration notes through v1.15 (daemon-mandatory transition); newer releases are documented in their GitHub release notes
+- **[Documentation Index](docs/README.md)** - Full user and developer documentation
 
 ### For Contributors
 
 - **[Architecture Overview](docs/dev/architecture.md)** - System diagram, subsystem descriptions, key interfaces
 - **[Dev Workflow](docs/dev/dev-workflow.md)** - Development setup and fast-feedback loop
-- **[Full Developer Guide](docs/README.md)** - All contributor and design docs
 
 ---
 
