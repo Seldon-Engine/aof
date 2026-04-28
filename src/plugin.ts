@@ -50,6 +50,32 @@ const plugin = {
   name: "AOF — Agentic Ops Fabric",
   description: "Deterministic task orchestration for multi-agent systems",
 
+  /**
+   * Config-reload policy. Tells OpenClaw which AOF config-key prefixes
+   * mean what when the gateway sees a config change (handled by
+   * `~/Projects/openclaw/src/gateway/config-reload-plan.ts` —
+   * `pluginReloadRules` aggregates each plugin's `restartPrefixes` /
+   * `hotPrefixes` / `noopPrefixes` into the gateway's reload decision
+   * tree). Without a `reload` block, OpenClaw warns
+   * (`~/Projects/openclaw/src/plugins/registry.ts` empty-prefixes
+   * branch) and falls back to the conservative default: any change
+   * triggers a full restart.
+   *
+   * Every AOF plugin-config key is consumed at register time and
+   * forwarded to the daemon over IPC. Nothing is re-read at runtime,
+   * so changes only take effect after a gateway restart — meaning
+   * `restartPrefixes` is the correct kind for the entire AOF config
+   * subtree. The legacy path AOF uses to read its own config is
+   * `plugins.entries.aof.config` (see `resolvePluginConfig` in this
+   * file), so that's the prefix we declare. Hot/noop prefixes are
+   * intentionally empty — there is no key AOF can hot-apply today.
+   */
+  reload: {
+    restartPrefixes: ["plugins.entries.aof.config"],
+    hotPrefixes: [],
+    noopPrefixes: [],
+  },
+
   register(api: OpenClawApi): void {
     const config = resolvePluginConfig(api);
     const dataDir = normalizeDataDir(config.dataDir);

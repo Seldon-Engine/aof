@@ -48,6 +48,25 @@ export function registerAofPlugin(
   opts: AOFPluginOptions,
 ): { mode: "thin-bridge"; daemonSocketPath: string } {
   const socketPath = daemonSocketPath(opts.dataDir);
+
+  // Registration-mode guard. OpenClaw's plugin registry
+  // (`~/Projects/openclaw/src/plugins/registry.ts`) only attaches
+  // `registerTool`, `registerService`, `registerHook`, etc. to the
+  // api object when `registrationMode === "full"`. In any other
+  // mode (`setup-only`, `setup-runtime`, `cli-metadata`) those
+  // handlers are omitted, and calling them would throw. None of the
+  // AOF plugin's surface — IPC selfCheck, event hook wiring, tool
+  // registration, service registration — makes sense without a live
+  // gateway runtime, so the right behavior is to early-return.
+  // Treat `undefined` as "full" so older OpenClaw versions and
+  // minimal test mocks keep working.
+  if (api.registrationMode !== undefined && api.registrationMode !== "full") {
+    api.logger?.info?.(
+      `[AOF] Plugin registration skipped (registrationMode=${api.registrationMode}); no side effects.`,
+    );
+    return { mode: "thin-bridge", daemonSocketPath: socketPath };
+  }
+
   const client = opts.daemonIpcClient ?? ensureDaemonIpcClient({ socketPath });
   const invocationContextStore =
     opts.invocationContextStore ?? new OpenClawToolInvocationContextStore();

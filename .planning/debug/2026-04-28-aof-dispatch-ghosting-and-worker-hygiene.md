@@ -417,3 +417,18 @@ Three changes, ordered by leverage:
   cleanly transition the module-level gates. Full suite: 3025/3025
   passing. Workstream 2.5 steps #2 (typed `on` + registrationMode
   guard) and #3 (`reload` declaration) deferred.
+- 2026-04-28 13:05Z — Workstream 2.5 steps #2 + #3 shipped together.
+  Step #2: `OpenClawApi.on` now typed against the canonical
+  `PluginHookName` union (29 hooks); typo'd hook names fail at
+  compile time. `registerAofPlugin` early-returns when
+  `registrationMode !== "full"` (treats `undefined` as "full" for
+  back-compat) — without the guard, AOF would have TypeError'd in
+  setup-only/cli-metadata modes because OpenClaw's registry strips
+  registration handlers off the api object in those modes. Step #3:
+  plugin export now declares
+  `reload: { restartPrefixes: ["plugins.entries.aof.config"] }` so
+  OpenClaw stops warning about the empty reload registration and
+  knows to trigger a gateway restart on any AOF config change.
+  Regression test
+  `bug-2026-04-28-registration-mode-and-reload.test.ts` covers
+  both behaviors. Full suite: 3031/3031 passing.
