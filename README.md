@@ -47,6 +47,23 @@ See the **[Getting Started Guide](docs/guide/getting-started.md)** for a complet
 
 ---
 
+## Upgrading
+
+Two paths exist on paper:
+
+```bash
+aof update                                                                            # in-CLI updater
+curl -fsSL https://raw.githubusercontent.com/d0labs/aof/main/scripts/install.sh | sh  # re-run the installer
+```
+
+Both are designed to preserve your data directory (`~/.aof/data`) and the daemon service. `aof update` also writes a backup so it can roll back with `aof update --rollback --backup <path>`.
+
+**Honest disclaimer:** neither path has been exercised in recent releases. Current development bumps versions frequently and verifies via `npm run deploy` from a checkout, so the user-facing upgrade flows have drifted out of routine testing. Back up `~/.aof/data` before either path if its contents are not easily reproducible. If you hit a regression, file an issue.
+
+Per-release notes live on [GitHub Releases](https://github.com/d0labs/aof/releases).
+
+---
+
 ## Key Features
 
 | Feature | Description | Docs |
@@ -67,7 +84,6 @@ See the **[Getting Started Guide](docs/guide/getting-started.md)** for a complet
 - **[Getting Started](docs/guide/getting-started.md)** - Install, configure, and orchestrate your first agent team
 - **[Configuration Reference](docs/guide/configuration.md)** - Org chart schema, AOF config, OpenClaw plugin wiring
 - **[CLI Reference](docs/guide/cli-reference.md)** - Complete command reference (auto-generated)
-- **[Upgrading](UPGRADING.md)** - Migration notes through v1.15 (daemon-mandatory transition); newer releases are documented in their GitHub release notes
 - **[Documentation Index](docs/README.md)** - Full user and developer documentation
 
 ### For Contributors

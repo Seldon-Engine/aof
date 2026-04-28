@@ -271,7 +271,8 @@ branch from Phase 42 / v1.14 is removed.
 The migration is idempotent and safe to re-run. It has no `down()`: rolling
 it back would strand the v1.15 thin-bridge plugin with no IPC authority to
 talk to. Canonical rollback from v1.15 is "install an older AOF version"
-(see [UPGRADING.md](../../UPGRADING.md) §Rollback).
+(`aof update --rollback --backup <path>` if you have a backup from `aof
+update`, otherwise re-run the installer pinned to a pre-1.15 version).
 
 ### What you need to do
 
@@ -286,4 +287,4 @@ talk to. Canonical rollback from v1.15 is "install an older AOF version"
 
 - [Task Format](./task-format.md) -- Task file structure and frontmatter schema
 - [Workflow DAGs](workflow-dags.md) -- Full DAG workflow documentation
-- [Upgrading](../../UPGRADING.md) -- Version-to-version upgrade guide
+- [README → Upgrading](../../README.md#upgrading) -- Upgrade paths and per-release notes

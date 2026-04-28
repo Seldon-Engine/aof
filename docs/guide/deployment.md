@@ -488,6 +488,6 @@ the gateway process and is not subject to the HTTP-tool allowlist.
 
 ## References
 
-- Upgrading from earlier versions: [UPGRADING.md](../../UPGRADING.md)
+- Upgrading from earlier versions: [README → Upgrading](../../README.md#upgrading)
 - Recovery runbook: `docs/RECOVERY-RUNBOOK.md`
 - Watchdog design: `docs/design/DAEMON-WATCHDOG-DESIGN.md`
