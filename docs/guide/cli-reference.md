@@ -9,7 +9,6 @@ Complete command reference for the `aof` CLI, auto-generated from the Commander 
 - [`aof init`](#aof-init)
 - [`aof create-project`](#aof-create-project)
 - [`aof project-list`](#aof-project-list)
-- [`aof project-add-participant`](#aof-project-add-participant)
 - [`aof integrate`](#aof-integrate)
   - [`aof integrate openclaw`](#aof-integrate-openclaw)
 - [`aof eject`](#aof-eject)
@@ -49,6 +48,10 @@ Complete command reference for the `aof` CLI, auto-generated from the Commander 
   - [`aof runbook check`](#aof-runbook-check)
 - [`aof board`](#aof-board)
 - [`aof watch`](#aof-watch)
+- [`aof artifacts`](#aof-artifacts)
+  - [`aof artifacts archive`](#aof-artifacts-archive)
+  - [`aof artifacts list`](#aof-artifacts-list)
+  - [`aof artifacts restore`](#aof-artifacts-restore)
 - [`aof memory`](#aof-memory)
   - [`aof memory generate`](#aof-memory-generate)
   - [`aof memory audit`](#aof-memory-audit)
@@ -113,7 +116,6 @@ Create a new project with standard directory structure
 | `--lead <lead>` | Owner lead (defaults to 'system') | `"system"` |
 | `--parent <id>` | Parent project ID for hierarchical projects |  |
 | `--template` | Scaffold with memory directory and README template | `false` |
-| `--participants <agents...>` | Initial participant agent IDs |  |
 
 ---
 
@@ -126,19 +128,6 @@ List all projects on this AOF instance
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--json` | Output as JSON | `false` |
-
----
-
-### `aof project-add-participant`
-
-Add an agent to a project's participant list
-
-**Arguments:**
-
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `project` | Yes |  |
-| `agent` | Yes |  |
 
 ---
 
@@ -677,6 +666,65 @@ Watch a view directory for real-time updates
 | `--format <format>` | Output format (cli\|json\|jsonl) | `"cli"` |
 | `--agent <agent>` | Filter by agent (mailbox views only) |  |
 | `--project <id>` | Project ID | `"_inbox"` |
+
+---
+
+### `aof artifacts`
+
+Archive, list, and restore local artifact directories
+
+---
+
+#### `aof artifacts archive`
+
+**Arguments:**
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `source-dir` | Yes | artifact directory to archive |
+
+**Options:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--project <name>` | project name | `"default"` |
+| `--title <title>` | archive title |  |
+| `--tag <tag>` | tag to attach (repeatable) | `[]` |
+| `--notes <text>` | operator notes |  |
+| `--prune-original-to-trash` | move source directory to Trash after successful archive/index write | `false` |
+| `--archive-root <path>` | cold-storage archive root | `"/Users/xavier/.openclaw/cold-storage/artifact-archives"` |
+| `--db-path <path>` | SQLite index path override |  |
+
+---
+
+#### `aof artifacts list`
+
+**Options:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--limit <n>` | maximum archives to show | `"20"` |
+| `--json` | print JSON rows | `false` |
+| `--archive-root <path>` | cold-storage archive root | `"/Users/xavier/.openclaw/cold-storage/artifact-archives"` |
+| `--db-path <path>` | SQLite index path override |  |
+
+---
+
+#### `aof artifacts restore`
+
+**Arguments:**
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `archive-id` | Yes | archive id to restore |
+
+**Options:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--dest <destination-parent>` | destination parent directory |  |
+| `--archive-root <path>` | cold-storage archive root | `"/Users/xavier/.openclaw/cold-storage/artifact-archives"` |
+| `--db-path <path>` | SQLite index path override |  |
 
 ---
 
