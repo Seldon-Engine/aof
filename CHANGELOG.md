@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.18.0](https://github.com/d0labs/aof/compare/v1.17.4...v1.18.0) (2026-04-28)
+
+### Features
+
+* **executor:** pass configured agent provider/model explicitly to runEmbeddedPiAgent ([3a5b1ff](https://github.com/d0labs/aof/commit/3a5b1ffce0e92d78508855364470e195e5f478f6))
+
+### Bug Fixes
+
+* **dispatch:** classify credential errors as permanent so they deadletter on first failure ([2261107](https://github.com/d0labs/aof/commit/22611076998abe2fa814ad9592b3685a71a8f9d3))
+* **plugin:** align with OpenClaw plugin contract — registrationMode guard, typed on, reload policy ([8d2cd57](https://github.com/d0labs/aof/commit/8d2cd5759d5269a6eb6a01bcb7957c853da41b04)), closes [#2](https://github.com/d0labs/aof/issues/2) [#3](https://github.com/d0labs/aof/issues/3) [#2](https://github.com/d0labs/aof/issues/2) [#3](https://github.com/d0labs/aof/issues/3) [#1](https://github.com/d0labs/aof/issues/1)
+* **plugin:** register spawn-poller and chat-delivery-poller as plugin services ([99adb1f](https://github.com/d0labs/aof/commit/99adb1feda57a4f1c76d8eb75843185982343b1d)), closes [#1](https://github.com/d0labs/aof/issues/1) [#2](https://github.com/d0labs/aof/issues/2) [#3](https://github.com/d0labs/aof/issues/3)
+
+### Tests
+
+* **views:** retry-on-flake for ViewWatcher chokidar tests ([21ba14b](https://github.com/d0labs/aof/commit/21ba14b1c710f7386001b40f305cc5d072873f14))
+
 ## [1.17.4](https://github.com/d0labs/aof/compare/v1.17.3...v1.17.4) (2026-04-26)
 
 ### Features
