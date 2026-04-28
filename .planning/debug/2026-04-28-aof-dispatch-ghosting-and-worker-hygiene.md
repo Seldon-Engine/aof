@@ -432,3 +432,50 @@ Three changes, ordered by leverage:
   Regression test
   `bug-2026-04-28-registration-mode-and-reload.test.ts` covers
   both behaviors. Full suite: 3031/3031 passing.
+- 2026-04-28 14:55Z — v1.18.0 released to GitHub. Hand-crafted
+  release notes per CLAUDE.md format. Test infra commit
+  `21ba14b` adds `{ retry: 3 }` to the ViewWatcher describe block
+  to absorb chokidar fs-event flake under suite load.
+- 2026-04-28 15:15Z — Workstream 3 shipped. Two changes targeting
+  the dispatch-ghost symptom:
+
+  (a) AOF now derives `authProfileId: "<provider>:default"` from
+      the agent's configured provider and passes it explicitly to
+      `runEmbeddedPiAgent` along with `authProfileIdSource: "auto"`.
+      Verified against
+      `~/Projects/openclaw/src/agents/pi-embedded-runner/run.ts`:
+      with source="auto", `lockedProfileId` stays undefined and the
+      `preferredProfile` hint flows into `resolveAuthProfileOrder`,
+      so OpenClaw starts resolution from a known-good profile and
+      can still fall back through the order if the preferred is
+      ineligible. Removes the ambiguity that made
+      `No credentials found for profile "openai:default"` appear
+      to be intermittent.
+
+  (b) `prepared.setup()` is now wrapped in a 30-second
+      `withSetupTimeout` watchdog at both call sites
+      (`OpenClawAdapter.spawnSession` in-process path, and
+      `runAgentFromSpawnRequest` spawn-poller path). Setup is
+      just config lookups + a workspace mkdir; 30 s is generous.
+      Without the watchdog, a wedged OpenClaw runtime helper
+      (e.g. `ensureAgentWorkspace` blocked on a fs lock or a
+      keychain prompt) produces the exact ghost symptom we
+      observed live: `dispatch.matched` fires, spawn-poller logs
+      "spawn received", then total silence until the per-task
+      timeout (1-4 hours) finally fires. Now those wedges
+      surface as a `setup_error` outcome that flows through the
+      normal failure-tracker → blocked → retry path.
+
+  Setup-timeout errors are intentionally NOT classified as
+  permanent — they could be transient (momentary lock
+  contention, fs blip), so the default retry path is correct.
+  If the wedge is permanent, the failure-budget cap will
+  deadletter after 3 attempts, same as any other transient
+  failure mode.
+
+  Regression test
+  `bug-2026-04-28-auth-profile-and-setup-timeout.test.ts`
+  covers both with 6 cases: explicit auth profile derivation
+  for openai/litellm/bare-model/no-config, plus setup-hang
+  surfacing as setup_error within the 30s window. Full suite:
+  3037/3037 passing.

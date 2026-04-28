@@ -67,7 +67,12 @@ export class OpenClawAdapter implements GatewayAdapter {
     }
 
     try {
-      const ready = await prepared.setup();
+      const ready = await withSetupTimeout(
+        prepared.setup(),
+        DEFAULT_SETUP_TIMEOUT_MS,
+        context.taskId,
+        context.agent,
+      );
 
       log.info({ agentId: ready.agentId, sessionId: ready.sessionId }, "launching embedded agent (fire-and-forget)");
 
@@ -175,7 +180,12 @@ export async function runAgentFromSpawnRequest(
 
   let ready: EmbeddedRunReady;
   try {
-    ready = await prepared.setup();
+    ready = await withSetupTimeout(
+      prepared.setup(),
+      DEFAULT_SETUP_TIMEOUT_MS,
+      sr.taskId,
+      sr.agent,
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.error({ err, taskId: sr.taskId }, "embedded agent setup failed (spawn-poller path)");
@@ -231,6 +241,8 @@ interface EmbeddedRunReady {
   thinking?: string;
   provider?: string;
   model?: string;
+  authProfileId?: string;
+  authProfileIdSource?: "auto" | "user";
 }
 
 type PrepareResult =
@@ -273,6 +285,28 @@ function prepareEmbeddedRun(api: OpenClawApi, input: EmbeddedRunSetupInput): Pre
       const sessionFile = runtimeAgent.session?.resolveSessionFilePath?.(sessionId)
         ?? `${agentDir}/sessions/${sessionId}.jsonl`;
 
+      const modelRef = resolveConfiguredModelRef(config, agentId);
+
+      // Derive the explicit auth profile id from the agent's configured
+      // provider. OpenClaw's profile-resolution path
+      // (`~/Projects/openclaw/src/agents/pi-embedded-runner/run.ts`,
+      // `preferredProfileId = params.authProfileId?.trim()`) consumes
+      // this as a hint when source is "auto", and as a hard requirement
+      // when source is "user". We pass "auto" so OpenClaw can still
+      // fall back to the next eligible profile in
+      // `resolveAuthProfileOrder` if `<provider>:default` is somehow
+      // unavailable (lock file held, keychain prompt blocked, etc.) —
+      // but the resolution starts from a known-good preferred profile
+      // instead of OpenClaw guessing the default. Passing nothing
+      // produced the original "No credentials found for openai:default"
+      // ghost class because OpenClaw's silent fallback can pick a
+      // profile that doesn't exist in the AOF-spawned agent's scope.
+      // See .planning/debug/2026-04-28-aof-dispatch-ghosting-and-worker-hygiene.md
+      // (Workstream 3) for the full investigation.
+      const authProfileId = modelRef.provider
+        ? `${modelRef.provider}:default`
+        : undefined;
+
       return {
         runEmbeddedPiAgent: runtimeAgent.runEmbeddedPiAgent,
         sessionId,
@@ -287,10 +321,57 @@ function prepareEmbeddedRun(api: OpenClawApi, input: EmbeddedRunSetupInput): Pre
         runId: sessionId,
         taskId: input.taskId,
         thinking: input.thinking,
-        ...resolveConfiguredModelRef(config, agentId),
+        ...modelRef,
+        ...(authProfileId && {
+          authProfileId,
+          authProfileIdSource: "auto" as const,
+        }),
       };
     },
   };
+}
+
+/**
+ * Default ceiling on `prepared.setup()` — wraps the IPC + filesystem
+ * helpers (resolveAgentWorkspaceDir, ensureAgentWorkspace,
+ * resolveAgentDir, resolveSessionFilePath) in a hard timeout so a
+ * silently-hung helper can't ghost a dispatch indefinitely.
+ *
+ * Setup is just config lookups + a workspace mkdir; 30 s is generous.
+ * Without this watchdog, a wedged OpenClaw runtime (e.g. mid-reload
+ * race, blocked keychain prompt, fs deadlock) produces the exact
+ * symptom captured in
+ * `.planning/debug/2026-04-28-aof-dispatch-ghosting-and-worker-hygiene.md`
+ * — `dispatch.matched` fires, `spawn-poller` logs "spawn received",
+ * then total silence until the 1-4 hour task timeout finally fires.
+ */
+const DEFAULT_SETUP_TIMEOUT_MS = 30_000;
+
+/** Race a promise against a setup-timeout window. */
+async function withSetupTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  taskId: string,
+  agentId: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new Error(
+            `setup timed out after ${timeoutMs}ms (taskId=${taskId}, agentId=${agentId})`,
+          ),
+        ),
+      timeoutMs,
+    );
+    if (typeof timer === "object" && timer && "unref" in timer) timer.unref();
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 /** Fire-and-forget wrapper that funnels completion through `onRunComplete`. */
@@ -333,6 +414,8 @@ async function executeEmbeddedRun(ready: EmbeddedRunReady): Promise<AgentRunOutc
       senderIsOwner: true,
       ...(ready.provider && { provider: ready.provider }),
       ...(ready.model && { model: ready.model }),
+      ...(ready.authProfileId && { authProfileId: ready.authProfileId }),
+      ...(ready.authProfileIdSource && { authProfileIdSource: ready.authProfileIdSource }),
       ...(ready.thinking && { thinkLevel: ready.thinking }),
     });
 
