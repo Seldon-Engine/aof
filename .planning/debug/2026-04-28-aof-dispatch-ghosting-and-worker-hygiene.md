@@ -275,7 +275,123 @@ After fixing, sweep them:
 - Any task with `metadata.lastDispatchFailureReason` matching
   "No credentials found for profile" — `rg -l` over `tasks/`.
 
+## Audit results (Workstream 2 — partial, static + lightweight live)
+
+Static + log-based audit completed 2026-04-28. **Strong evidence that
+AOF contributes to worker leaks.** Three findings, in priority order:
+
+### Finding A — Per-process pollers keep workers alive (high)
+
+`src/openclaw/spawn-poller.ts` and `src/openclaw/chat-delivery-poller.ts`
+both expose a `startXPollerOnce` guarded by a module-level boolean
+(`spawnPollerStarted`, `chatDeliveryPollerStarted`). The comment in
+spawn-poller.ts explicitly says "at most one active long-poll loop
+**per plugin process**" — i.e. the singleton is per-Node-process, not
+per-system. Every Node process that loads `registerAofPlugin`
+unconditionally calls both `startXPollerOnce`s
+(adapter.ts:144-145), so each spawned worker process opens its own
+long-poll on the daemon socket and never lets go.
+
+The poll loop uses `await client.waitForSpawn(30_000)` followed by
+re-entry, so the underlying Node socket handle is effectively held
+forever. There is no abort signal, no `process.on("exit")` teardown,
+no `stop` hook from OpenClaw — the only documented way to end the
+loop is `stopSpawnPoller` which is labeled a *test helper*. Production
+has no clean shutdown path.
+
+**Live evidence:**
+- `gateway.log` shows **6,019 `[AOF] Plugin loaded` lines since
+  2026-02-08** (~79 reloads/day average).
+- `aof.log` shows the register-time `selfCheck` warning emitted by
+  **28 distinct PIDs** over the log retention window.
+- **11 of those 28 PIDs are still alive right now** (1 gateway
+  primary, 1 generic `openclaw`, 9 `openclaw-agent` workers all
+  spawned in a 14-second window 2026-04-28 07:55-07:56). Each one
+  is running an idle spawn-poller + chat-delivery-poller pair
+  competing for the same daemon socket.
+
+This matches CLAUDE.md "Flavor 1 zombie agent" pattern: agents started
+on prior days hold loaded plugin code. AOF's plugin code, once loaded,
+keeps the worker process alive via the poller's open socket handle.
+
+### Finding B — Event listeners accumulate per reload (medium)
+
+`registerAofPlugin` (`src/openclaw/adapter.ts:69-90`) calls
+`api.on(...)` 7 times: `session_end`, `agent_end`,
+`before_compaction`, `message_received`, `message_sent`,
+`before_tool_call`, `after_tool_call`. There is no `api.off()` or
+deduplication. If OpenClaw's `api.on` is additive (the common Node
+EventEmitter contract), a process that gets the plugin reloaded N
+times will fire each handler N times per event — N copies of
+`postSessionEnd`, etc., hitting the daemon over IPC.
+
+We can't directly inspect OpenClaw's listener registry without a
+runtime probe, but the gateway-log volume (6,019 reloads vs. one
+process) strongly implies accumulation. The cost is daemon IPC churn
+(load-amplified event delivery), not necessarily worker leaks per
+se — but it's a contributing factor to "AOF feels slow under heavy
+session churn".
+
+### Finding C — No `stop` lifecycle hook on the plugin export (medium)
+
+`src/plugin.ts` exports a plugin object with `{ id, name, description,
+register }` only — no symmetric `stop()` or `unload()`. OpenClaw's
+plugin lifecycle apparently has no way to signal "you're being
+unloaded, clean up." Even if OpenClaw added that signal tomorrow, AOF
+wouldn't honour it because there's no entry point.
+
+By contrast, `OpenClawServiceDefinition` (`src/openclaw/types.ts:9`)
+has a `stop` field — the *service* lifecycle has it, the *plugin*
+lifecycle does not. AOF used to register a service (pre-Phase 43
+thin-bridge). Now it just registers tools/handlers and starts pollers
+in `register()`. Removing the service removed the only place AOF
+could plausibly attach teardown logic.
+
+### Phase scope (Workstream 2.5 — fix lifecycle)
+
+Three changes, ordered by leverage:
+
+1. **Detect "I'm in a worker, not the gateway main" and skip
+   pollers in workers.** Probe needed first: what does
+   `api.config`/`api.runtime`/some context flag look like in the
+   gateway main vs. a per-session worker? If there's a
+   distinguishable signal, wrap `startSpawnPollerOnce` and
+   `startChatDeliveryPollerOnce` in a guard. If not, this requires
+   OpenClaw cooperation (adding a context flag).
+
+2. **Add an `unregister`/`stop` hook to the plugin export and wire
+   it to `stopSpawnPoller` + `stopChatDeliveryPoller` + `api.off`
+   counterparts.** Even if OpenClaw doesn't call it today, having it
+   makes AOF cleanly unloadable when OpenClaw eventually wires
+   plugin teardown. The internal stop already exists for the
+   pollers (test helpers); promote them to production primitives.
+
+3. **Make `api.on` registrations idempotent** — keep a module-level
+   `Set<string>` of registered events and skip if already wired.
+   This is a defensive fix; ideal would be `api.off` on stop, but
+   skipping re-registration is the minimum.
+
+### What I did NOT verify
+
+- Whether `api.on` is actually additive in OpenClaw's runtime (vs.
+  silently dedup by handler reference). Needs a tiny runtime probe.
+- Whether the in-flight `src/openclaw/openclaw-executor.ts` and
+  `src/openclaw/__tests__/executor.test.ts` uncommitted changes
+  affect any of this. They thread `provider`/`model` through
+  `runEmbeddedPiAgent` but don't touch lifecycle.
+- Live N=10 dispatch comparison from the original plan. Skipped
+  because (a) main intercepts, (b) dispatches ghost (Workstream 3),
+  and (c) static evidence already pointed at AOF concretely.
+
 ## Status log
 
 - 2026-04-28 03:30Z — Investigation opened. Workstream 1 ready to
   implement; Workstreams 2+3 pending.
+- 2026-04-28 07:35Z — Workstream 1 shipped (commit 2261107). Docs
+  regen prep in 046b773. 3 production files + 1 regression test +
+  this debug doc.
+- 2026-04-28 12:00Z — Workstream 2 audit complete. AOF confirmed
+  contributing to worker leaks via per-process pollers without
+  shutdown path (Finding A). Workstream 2.5 (lifecycle fix) scoped
+  but not implemented — pending user decision on whether to
+  prioritise that vs. Workstream 3 (dispatch ghosting).
