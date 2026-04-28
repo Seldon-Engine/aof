@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.18.1](https://github.com/d0labs/aof/compare/v1.18.0...v1.18.1) (2026-04-28)
+
+### Bug Fixes
+
+* **executor:** pass authProfileId explicitly + add setup-phase timeout to prevent dispatch ghosts ([b868328](https://github.com/d0labs/aof/commit/b86832845cb646d7824a053645a72ded8a83fe53))
+
 ## [1.18.0](https://github.com/d0labs/aof/compare/v1.17.4...v1.18.0) (2026-04-28)
 
 ### Features
