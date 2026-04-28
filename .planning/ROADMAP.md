@@ -294,3 +294,22 @@ Plans:
 - [x] 46-04-PLAN.md — Wave 3 Bug 1C: wire `pino-roll@4` transport at 50 MB × 5, drop `fd:2` destination, release worker-thread on `resetLogger()`
 - [x] 46-05-PLAN.md — Wave 3 Bug 2B: routing-target validation in `aofDispatch` with project-owner defaulting + `"system"` sentinel handling
 - [x] 46-06-PLAN.md — Wave 3 Bug 2C: envelope-actor injection at `/v1/tool/invoke` + plugin-side `params.actor` fallback to `captured.actor` in `mergeDispatchNotificationRecipient`
+
+### Phase 47: Validate and stabilize the user upgrade pipeline (canonical path + CI test automation)
+
+**Goal:** Settle on one canonical user upgrade path (likely `aof update`, with `scripts/install.sh` re-run as fallback for fresh installs / broken `aof` binaries), make it work end-to-end across version transitions, and ship CI test automation that exercises real upgrade scenarios so the path can never silently drift again. As of v1.18.1 neither user-facing upgrade path is exercised in routine development — current dev workflow uses `npm run deploy` from a checkout, which works for contributors but means `aof update` (`src/cli/commands/system-commands.ts:257`) and `install.sh`'s `IS_UPGRADE=true` branch have not been verified against recent releases.
+
+Scope: (1) Pick the canonical path. `aof update` is the leading candidate — already wired up with rollback, channel switching, structured selfUpdate/runMigrations flow. (2) End-to-end verification: a previous-version install upgrades cleanly to current, data preserved, daemon service swapped, migrations run, rollback works. (3) CI smoke test on every release tag — checks out v(latest-1), upgrades to vlatest, dispatches a probe task, verifies completion. Fails the release if upgrade is broken. (4) Decide installer-rerun path's fate: keep documented + tested as fallback, or deprecate. (5) Update README upgrade section once paths are verified.
+
+Out of scope: rebuilding the migration framework (already exists, just needs to be exercised), changing `install.sh` download mechanism, npm publication (we don't publish to npm — `aof` on npm is an unrelated deprecated package).
+
+Investigation precedent: `.planning/debug/2026-04-28-aof-dispatch-ghosting-and-worker-hygiene.md` is the closest shape — investigation doc + multiple atomic fixes + hand-crafted release notes.
+
+Acceptance: `aof update` from v(N-1) → vN works on a clean install, data preserved, rollback restores prior state, CI job blocks any release where this regresses.
+
+**Requirements**: TBD (define during /gsd-plan-phase 47)
+**Depends on:** Phase 46
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 47 to break down)
