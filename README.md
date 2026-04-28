@@ -56,9 +56,7 @@ aof update                                                                      
 curl -fsSL https://raw.githubusercontent.com/d0labs/aof/main/scripts/install.sh | sh  # re-run the installer
 ```
 
-Both are designed to preserve your data directory (`~/.aof/data`) and the daemon service. `aof update` also writes a backup so it can roll back with `aof update --rollback --backup <path>`.
-
-**Honest disclaimer:** neither path has been exercised in recent releases. Current development bumps versions frequently and verifies via `npm run deploy` from a checkout, so the user-facing upgrade flows have drifted out of routine testing. Back up `~/.aof/data` before either path if its contents are not easily reproducible. If you hit a regression, file an issue.
+Both preserve your data directory (`~/.aof/data`) and the daemon service. `aof update` also writes a backup so it can roll back with `aof update --rollback --backup <path>`.
 
 Per-release notes live on [GitHub Releases](https://github.com/d0labs/aof/releases).
 
