@@ -25,9 +25,9 @@ const mockResolveAgentDir = vi.fn(() => "/tmp/agent");
 const mockEnsureAgentWorkspace = vi.fn(async (p: { dir: string }) => ({ dir: p.dir }));
 const mockResolveSessionFilePath = vi.fn((_: unknown, id: string) => `/tmp/s/${id}.jsonl`);
 
-function buildApi(): OpenClawApi {
+function buildApi(config: Record<string, unknown> = { agents: {} }): OpenClawApi {
   return {
-    config: { agents: {} },
+    config,
     runtime: {
       agent: {
         runEmbeddedPiAgent: mockRunEmbeddedPiAgent,
@@ -222,6 +222,28 @@ describe("OpenClawAdapter", () => {
     await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
     expect(mockRunEmbeddedPiAgent).toHaveBeenCalledWith(
       expect.objectContaining({ thinkLevel: "high" }),
+    );
+  });
+
+  it("uses the configured target agent model instead of OpenClaw embedded defaults", async () => {
+    const api = buildApi({
+      agents: {
+        list: [
+          { id: "swe-backend", model: "litellm/gemini-3.1-pro-preview-customtools" },
+        ],
+      },
+    });
+    const exec = new OpenClawAdapter(api);
+    mockRunEmbeddedPiAgent.mockResolvedValueOnce({ meta: { durationMs: 10 } });
+
+    await exec.spawnSession(baseContext({ agent: "swe-backend" }));
+
+    await vi.waitFor(() => expect(mockRunEmbeddedPiAgent).toHaveBeenCalledTimes(1));
+    expect(mockRunEmbeddedPiAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "litellm",
+        model: "gemini-3.1-pro-preview-customtools",
+      }),
     );
   });
 

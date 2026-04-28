@@ -229,6 +229,8 @@ interface EmbeddedRunReady {
   runId: string;
   taskId: string;
   thinking?: string;
+  provider?: string;
+  model?: string;
 }
 
 type PrepareResult =
@@ -285,6 +287,7 @@ function prepareEmbeddedRun(api: OpenClawApi, input: EmbeddedRunSetupInput): Pre
         runId: sessionId,
         taskId: input.taskId,
         thinking: input.thinking,
+        ...resolveConfiguredModelRef(config, agentId),
       };
     },
   };
@@ -328,6 +331,8 @@ async function executeEmbeddedRun(ready: EmbeddedRunReady): Promise<AgentRunOutc
       runId: ready.runId,
       lane: "aof",
       senderIsOwner: true,
+      ...(ready.provider && { provider: ready.provider }),
+      ...(ready.model && { model: ready.model }),
       ...(ready.thinking && { thinkLevel: ready.thinking }),
     });
 
@@ -386,6 +391,56 @@ function normalizeAgentId(agent: string): string {
     return parts[1] ?? agent;
   }
   return agent;
+}
+
+interface ModelRef {
+  provider?: string;
+  model?: string;
+}
+
+function resolveConfiguredModelRef(config: Record<string, unknown>, agentId: string): ModelRef {
+  const modelRef = readAgentModelRef(config, agentId);
+  if (!modelRef) return {};
+
+  const slash = modelRef.indexOf("/");
+  if (slash <= 0 || slash >= modelRef.length - 1) {
+    return { model: modelRef };
+  }
+
+  return {
+    provider: modelRef.slice(0, slash),
+    model: modelRef.slice(slash + 1),
+  };
+}
+
+function readAgentModelRef(config: Record<string, unknown>, agentId: string): string | undefined {
+  const agents = config.agents;
+  if (!agents || typeof agents !== "object") return undefined;
+
+  const list = (agents as { list?: unknown }).list;
+  if (!Array.isArray(list)) return undefined;
+
+  const entry = list.find((candidate) => {
+    if (!candidate || typeof candidate !== "object") return false;
+    return (candidate as { id?: unknown }).id === agentId;
+  });
+  if (!entry || typeof entry !== "object") return undefined;
+
+  const model = (entry as { model?: unknown }).model;
+  if (typeof model === "string") {
+    const trimmed = model.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+
+  if (model && typeof model === "object") {
+    const primary = (model as { primary?: unknown }).primary;
+    if (typeof primary === "string") {
+      const trimmed = primary.trim();
+      return trimmed.length > 0 ? trimmed : undefined;
+    }
+  }
+
+  return undefined;
 }
 
 function formatTaskInstruction(context: TaskContext): string {
