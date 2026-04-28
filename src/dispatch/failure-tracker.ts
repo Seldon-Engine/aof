@@ -47,6 +47,12 @@ export async function trackDispatchFailure(
  */
 export function shouldTransitionToDeadletter(task: Task): boolean {
   const failures = (task.frontmatter.metadata.dispatchFailures as number | undefined) ?? 0;
+  // Permanent errors (e.g. classified credential / api-key resolution
+  // failures) deadletter on the first occurrence — retrying is
+  // deterministic wasted work, and the task should not consume the
+  // failure budget meant for genuinely transient flakes.
+  const errorClass = task.frontmatter.metadata.errorClass as string | undefined;
+  if (errorClass === "permanent") return true;
   return failures >= MAX_DISPATCH_FAILURES;
 }
 

@@ -9,6 +9,7 @@
 
 import { createLogger } from "../logging/index.js";
 import { trackDispatchFailure, shouldTransitionToDeadletter, transitionToDeadletter } from "./failure-tracker.js";
+import { classifySpawnError } from "./scheduler-helpers.js";
 import { stopLeaseRenewal } from "./lease-manager.js";
 import { captureTraceSafely } from "./trace-helpers.js";
 import { deliverAllCallbacksSafely } from "./callback-helpers.js";
@@ -86,6 +87,17 @@ export async function handleRunComplete(
         ? "Agent run was aborted"
         : "Agent run failed (unknown reason)";
 
+  // Classify spawn-time errors that surface via the run-complete callback
+  // so deterministic config errors (missing credentials, agent not found,
+  // etc.) deadletter immediately instead of cycling through the full
+  // dispatchFailures budget. Without this, OpenClaw's "No credentials
+  // found for profile X" surfaces as errorClass=unknown and burns
+  // ~30 min of retry/lease churn — see
+  // .planning/debug/2026-04-28-aof-dispatch-ghosting-and-worker-hygiene.md
+  const errorClass = outcome.error
+    ? classifySpawnError(outcome.error.message)
+    : undefined;
+
   log.error({ taskId: action.taskId, correlationId, op: "completionEnforcement" }, "task still in-progress after agent completed");
 
   try {
@@ -96,6 +108,7 @@ export async function handleRunComplete(
         ...taskForMeta.frontmatter.metadata,
         enforcementReason,
         enforcementAt: new Date().toISOString(),
+        ...(errorClass && { errorClass }),
       };
       await store.save(taskForMeta);
     }

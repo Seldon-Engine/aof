@@ -143,6 +143,18 @@ const PERMANENT_ERROR_PATTERNS = [
   "permission denied",
   "forbidden",
   "unauthorized",
+  // Credential resolution failures from the agent runner — env-ref'd
+  // profiles (e.g. `keyRef: { source: env, id: OPENAI_API_KEY }`) miss,
+  // OAuth tokens revoked, key files unreadable. These are deterministic
+  // configuration errors: retrying just burns the dispatch budget for
+  // ~30 min before deadlettering, holding up other work and producing
+  // a confusing "intermittent" pattern in the events log.
+  // See .planning/debug/2026-04-28-aof-dispatch-ghosting-and-worker-hygiene.md
+  "no credentials found",
+  "no api key found",
+  "missing credentials",
+  "missing api key",
+  "invalid api key",
 ];
 
 /** Patterns that indicate rate-limit errors (retryable, but distinct for observability). */
