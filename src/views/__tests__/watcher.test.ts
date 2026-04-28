@@ -4,7 +4,19 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ViewWatcher, type WatchEvent } from "../watcher.js";
 
-describe("ViewWatcher", () => {
+// Retry-on-flake: this suite exercises chokidar fs-event delivery
+// on macOS, which is timing-fragile under heavy parallel test load.
+// Symptoms recur intermittently across releases (see
+// .planning/debug/resolved/2026-04-18-vitest-flakes.md → "Symptoms"
+// section, which lists 'debounces rapid file changes' and the
+// auto-detection generic-fallback test as confirmed flakes). Tests
+// pass 14/14 in isolation. The retry is load-bearing for any
+// release-it pre-flight `npm test` run while the suite executes
+// alongside the rest of the unit pool. Do not remove without first
+// either (a) splitting watcher tests into their own
+// singleFork-pooled config, or (b) replacing chokidar with a
+// deterministic fixture-driven event source.
+describe("ViewWatcher", { retry: 3 }, () => {
   let testDir: string;
   let events: WatchEvent[];
   let watcher: ViewWatcher | undefined;
