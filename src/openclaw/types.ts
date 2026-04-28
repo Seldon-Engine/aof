@@ -6,11 +6,47 @@ export interface ToolResult {
   content: Array<{ type: string; text: string }>;
 }
 
+/**
+ * Service context passed to registered plugin services on start/stop.
+ *
+ * Mirrors the canonical `OpenClawPluginServiceContext` from
+ * `~/Projects/openclaw/src/plugins/types.ts:1850-1856`. AOF doesn't
+ * import openclaw's types directly (peer-dependency only), so we mirror
+ * the shape here. Only the fields AOF actually consumes are typed
+ * narrowly; everything else stays as `unknown` to avoid drift if
+ * upstream extends the surface.
+ */
+export interface OpenClawPluginServiceContext {
+  config: Record<string, unknown>;
+  workspaceDir?: string;
+  stateDir: string;
+  logger: {
+    info(msg: string): void;
+    warn(msg: string): void;
+    error(msg: string): void;
+    debug?(msg: string): void;
+  };
+}
+
+/**
+ * Background plugin service registered via `api.registerService(...)`.
+ *
+ * Lifecycle (verified against `~/Projects/openclaw/src/plugins/services.ts`):
+ *   - `start(ctx)` is invoked exactly once per process during gateway
+ *     startup (`startPluginServices` in
+ *     `~/Projects/openclaw/src/gateway/server-startup.ts`). Worker
+ *     processes (per-session agent runners) never call
+ *     `startPluginServices`, so service.start does NOT fire there.
+ *   - `stop(ctx)` is invoked on gateway shutdown via the handle returned
+ *     from `startPluginServices`, in reverse registration order.
+ *
+ * Mirrors `OpenClawPluginService` at
+ * `~/Projects/openclaw/src/plugins/types.ts:1858-1863`.
+ */
 export interface OpenClawServiceDefinition {
-  id: string;               // OpenClaw calls service.id.trim()
-  start: () => Promise<void> | void;
-  stop: () => Promise<void> | void;
-  status?: () => unknown;
+  id: string;
+  start: (ctx: OpenClawPluginServiceContext) => Promise<void> | void;
+  stop?: (ctx: OpenClawPluginServiceContext) => Promise<void> | void;
 }
 
 export interface OpenClawToolDefinition {

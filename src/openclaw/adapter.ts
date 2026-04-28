@@ -14,8 +14,8 @@ import { daemonSocketPath } from "../config/paths.js";
 import { toolRegistry } from "../tools/tool-registry.js";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { DaemonIpcClient, ensureDaemonIpcClient } from "./daemon-ipc-client.js";
-import { startSpawnPollerOnce } from "./spawn-poller.js";
-import { startChatDeliveryPollerOnce } from "./chat-delivery-poller.js";
+import { startSpawnPollerOnce, stopSpawnPoller } from "./spawn-poller.js";
+import { startChatDeliveryPollerOnce, stopChatDeliveryPoller } from "./chat-delivery-poller.js";
 import { OpenClawToolInvocationContextStore } from "./tool-invocation-context.js";
 import { buildStatusProxyHandler } from "./status-proxy.js";
 import { mergeDispatchNotificationRecipient } from "./dispatch-notification.js";
@@ -144,7 +144,35 @@ export function registerAofPlugin(
     api.registerHttpRoute({ path: "/aof/status", handler: proxy, auth: "gateway" });
   }
 
-  startSpawnPollerOnce(client, api);
-  startChatDeliveryPollerOnce(client, api);
+  // Wrap the long-poll loops as plugin services so OpenClaw can lifecycle
+  // them. Without this, every Node process that loads the AOF plugin (the
+  // gateway main + every per-session worker per CLAUDE.md "Flavor 1") would
+  // call `startSpawnPollerOnce` directly during register(), spawning a
+  // long-poll handle that keeps the worker alive forever.
+  //
+  // OpenClaw's `startPluginServices` (verified in
+  // ~/Projects/openclaw/src/plugins/services.ts) runs only in the gateway
+  // main process, exactly once during server startup. Workers never invoke
+  // it. So registering as a service confines poller startup to the one
+  // process that actually owns the dispatch bridge, and gives us a clean
+  // stop hook for gateway shutdown.
+  //
+  // The `startXPollerOnce` helpers stay idempotent at the module level —
+  // that's still useful because OpenClaw may re-register a plugin within
+  // the same process (config reload, hot-swap), and the gate prevents a
+  // double-start in that scenario. Stop is similarly idempotent.
+  //
+  // See .planning/debug/2026-04-28-aof-dispatch-ghosting-and-worker-hygiene.md
+  // (Workstream 2 audit) for the full investigation context.
+  api.registerService({
+    id: "aof-spawn-poller",
+    start: () => startSpawnPollerOnce(client, api),
+    stop: () => { stopSpawnPoller(); },
+  });
+  api.registerService({
+    id: "aof-chat-delivery-poller",
+    start: () => startChatDeliveryPollerOnce(client, api),
+    stop: () => { stopChatDeliveryPoller(); },
+  });
   return { mode: "thin-bridge", daemonSocketPath: socketPath };
 }

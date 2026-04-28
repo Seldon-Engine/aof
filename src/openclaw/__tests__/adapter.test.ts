@@ -10,7 +10,12 @@
  *     mergeDispatchNotificationRecipient before invokeTool
  *   - event hooks attach for all 7 OpenClaw lifecycle signals
  *   - HTTP routes /aof/status + /aof/metrics are wired
- *   - registerAofPlugin does NOT call api.registerService (D-02 invariant)
+ *   - registerAofPlugin registers the spawn-poller and chat-delivery-poller
+ *     as plugin services so OpenClaw lifecycles them (gateway-only start,
+ *     graceful stop on shutdown). Pre-2026-04-28 this was a no-services
+ *     "D-02 invariant" — but starting the pollers directly during register()
+ *     leaked them into per-session worker processes. See
+ *     .planning/debug/2026-04-28-aof-dispatch-ghosting-and-worker-hygiene.md.
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -65,7 +70,7 @@ describe("OpenClaw adapter (thin-bridge, Phase 43)", () => {
     resetDaemonIpcClient();
   });
 
-  it("registers all shared-registry tools + HTTP routes + 7 event hooks; does NOT register a service", () => {
+  it("registers all shared-registry tools + HTTP routes + 7 event hooks + 2 poller services", () => {
     const services: Array<{ id: string }> = [];
     const tools: Array<{ name: string; execute: (id: string, params: Record<string, unknown>) => Promise<unknown> }> = [];
     const routes: Array<{ path: string; auth: "gateway" | "plugin" }> = [];
@@ -85,8 +90,18 @@ describe("OpenClaw adapter (thin-bridge, Phase 43)", () => {
       daemonIpcClient: makeMockClient(),
     });
 
-    // D-02 structural invariant: plugin no longer registers a scheduler service.
-    expect(services).toEqual([]);
+    // The pollers (spawn-poller + chat-delivery-poller) are now registered
+    // as plugin services so OpenClaw can lifecycle them. The original D-02
+    // invariant ("plugin no longer registers a scheduler service") still
+    // holds in spirit — there is no AOFService scheduler — but the
+    // infrastructure pollers MUST register as services or they leak into
+    // per-session worker processes. See test
+    // bug-2026-04-28-plugin-service-lifecycle.test.ts for the lifecycle
+    // assertions; here we only confirm the registration shape.
+    expect(services.map((s) => s.id).sort()).toEqual([
+      "aof-chat-delivery-poller",
+      "aof-spawn-poller",
+    ]);
 
     // All 16 tools from the shared registry (13 core + 3 project-management tools).
     expect(tools.map((t) => t.name)).toEqual([

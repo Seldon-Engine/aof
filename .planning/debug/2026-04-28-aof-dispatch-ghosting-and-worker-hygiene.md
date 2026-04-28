@@ -314,23 +314,28 @@ This matches CLAUDE.md "Flavor 1 zombie agent" pattern: agents started
 on prior days hold loaded plugin code. AOF's plugin code, once loaded,
 keeps the worker process alive via the poller's open socket handle.
 
-### Finding B — Event listeners accumulate per reload (medium)
+### Finding B — RETRACTED (2026-04-28 source review)
 
-`registerAofPlugin` (`src/openclaw/adapter.ts:69-90`) calls
-`api.on(...)` 7 times: `session_end`, `agent_end`,
-`before_compaction`, `message_received`, `message_sent`,
-`before_tool_call`, `after_tool_call`. There is no `api.off()` or
-deduplication. If OpenClaw's `api.on` is additive (the common Node
-EventEmitter contract), a process that gets the plugin reloaded N
-times will fire each handler N times per event — N copies of
-`postSessionEnd`, etc., hitting the daemon over IPC.
+Originally claimed: `api.on(...)` listeners accumulate across
+plugin reloads with no cleanup.
 
-We can't directly inspect OpenClaw's listener registry without a
-runtime probe, but the gateway-log volume (6,019 reloads vs. one
-process) strongly implies accumulation. The cost is daemon IPC churn
-(load-amplified event delivery), not necessarily worker leaks per
-se — but it's a contributing factor to "AOF feels slow under heavy
-session churn".
+Retraction: incorrect. Source review against
+`~/Projects/openclaw/src/plugins/registry.ts` (the real source, not
+the obfuscated dist) confirms `api.on` is implemented as
+`registerTypedHook(record, hookName, handler, opts, hookPolicy)`,
+and the registry has `pluginHookRollback` machinery + a
+`rollbackPluginGlobalSideEffects(pluginId)` function that explicitly
+unregisters previous handlers before re-registration. Within a
+single Node process, hooks do NOT pile up across reloads.
+
+Cross-process is irrelevant — each Node process has its own
+listener registry. The N=11 alive plugin-loaded PIDs each have their
+own (correctly bounded) listener set.
+
+The original misread came from reading the dist bundle, not the
+source. Going forward, OpenClaw analysis works from
+`~/Projects/openclaw` — see auto-memory entry
+`feedback_openclaw_source_analysis`.
 
 ### Finding C — No `stop` lifecycle hook on the plugin export (medium)
 
@@ -395,3 +400,20 @@ Three changes, ordered by leverage:
   shutdown path (Finding A). Workstream 2.5 (lifecycle fix) scoped
   but not implemented — pending user decision on whether to
   prioritise that vs. Workstream 3 (dispatch ghosting).
+- 2026-04-28 12:50Z — Comprehensive plugin SDK review against the
+  real OpenClaw source at `~/Projects/openclaw` (v2026.4.23,
+  commit a979721). Six gaps found beyond the worker leak; tabled
+  in conversation. Finding B retracted (the dist-vs-source mismatch
+  bit me — `api.on` does NOT accumulate, retraction documented
+  inline). Convention saved: `feedback_openclaw_source_analysis`
+  memory.
+- 2026-04-28 12:55Z — Workstream 2.5 step #1 shipped: pollers
+  registered as plugin services. `OpenClawPluginServiceContext` +
+  updated `OpenClawServiceDefinition` types match canonical
+  upstream shapes. New regression test
+  `bug-2026-04-28-plugin-service-lifecycle.test.ts` asserts
+  registerAofPlugin no longer eagerly starts pollers, services are
+  registered with the expected ids, and start/stop callbacks
+  cleanly transition the module-level gates. Full suite: 3025/3025
+  passing. Workstream 2.5 steps #2 (typed `on` + registrationMode
+  guard) and #3 (`reload` declaration) deferred.

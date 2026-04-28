@@ -88,9 +88,16 @@ describe("AOF OpenClaw plugin entrypoint", () => {
       dryRun: false,
     });
 
-    // Phase 43 D-02: the plugin no longer registers an AOFService — the
-    // scheduler/store/etc. live daemon-side.
-    expect(registry.serviceIds).toEqual([]);
+    // Phase 43 D-02: the plugin no longer registers an AOFService for the
+    // scheduler/store/etc. (those live daemon-side). 2026-04-28 lifecycle
+    // fix: the long-poll bridges (spawn-poller, chat-delivery-poller) DO
+    // register as plugin services so OpenClaw can confine them to the
+    // gateway main process and stop them cleanly on shutdown. See
+    // .planning/debug/2026-04-28-aof-dispatch-ghosting-and-worker-hygiene.md.
+    expect(registry.serviceIds.sort()).toEqual([
+      "aof-chat-delivery-poller",
+      "aof-spawn-poller",
+    ]);
     expect(registry.toolNames).toEqual([
       // All 16 tools now come from the shared toolRegistry (post-43-07 Task 1
       // moved the 3 project tools into the shared registry too).
