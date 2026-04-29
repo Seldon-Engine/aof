@@ -100,12 +100,58 @@ export interface OpenClawAgentRuntime {
   resolveAgentTimeoutMs?: (cfg: Record<string, unknown>, agentId?: string) => number;
   ensureAgentWorkspace?: (params?: { dir?: string; ensureBootstrapFiles?: boolean }) => Promise<{ dir: string } | void>;
   session?: {
-    resolveSessionFilePath?: (sessionId: string) => string;
+    resolveSessionFilePath?: (
+      sessionId: string,
+      entry?: { sessionFile?: string },
+      opts?: { agentId?: string; sessionsDir?: string },
+    ) => string;
+    resolveStorePath?: (
+      store?: string,
+      opts?: { agentId?: string },
+    ) => string;
+    loadSessionStore?: (storePath: string) => Record<string, {
+      sessionId?: string;
+      sessionFile?: string;
+      updatedAt?: number;
+      lastChannel?: string;
+      lastTo?: string;
+      [key: string]: unknown;
+    }>;
   };
+}
+
+/**
+ * Subset of the openclaw `api.runtime.system` surface we consume.
+ * Canonical definition lives in openclaw's
+ * `plugin-sdk/src/plugins/runtime/types-core.ts` (PluginRuntimeCore.system)
+ * and the implementations live in `infra/system-events.ts` +
+ * `infra/heartbeat-wake.ts`.
+ *
+ * Optional everywhere — older OpenClaw gateways predate this surface, and
+ * AOF's chat-delivery-poller feature-detects before calling.
+ */
+export interface OpenClawSystemRuntime {
+  enqueueSystemEvent?: (
+    text: string,
+    options: {
+      sessionKey: string;
+      contextKey?: string | null;
+      deliveryContext?: Record<string, unknown>;
+      trusted?: boolean;
+    },
+  ) => boolean | unknown;
+  requestHeartbeatNow?: (opts?: {
+    reason?: string;
+    coalesceMs?: number;
+    agentId?: string;
+    sessionKey?: string;
+    heartbeat?: { target?: string };
+  }) => void;
 }
 
 export interface OpenClawRuntime {
   agent?: OpenClawAgentRuntime;
+  system?: OpenClawSystemRuntime;
 }
 
 // --- API Interface ---
