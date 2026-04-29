@@ -88,9 +88,16 @@ describe("LiveAdapter", () => {
 
   it("throws error when openclaw command fails", async () => {
     const adapter = new LiveAdapter();
-    
+
     // Command will fail if openclaw not installed or returns invalid JSON
-    // We expect this to throw in test environment
+    // We expect this to throw in test environment.
+    //
+    // 30s timeout because this shells out to the real `openclaw` CLI; the
+    // subprocess can take 7-12s to start + fail under suite load (CPU
+    // contention, cold node module load). The default 10s ceiling is
+    // racy — fails ~1 run in 5 even on otherwise-green builds. The
+    // actual command-fail latency we're testing is bounded by the
+    // CLI's own startup time, which we don't control.
     await expect(adapter.getAgents()).rejects.toThrow(/Failed to get live agents/);
-  });
+  }, 30_000);
 });
