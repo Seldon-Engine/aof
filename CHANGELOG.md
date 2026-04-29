@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.19.0](https://github.com/d0labs/aof/compare/v1.18.1...v1.19.0) (2026-04-29)
+
+### Features
+
+* **chat-delivery-poller:** inject completion notifications into dispatcher session context ([de5b6bd](https://github.com/d0labs/aof/commit/de5b6bd4ff2037230dac5f64d412d69286606508))
+
+### Tests
+
+* **drift:** bump LiveAdapter timeout to 30s to defuse pre-existing flake ([40fb387](https://github.com/d0labs/aof/commit/40fb3873c36f032170a880eba286e1cd11870fac))
+
 ## [1.18.1](https://github.com/d0labs/aof/compare/v1.18.0...v1.18.1) (2026-04-28)
 
 ### Bug Fixes
