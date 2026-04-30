@@ -1,7 +1,7 @@
 # AOF Code Map
 
 Agentic Ops Fabric — deterministic orchestration for multi-agent systems.  
-TypeScript ESM | Node >= 22 | ~47K LOC source | 300 source files, 268 test files
+TypeScript ESM | Node >= 22 | ~50K LOC source | 314 source files, 295 test files
 
 ---
 
@@ -58,6 +58,7 @@ delegation/      Subtask delegation artifacts
 drift/           Org chart <-> gateway drift detection
 murmur/          Inter-agent review triggers
 recovery/        Run artifacts, heartbeat, resume
+artifacts/       Long-term artifact archive (tar.zst + SQLite index, Phase 999.4)
 trace/           Session trace capture and formatting
 metrics/         Prometheus-compatible metric collection
 openclaw/        Thin-plugin bridge (Phase 43 — gutted adapter.ts + new siblings)
@@ -172,43 +173,67 @@ src/ipc/
 
 ---
 
-## Thin-plugin module (`src/openclaw/` — Phase 43)
+## Thin-plugin module (`src/openclaw/` — Phase 43+)
 
-Pre-43 `adapter.ts` was 393 LOC and instantiated `AOFService`, built stores, loaded the org chart, and self-started the scheduler. Post-43 it is 145 LOC and a thin bridge.
+Pre-43 `adapter.ts` was 393 LOC and instantiated `AOFService`, built stores, loaded the org chart, and self-started the scheduler. Post-43 it is 197 LOC and a thin bridge. Phase 44+ added subscription-delivery typing and per-process worker hygiene (registrationMode guard + plugin-service registration).
 
 ```
 src/openclaw/
-├── adapter.ts                145 LOC — registerAofPlugin(): tool-registry → IPC proxies,
-│                             4/7 lifecycle hooks forward, starts spawn-poller, proxies
-│                             /aof/status + /aof/metrics to daemon (Open Q4).
+├── adapter.ts                197 LOC — registerAofPlugin(): registrationMode guard
+│                             (early-return when not "full"), tool-registry → IPC proxies,
+│                             4/7 lifecycle hooks forward, /aof/status + /aof/metrics
+│                             proxy (auth: "gateway"). Wraps spawn-poller + chat-delivery-poller
+│                             as `api.registerService({ id, start, stop })` so OpenClaw's
+│                             gateway-only `startPluginServices` confines them to one process
+│                             (workers no longer leak long-poll handles — see plugin-services
+│                             note below).
 ├── daemon-ipc-client.ts      Module-level singleton `ensureDaemonIpcClient({ socketPath })`.
 │                             Uses `http.request({ socketPath })` NOT fetch — AbortSignal.timeout
 │                             over Unix socket fetch is unreliable (RESEARCH Pitfall 4).
-├── spawn-poller.ts           `startSpawnPollerOnce(client, api)` — module-scope gate survives
-│                             OpenClaw's per-session plugin reload (Pitfall 3). Long-poll
-│                             with 35_000ms waitForSpawn timeout (25s server keepalive + 5s
-│                             grace + 5s buffer). Handler throws become
+├── spawn-poller.ts           `startSpawnPollerOnce(client, api)` + `stopSpawnPoller()`.
+│                             Long-poll with 30_000ms wait. Module-scope gate is now a
+│                             defense-in-depth against same-process re-register (config reload);
+│                             gateway-vs-worker isolation is enforced by service registration
+│                             upstream. Handler throws become
 │                             { success: false, error: { kind: "exception" } }.
-├── openclaw-executor.ts      OpenClawAdapter class retained for standalone/legacy path.
-│                             NEW: `runAgentFromSpawnRequest(api, sr)` consumed by the
-│                             spawn-poller. Shared helpers: `prepareEmbeddedRun` +
-│                             `executeEmbeddedRun`.
+├── openclaw-executor.ts      420 LOC. `runAgentFromSpawnRequest(api, sr)` is the sole
+│                             production entry point — consumed by the spawn-poller.
+│                             Passes `authProfileId` + agent provider/model explicitly to
+│                             `runEmbeddedPiAgent` (no env fallback). Setup-phase timeout
+│                             prevents dispatch ghosts.
 ├── status-proxy.ts           Thin IPC proxy for `/aof/status` + `/aof/metrics` gateway URLs
 │                             (preserves pre-43 URL compatibility — dashboards keep working).
 ├── dispatch-notification.ts  `mergeDispatchNotificationRecipient(params, id, store)` —
-│                             extracted from adapter.ts for reuse.
+│                             attaches captured dispatcher route + actor envelope as
+│                             OpenClawChatDelivery (subscription-delivery.ts schema).
 ├── tool-invocation-context.ts  OpenClawToolInvocationContextStore — per-session route capture
 │                             for notify-on-completion. Stays plugin-side (D-07): captured route
 │                             is attached to aof_dispatch params BEFORE the IPC send.
+├── subscription-delivery.ts    Phase 44 — Zod schema for the `openclaw-chat` SubscriptionDelivery
+│                             kind. Promotes captured-dispatcher fields (sessionKey, sessionId,
+│                             target, channel, threadId, dispatcherAgentId, capturedAt, pluginId)
+│                             from a plugin-local interface to a typed wire contract. Passthrough
+│                             on unknown fields so 999.4 project-wide subscriptions can extend
+│                             without a schema break.
 ├── openclaw-chat-delivery.ts   "openclaw-chat" subscription delivery kind. Runs on the
 │                             daemon as an EventLogger callback: on task.transitioned to
 │                             a trigger status, filters matching subscriptions and calls
 │                             messageTool.send(target, msg, ctx). Dedupe + subscription
 │                             status updates live here.
-├── chat-delivery-poller.ts     `startChatDeliveryPollerOnce(client, api)` — plugin-side
-│                             long-poll loop that drains GET /v1/deliveries/wait and
-│                             dispatches each ChatDeliveryRequest to sendChatDelivery().
-│                             Same module-scope gate + backoff pattern as spawn-poller.
+├── chat-delivery-poller.ts     658 LOC. `startChatDeliveryPollerOnce(client, api)` — plugin-side
+│                             long-poll loop. Beyond simple chat send (`chat-message-sender`),
+│                             it now ALSO injects completion notifications into the dispatcher's
+│                             session as a system event AND wakes the agent so the next turn
+│                             includes it as turn-context (de5b6bd, Apr 29). Decoupled from
+│                             chat-send so a `NoPlatformError` on a subagent/main/cron sessionKey
+│                             no longer suppresses the wake. Branches by heartbeat capability:
+│                             agents with `heartbeat.every` get `enqueueSystemEvent +
+│                             requestHeartbeatNow`; agents without fall back to
+│                             `runtime.agent.runEmbeddedPiAgent` (resume-by-default into the
+│                             agent's main session). Ephemeral session keys
+│                             (`agent:X:cron:UUID`, `agent:X:subagent:UUID`) are redirected to
+│                             `agent:X:<mainKey>` so wakes land in the agent's ongoing inbox.
+│                             In-flight dedup via `Set<sessionKey>` to absorb recovery-replay storms.
 ├── chat-message-sender.ts      sendChatDelivery(api, req): parses sessionKey (or uses
 │                             delivery.channel + target) and dispatches to the matching
 │                             api.runtime.channel.<platform>.sendMessage<Platform>.
@@ -216,18 +241,31 @@ src/openclaw/
 ├── matrix-notifier.ts          MatrixMessageTool + ChatDeliveryContext interface. The
 │                             daemon's queue-backed tool implements this to bridge the
 │                             notifier onto ChatDeliveryQueue.enqueueAndAwait().
-├── executor.ts, permissions.ts, types.ts  unchanged leaf files.
+├── executor.ts, permissions.ts, types.ts  unchanged leaf files (types.ts now exports
+│                             OpenClawSystemRuntime + extended OpenClawAgentRuntime.session for
+│                             system-event injection paths).
 ```
+
+### Plugin services & registrationMode guard (2026-04-28)
+
+Pre-fix, `registerAofPlugin` called `startSpawnPollerOnce` and `startChatDeliveryPollerOnce` directly during `register()`. OpenClaw invokes `register()` **in every Node process that loads the plugin** — gateway main + each per-session worker. That meant every worker opened its own pair of long-poll handles on the daemon socket and the loop kept the worker alive forever (11 alive plugin-loaded PIDs observed at audit time on 2026-04-28: 1 gateway + 10 worker zombies). Post-fix:
+
+- **`registrationMode` guard:** OpenClaw's plugin registry only attaches `registerService`, `registerTool`, `registerHook`, `registerHttpRoute`, etc. when `registrationMode === "full"`. Other modes (`setup-only`, `setup-runtime`, `cli-metadata`) omit them and would TypeError. `register()` early-returns in non-`"full"` modes. `undefined` is treated as `"full"` for back-compat.
+- **Plugin-service registration:** spawn-poller and chat-delivery-poller are wrapped as `api.registerService({ id, start, stop })`. OpenClaw's `startPluginServices` runs only in the gateway main process exactly once during server startup — workers never invoke it. Confines poller startup to the one process that owns the dispatch bridge and gives a clean shutdown stop hook.
+- **Module-scope gates retained as defense-in-depth** against same-process re-register (config reload / hot-swap).
+- **Typed `on()` hook:** `<K extends PluginHookName>(hookName: K, handler, opts?)`. PluginHookName mirrors all 29 canonical OpenClaw hooks so typos fail at compile time.
 
 ### Chat-delivery pipeline
 
 The "notify the originating session on task completion" feature crosses process boundaries (EventLogger lives in the daemon; session-send lives in the plugin). Mirrors the spawn-poller inversion:
 
-1. Agent calls `aof_dispatch`. `mergeDispatchNotificationRecipient` (in `dispatch-notification.ts`) attaches `{kind: "openclaw-chat", sessionKey, sessionId, target, channel, threadId}` to `notifyOnCompletion` using the plugin-local invocation-context store.
+1. Agent calls `aof_dispatch`. `mergeDispatchNotificationRecipient` (in `dispatch-notification.ts`) attaches an `openclaw-chat` `OpenClawChatDelivery` (sessionKey, sessionId, target, channel, threadId, dispatcherAgentId, capturedAt) to `notifyOnCompletion` using the plugin-local invocation-context store.
 2. Daemon creates a subscription with that delivery payload via `project-tools.ts:aofDispatch`.
-3. Task transitions to a trigger status (`blocked|review|done|cancelled|deadletter`). `EventLogger.log` fires the `OpenClawChatDeliveryNotifier` callback wired in `startAofDaemon`.
+3. Task transitions to a trigger status (`blocked|review|done|cancelled|deadletter`). `EventLogger.log` fires the `OpenClawChatDeliveryNotifier` callback wired in `startAofDaemon` (uses `daemon/resolve-store-for-task.ts` to find the owning project store from a bare `taskId`).
 4. The notifier calls `messageTool.send(target, renderedMsg, ctx)` on the daemon-side `QueueBackedMessageTool`, which enqueues a `ChatDeliveryRequest` onto `ChatDeliveryQueue` and returns a promise pending plugin ACK.
-5. Plugin's `chat-delivery-poller` claims the request via long-poll, `chat-message-sender` dispatches to the right OpenClaw outbound send.
+5. Plugin's `chat-delivery-poller` claims the request via long-poll. **Two independent paths run from here** (decoupled in de5b6bd to keep the wake load-bearing even when chat-send legitimately fails):
+   - **Chat-send (audit channel):** `chat-message-sender` dispatches to the matching OpenClaw outbound channel. May fail with `NoPlatformError` on `subagent/main/cron` sessionKeys — non-fatal for the wake path.
+   - **System-event injection (orchestrator resume):** push the completion as a system event into the dispatcher's session AND wake the agent so its next turn carries it as turn-context. Ephemeral session keys (`agent:X:cron:UUID`, `agent:X:subagent:UUID`) are redirected to `agent:X:<mainKey>` for wake purposes only (chat keeps the original key). Wake mechanism branches on heartbeat capability: heartbeat-enabled agents get `enqueueSystemEvent + requestHeartbeatNow`; heartbeat-disabled agents fall back to `runtime.agent.runEmbeddedPiAgent` (resume-by-default into the agent's existing main session via `runtime.agent.session.{resolveStorePath, loadSessionStore, resolveSessionFilePath}`). In-flight dedup via `Set<sessionKey>` collapses recovery-replay storms. Embedded-run wakes prefix prompts with `[AOF wake notification — informational. Reply NO_REPLY if this doesn't affect your active work.]` so agents recognize them as informational rather than directives.
 6. Plugin POSTs `/v1/deliveries/{id}/result`. Daemon's `ChatDeliveryQueue.deliverResult` resolves/rejects the awaiting promise.
 7. Notifier updates the subscription: `notifiedStatuses += toStatus`; for terminal statuses, `status = "delivered"` + `deliveredAt`. On failure, `deliveryAttempts++` + `failureReason`.
 
@@ -299,9 +337,15 @@ ITaskStore (interface, 20+ methods)
   +-- createMockStore() (test: typed vi.fn() stubs, pre-seedable)
 ```
 
-All task mutations go through `ITaskStore`. Never call `serializeTask` + `writeFileAtomic` directly. Tasks live in `tasks/<status>/TASK-NNN.md` and physically move on status transitions.
+All task mutations go through `ITaskStore`. Never call `serializeTask` + `writeFileAtomic` directly. Tasks live in `tasks/<status>/TASK-NNN-<nanoid>.md` and physically move on status transitions.
 
 Post-43, `PermissionAwareTaskStore` wraps **daemon-side**: `src/ipc/store-resolver.ts::buildDaemonResolveStore` loads the org chart once (cached) and returns a per-actor, per-project permission-aware store. Plugin no longer loads org charts.
+
+**Task ID minting (2026-04-25, fbcdda8):** ID format is `TASK-YYYY-MM-DD-<nanoid8>` — the legacy per-store sequential counter (`-001`, `-002`, …) caused cross-store collisions because two stores writing on the same day could each mint `TASK-2026-04-26-001`. Production observation: `TASK-2026-04-26-001` was minted twice on the same day across the unscoped vault and a project-scoped store. Nanoid is collision-free across stores.
+
+**Atomic transitions (2026-04-25, Phase 46-01):** `ITaskStore.transition(...)` accepts a `metadataPatch` field so callers can stamp metadata + rename in a single atomic operation. `transitionToDeadletter` was collapsed to one `store.transition` call to eliminate the stamp-but-not-renamed crash window.
+
+**Startup reconciliation (2026-04-25, Phase 46-02):** `FilesystemTaskStore.init()` runs a reconciliation sweep that detects orphaned in-progress tasks (lease holder gone) and resets them, closing the daemon-crash-mid-dispatch window where the next stale-heartbeat tick would otherwise be the first actor to notice.
 
 ### Tool Registry
 
@@ -347,7 +391,7 @@ GatewayAdapter (interface — src/dispatch/executor.ts)
   getSessionStatus(sessionId)      -> SessionStatus
   forceCompleteSession(sessionId)  -> void
 
-Implementations (all three used by the daemon post-43):
+Implementations:
   PluginBridgeAdapter (primary)   — enqueues SpawnRequest onto SpawnQueue, awaits
                                      deliverResult() via POST /v1/spawns/{id}/result
                                      callback keyed by server-generated spawnId.
@@ -356,9 +400,10 @@ Implementations (all three used by the daemon post-43):
                                      picks primary vs fallback; in plugin-bridge
                                      mode with no plugin attached returns the D-12
                                      "no-plugin-attached" sentinel.
-  OpenClawAdapter                 — kept in-tree for the standalone/legacy in-process
-                                     path and consumed by runAgentFromSpawnRequest.
   MockAdapter                     — configurable test double (auto-complete, fail modes).
+
+Plugin-side, the spawn-poller calls `runAgentFromSpawnRequest(api, sr)` directly —
+not via a `GatewayAdapter` instance. The adapter interface is daemon-side only.
 ```
 
 ---
@@ -405,6 +450,25 @@ if (result.error === "no-plugin-attached") {
 
 Task stays in `ready/`; retryCount is **not** incremented; deadletter is **not** triggered. Upholds PROJECT.md's core invariant: "tasks never get dropped." Covered by `tests/integration/hold-no-plugin.test.ts` + `plugin-session-boundaries.test.ts` + `daemon-restart-midpoll.test.ts`.
 
+### Phase 46 — daemon state freshness (Tier A bug fixes)
+
+A cluster of fixes for dispatch ghosts and silently-stuck tasks observed in the 2026-04-26 incident batch:
+
+- **Atomic `transitionToDeadletter`** (46-01, BUG-046a) — `dispatch/lifecycle-handlers.ts` collapses metadata stamp + status rename into a single `store.transition({ metadataPatch })` call. Prevents the half-stamped state where a crash between stamp and rename leaves the task with deadletter metadata but a non-deadletter on-disk status. `TransitionOpts.metadataPatch` is the new store-side hook.
+- **Startup reconciliation** (46-02) — `FilesystemTaskStore.init()` now sweeps for in-progress tasks whose lease holders no longer exist and reconciles them on startup, closing a window where a daemon crash mid-dispatch left tasks in `running/` with a dead lease until the next stale-heartbeat sweep.
+- **Project rediscovery on every poll** (46-03, BUG-046b) — `AOFService.pollAllProjects` re-runs `discoverProjects()` each tick instead of caching at init. New projects created post-startup now get scheduled without restarting the daemon.
+- **Bounded log rotation** (46-04, BUG-046c) — Pino transport switched to `pino-roll` worker (size + time bounds) instead of an unbounded `fd:2` destination. `pino-roll` is skipped under `vitest` env (worker-thread incompatibility). See `logging/index.ts`.
+- **Empty routing rejected at `aof_dispatch`** (46-05, BUG-046d) — `tools/project-tools.ts` requires non-empty routing; absent routing now defaults from project owner instead of silently dispatching with no target. RED regression in `tools/__tests__/bug-046d-routing-required.test.ts`.
+- **Plugin-side actor fallback** (46-06, BUG-046e) — daemon `/v1/tool/invoke` injects `envelope.actor` into `inner.data` so plugin-side tool handlers see the actor regardless of how the request was constructed; plugin defends in depth by reading `captured.actor` if both arrive empty.
+
+### Phase 999.3 — heartbeat-handler precondition guard
+
+`recovery/heartbeat-handler.ts::handleStaleHeartbeat` now guards against two races: (a) the task's status changed since the stale-heartbeat scan kicked off, (b) the lease was reassigned to a different holder mid-scan. Pre-fix, both could double-requeue or strand the task. Per-precondition coverage in `recovery/__tests__/`.
+
+### Permanent-error classification (2026-04-28)
+
+`dispatch/handleRunComplete` now invokes `classifySpawnError` so OpenClaw's `Agent error: exception: No credentials found for profile "openai:default"` (and similar credential failures) is tagged `errorClass = "permanent"` and deadlettered on first failure rather than cycling `blocked → ready` until retry exhaustion. Avoids burning retry budget on configuration errors that won't self-heal.
+
 ### Per-task spawn timeouts
 
 `aof_dispatch` accepts an optional `timeoutMs` (Zod-validated, capped at `MAX_DISPATCH_TIMEOUT_MS = 4h` in `tools/project-tools.ts`). Stored in task metadata and consumed by `assign-executor.ts` at spawn time, overriding the daemon-level `spawnTimeoutMs` default. Flows through the `SpawnRequest` envelope to the plugin's spawn-poller unchanged.
@@ -445,7 +509,36 @@ standalone-adapter.ts  GatewayAdapter via HTTP to external OpenClaw gateway —
 health.ts         Shutdown flag shared with CLI.
 service-file.ts   installService/uninstallService — writes launchd plist /
                   systemd user unit. Consumed by migration 007.
+resolve-store-for-task.ts  Daemon-side `(taskId) => ITaskStore?` resolver. `task.transitioned`
+                  events carry only `taskId`; chat-delivery notifier needs to find which
+                  project store owns it. Tries the unscoped base store first, then scans
+                  `discoverProjects()` lazily, caching `taskId → projectId` indefinitely.
+                  Misses are NOT cached (a `ready` task may resolve to `done` with a
+                  different on-disk path — store.get() handles that internally).
 ```
+
+### Artifacts (`src/artifacts/` — Phase 999.4, artifact lifecycle v1)
+
+Long-term archive surface for finished work. Phase boundary between AOF's task state (deleted aggressively) and the user's research/output corpus (preserved indefinitely with index + integrity check).
+
+```
+schema.ts          Zod schemas — ArtifactArchiveManifest (per-archive sidecar JSON,
+                   schema_version: 1, sha256 + file_count + bytes), ArtifactArchiveIndexRow
+                   (SQLite row shape with tags_json + 0/1 boolean), ArtifactArchiveRecord
+                   (decoded list output). Three option schemas:
+                   archiveArtifactOptions / listArtifactOptions / restoreArtifactOptions.
+paths.ts           Resolves archiveRoot + dbPath under AOF_DATA_DIR/artifacts/.
+tar.ts             tar+zstd helpers (38 LOC) — pack/unpack with deterministic ordering.
+archive-store.ts   SQLite index (better-sqlite3). Insert/list/get rows; tags stored
+                   as JSON. 113 LOC.
+archive-service.ts Orchestrates: hash → tar → write manifest → insert row → optional
+                   destructive prune (move source to trash/). 252 LOC. List + restore
+                   complete the surface.
+cli/commands/artifacts.ts  `aof artifacts archive|list|restore` (130 LOC). Subcommand
+                   under `aof` registered in `cli/program.ts`.
+```
+
+Integrity contract: `sha256` of the source tree is computed pre-archive and verified on restore. The optional `pruneOriginalToTrash` flag moves the original into `~/.aof/data/artifacts/trash/` rather than deleting outright (recoverable). User-facing guide in `docs/guide/artifact-lifecycle.md`.
 
 ### Memory (`src/memory/`)
 
@@ -523,9 +616,7 @@ Shell-side entry point `scripts/install.sh` owns:
 
 ### OpenClaw Notification Delivery
 
-Plugin-owned subscription-delivery subsystem that routes task state changes back to the originating chat session. Plugin-side hooks capture the OpenClawNotificationRecipient (sessionKey/sessionId/replyTarget/channel/threadId) and attach it to `aof_dispatch` params BEFORE the IPC send. The core-agnostic `SubscriptionDelivery` payload is emitted daemon-side by the `EventLogger` callback on task status transitions (blocked/review/done/cancelled/deadletter).
-
-All OpenClaw-specific idioms stay inside `src/openclaw/`.
+Subscription-delivery subsystem that routes task state changes back to the originating chat session and (for orchestrator-resume) back into the dispatcher agent's session as a system event + wake. Captured plugin-side, emitted daemon-side as a typed `SubscriptionDelivery` (`openclaw-chat` kind, schema in `openclaw/subscription-delivery.ts`) on task status transitions (`blocked|review|done|cancelled|deadletter`). All OpenClaw-specific idioms stay inside `src/openclaw/`. Full pipeline narrative under *Thin-plugin module → Chat-delivery pipeline*.
 
 ---
 
@@ -597,17 +688,21 @@ Plugin IPC proxies pick up new registry entries automatically — no plugin-side
 
 | File | Lines | Notes |
 |------|-------|-------|
-| `store/task-store.ts` | 616 | Core store, already extracted helpers |
+| `store/task-store.ts` | 784 | Core store, grew with reconciliation + metadataPatch + nanoid id |
+| `openclaw/chat-delivery-poller.ts` | 658 | Chat send + system-event injection + embedded-run wake |
 | `cli/commands/memory.ts` | 607 | CLI command module, many subcommands |
 | `cli/commands/daemon.ts` | 599 | CLI command module |
+| `cli/commands/setup.ts` | 589 | Interactive setup wizard + migration registry |
 | `dispatch/dag-evaluator.ts` | 588 | Complex DAG state machine |
-| `cli/commands/setup.ts` | 588 | Interactive setup wizard + migration registry |
+| `service/aof-service.ts` | 586 | AOFService orchestration (daemon-only post-43) |
+| `openclaw/openclaw-executor.ts` | 420 | runAgentFromSpawnRequest + prepareEmbeddedRun + executeEmbeddedRun + explicit auth/provider/model |
 | `protocol/router.ts` | 550 | 8 handler methods, could extract |
 | `schemas/workflow-dag.ts` | 538 | Complex schema + validation |
 | `dispatch/scheduler.ts` | 531 | Core scheduler, already extracted helpers |
-| `service/aof-service.ts` | 505 | AOFService orchestration (daemon-only post-43) |
 | `packaging/wizard.ts` | 493 | Install wizard |
-| `openclaw/openclaw-executor.ts` | 419 | Shared `prepareEmbeddedRun` + `executeEmbeddedRun` + runAgentFromSpawnRequest |
+| `tools/task-workflow-tools.ts` | 471 | DAG workflow tool surface |
+| `org/linter.ts` | 463 | Org chart structural validator |
+| `projects/migration.ts` | 462 | Project layout migration helpers |
 
 ---
 
