@@ -313,3 +313,57 @@ Acceptance: `aof update` from v(N-1) → vN works on a clean install, data prese
 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 47 to break down)
+
+### Phase 48: Codebase cleanup wave 2 — excise dormant complexity, defensive cruft, and historical comment debt
+
+**Goal:** Reduce the maintenance surface left behind by Phases 41-46 by deleting code paths that no longer fire in production, collapsing defensive shells around already-typed APIs, decomposing one god function, removing dead historical references from source comments, and splitting the three biggest CLI command files. Mirrors the v1.10 "Codebase Cleanups" milestone shape — multiple small, atomic, behavior-preserving commits with no API breakage. Triggered by an end-of-session audit on 2026-04-30 that surfaced ~15 distinct cleanup targets after the Phase 43-46 churn.
+
+**Already shipped as session-driven preliminary work** (commits `01da21d` and `23f2055`, both on `main`):
+- Wave 0a: `OpenClawAdapter` class + barrel + deprecated alias excised. The class had zero production callers post-Phase-43 (only tests instantiated it). −578 LOC across `src/openclaw/`. Replacement coverage at `src/openclaw/__tests__/run-agent-from-spawn-request.test.ts`.
+- Wave 0b: `SpawnResult.platformLimit` dynamic-throttling path excised. The only producer was the deleted `OpenClawAdapter`; neither `PluginBridgeAdapter` nor `StandaloneAdapter` parses platform-limit errors. The full consumer chain (`effectiveConcurrencyLimit` state in `scheduler.ts`, the ref threading through `executeActions → handleAssign → executeAssignAction`, the `concurrency.platformLimit` event type and notification rule, the orphan JSDoc block, two whole test files) went with it. −618 LOC across `src/dispatch/`. Static `config.maxConcurrentDispatches` throttling preserved (load-bearing).
+
+**Scope (this phase) — by audit-rank:**
+
+1. **`chat-delivery-poller.ts` defensive-cast reduction** (target ~250 LOC reduction). The runtime is typed in `src/openclaw/types.ts` (`OpenClawSystemRuntime`, `OpenClawAgentRuntime`), but the poller double-checks every field with cast-and-shape guards (3 identical `as { config?: { loadConfig?: ... } } | undefined` casts at `readMainKey:514`, `wakeViaEmbeddedRun:386`, `agentHasHeartbeat:556`). `injectSessionWakeUp` (`:163-321`) is 158 lines for redirect-key → enqueue → choose-mechanism → wake; each branch has its own verbose `wakeLog.info` payload. Collapse to one summary log per outcome. `agentHasHeartbeat` (`:554-586`) is 33 LOC of `as { agents?: unknown }` introspection that becomes ~10 lines once `cfg` is typed.
+
+2. **`dispatch/scheduler.ts:poll()` god-function decomposition.** 450 LOC of nine numbered inline phases, two manual stats-counting loops, inline DFS for circular-dep detection, inline YAML parse, inline alert thresholds. Extract `findCircularDeps(allTasks)`, reuse `buildTaskStats(updatedTasks)` instead of the duplicate increment block at `:339-360`, lift each numbered step (SLA / hop timeouts / promotion / DAG hop dispatch / callback retry / murmur eval) to a top-level helper. Target: `poll()` shrinks to ~80 LOC orchestrator. **Highest risk in the phase** — touches the dispatch hot path. Behavior must be byte-identical; tests must remain green without modification.
+
+3. **`AOFService.pollAllProjects` stats consolidation** (`src/service/aof-service.ts:500-558`). Manually zeroes nine `stats.*` fields then increments each one in a loop. Replace with a `Status[]` array + `reduce`. ~30 LOC → ~10. Pure local refactor.
+
+4. **`AOFService.reconcileOrphans` dedup** (`:352-447`). Two near-identical try/log/transition blocks for DAG vs non-DAG paths with the same error-swallow pattern. Extract `reclaimOne(task)`. Target: ~95 LOC → ~55.
+
+5. **`protocol/router.ts:handleSessionEnd` cleanup** (`:286-382`). 70-LOC DAG branch re-asserts `this.logger as import("../events/logger.js").EventLogger` four times. Hoist the cast to the constructor or actually narrow the type at the property declaration.
+
+6. **Sweep historical phase/bug references from production source.** 119 hits across 25 files: `Phase 43/44/45/46/47`, `D-01` … `D-14`, `BUG-046a` … `BUG-046e`, `WR-01/02`, `T-43-01`, `D-44-OBSERVABILITY`, etc. Per CLAUDE.md "Don't reference the current task, fix, or callers". Worst offenders: `dispatch/scheduler.ts` (15 refs), `daemon-ipc-client.ts` (11), `tools/project-tools.ts` (7), `store/task-store.ts` (7), `migrations/007-daemon-required.ts` (7). Mechanical sweep — keep the substantive WHY, drop the milestone tag.
+
+7. **Audit and likely remove the two callbackDepth env-var fallbacks.** `src/openclaw/adapter.ts:41-43` (`parseCallbackDepth`) and `src/mcp/shared.ts:97-98` both still read `process.env.AOF_CALLBACK_DEPTH`. Phase 43 D-06 made the IPC envelope the source of truth. Confirm the env fallback is dead before excising — `dispatch/callback-delivery.ts:351-400` still mutates `process.env.AOF_CALLBACK_DEPTH` (the documented CLAUDE.md exception); this work needs to confirm whether that mutation is still needed too, or whether the envelope path obsoletes it.
+
+8. **Split `cli/commands/{memory,daemon,setup}.ts`.** 600 LOC each. `memory.ts` packs 17 subcommands, `daemon.ts` 11, `setup.ts` 2 (interactive wizard + migration registry). Standard Commander.js layout puts each subcommand under `src/cli/commands/<group>/<verb>.ts`. Mechanical, lowest-risk.
+
+9. **`FilesystemTaskStore.create` retry-loop bound.** `task-store.ts:353` still loops up to 1000 times on EEXIST — leftover from the pre-`fbcdda8` per-store sequential counter. With nanoid8 suffixes, EEXIST is vanishingly rare. Cap at 5; failing fast surfaces real disk-full / permission bugs instead of looping silently.
+
+**Out of scope:**
+- Behavior changes (this is mechanical cleanup; user-facing surface should be identical).
+- The 5 Serena-parser-incompatible files (`events/logger.ts`, `events/notifier.ts`, `views/kanban.ts`, `views/mailbox.ts`, `events/notification-policy/engine.ts`) — they're flagged as "Noted Issues" but the parser bug is upstream Serena's, not ours.
+- The `migrations/00X-*.ts` `console.log` calls — bootstrap context where Pino isn't initialized; intentionally console.
+- Adding new tests beyond what's needed to lock in regression contracts; goal is reduction, not addition.
+
+**Acceptance:**
+- `npm run typecheck` clean after every commit
+- `npm test` green after every commit (some test files may shrink, none should break)
+- `npm run test:e2e` green at phase end
+- `npx madge --circular --extensions ts src/` reports 0 cycles
+- Total LOC reduction target: −2,500 to −3,500 across `src/` (combined with the −1,196 already shipped in waves 0a/0b)
+- CODE_MAP.md updated to reflect post-cleanup file sizes; Serena memories refreshed
+- No release-it cut required during the phase; ship as v1.20.0 patch when complete
+
+**Risk profile:** Plans 1, 3, 4, 8, 9 are isolated mechanical refactors — low risk. Plan 2 (scheduler.poll decomposition) is the only one that touches the dispatch hot path; it goes last, gets its own integration-test pass, and ships as a separate atomic commit. Plans 5, 6, 7 are noise reduction with no behavior implication.
+
+**Investigation precedent:** This phase plan was scoped from a session-driven audit on 2026-04-30 (CODE_MAP review + Serena symbolic walk of the largest files in the source tree). The audit findings are not preserved as a separate doc — the plan itself IS the captured analysis.
+
+**Requirements**: TBD (define during /gsd-plan-phase 48; expect one D-NN per scope item)
+**Depends on:** Phase 46 (atomic transitions, project rediscovery), Phase 47 (no hard dep, but ship Phase 47's upgrade-pipeline first so cleanup doesn't compete with user-facing release work)
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 48 to break down per scope item above)
