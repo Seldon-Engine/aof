@@ -22,7 +22,6 @@ export interface ActionExecutionStats {
   leasesExpired: number;
   tasksRequeued: number;
   tasksPromoted: number;
-  updatedConcurrencyLimit: number | null;
 }
 
 /**
@@ -37,7 +36,6 @@ export async function executeActions(
   store: ITaskStore,
   logger: EventLogger,
   config: SchedulerConfig,
-  effectiveConcurrencyLimitRef: { value: number | null },
   metrics?: import("../metrics/exporter.js").AOFMetrics
 ): Promise<ActionExecutionStats> {
   let actionsExecuted = 0;
@@ -73,7 +71,7 @@ export async function executeActions(
             break;
           }
           case "assign": {
-            const r = await handleAssign(action, store, logger, config, allTasks, effectiveConcurrencyLimitRef);
+            const r = await handleAssign(action, store, logger, config, allTasks);
             executed = r.executed;
             failed = r.failed;
             break;
@@ -128,6 +126,5 @@ export async function executeActions(
     leasesExpired,
     tasksRequeued,
     tasksPromoted,
-    updatedConcurrencyLimit: effectiveConcurrencyLimitRef.value,
   };
 }

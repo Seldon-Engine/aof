@@ -57,12 +57,6 @@ export interface PollResult {
 
 const log = createLogger("scheduler");
 
-/**
- * Effective concurrency limit — auto-detected from OpenClaw platform limit.
- * Starts null, set to min(platformLimit, config.maxConcurrentDispatches) when detected.
- */
-let effectiveConcurrencyLimit: number | null = null;
-
 /** Reset throttle state (for testing). */
 export function resetThrottleState(): void {
   resetThrottleStateInternal();
@@ -220,7 +214,6 @@ export async function poll(
       occupiedResources,
       inProgressTasks,
     },
-    effectiveConcurrencyLimit,
     childrenByParent
   );
   actions.push(...dispatchActions);
@@ -229,23 +222,20 @@ export async function poll(
   const recoveryActions = checkBlockedTaskRecovery(allTasks, childrenByParent, config.maxDispatchRetries);
   actions.push(...recoveryActions);
   // 6. Execute actions (only in active mode)
-  const effectiveConcurrencyLimitRef = { value: effectiveConcurrencyLimit };
   const executionStats = await executeActions(
     actions,
     allTasks,
     store,
     logger,
     config,
-    effectiveConcurrencyLimitRef,
     metrics
   );
-  
+
   const actionsExecuted = executionStats.actionsExecuted;
   const actionsFailed = executionStats.actionsFailed;
   const leasesExpired = executionStats.leasesExpired;
   const tasksRequeued = executionStats.tasksRequeued;
   const tasksPromoted = executionStats.tasksPromoted;
-  effectiveConcurrencyLimit = executionStats.updatedConcurrencyLimit;
 
   // 6.5. DAG hop dispatch: check in-progress DAG tasks for ready hops
   if (!config.dryRun && config.executor) {
@@ -484,7 +474,7 @@ export async function poll(
           dryRun: config.dryRun,
           defaultLeaseTtlMs: config.defaultLeaseTtlMs,
           spawnTimeoutMs: config.spawnTimeoutMs ?? 300_000,
-          maxConcurrentDispatches: effectiveConcurrencyLimit ?? config.maxConcurrentDispatches ?? 3,
+          maxConcurrentDispatches: config.maxConcurrentDispatches ?? 3,
           currentInProgress: stats.inProgress,
         });
         

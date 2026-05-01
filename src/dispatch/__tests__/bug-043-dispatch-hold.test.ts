@@ -1,17 +1,12 @@
 /**
- * BUG-043 / Phase 43 — D-12 regression
- *
- * Invariant: when the daemon has a ready task but no plugin is attached
+ * Regression: when the daemon has a ready task but no plugin is attached
  * (SelectingAdapter returns { success: false, error: "no-plugin-attached" }),
  * the scheduler MUST hold the task in `ready/` — not deadletter, not blocked,
  * not retried. Matches PROJECT.md core value: "tasks never get dropped".
  *
- * Wave 0 RED: this test asserts the hold-in-ready branch that does not yet
- * exist in `src/dispatch/assign-executor.ts`. It is RED until Wave 2 adds
- * the `result.error === "no-plugin-attached"` branch (alongside the existing
- * `platformLimit` capacity-exhaustion branch at L196-227) that releases the
- * lease, emits a `dispatch.held` event with `reason: "no-plugin-attached"`,
- * and returns `{ executed: false, failed: false }`.
+ * The `assign-executor` branch on `result.error === "no-plugin-attached"`
+ * releases the lease, emits a `dispatch.held` event with
+ * `reason: "no-plugin-attached"`, and returns `{ executed: false, failed: false }`.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";

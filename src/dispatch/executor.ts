@@ -45,7 +45,6 @@ export interface SpawnResult {
   success: boolean;
   sessionId?: string;
   error?: string;
-  platformLimit?: number;  // OpenClaw platform concurrency limit (from error message)
 }
 
 /**

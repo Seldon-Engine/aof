@@ -26,22 +26,13 @@ export { loadProjectManifest } from "../projects/manifest.js";
 
 /**
  * Execute a single assign action: acquire lease, spawn agent, handle errors.
- * 
- * @param action - Assign action to execute
- * @param store - Task store
- * @param logger - Event logger
- * @param config - Dispatch configuration
- * @param allTasks - All tasks in the system (for context lookup)
- * @param effectiveConcurrencyLimitRef - Reference to effective concurrency limit (mutable)
- * @returns { executed: boolean, failed: boolean }
  */
 export async function executeAssignAction(
   action: SchedulerAction,
   store: ITaskStore,
   logger: EventLogger,
   config: DispatchConfig,
-  allTasks: Task[],
-  effectiveConcurrencyLimitRef: { value: number | null }
+  allTasks: Task[]
 ): Promise<{ executed: boolean; failed: boolean }> {
   if (!config.executor) {
     log.error({ taskId: action.taskId, agent: action.agent, op: "dispatch" }, "cannot dispatch task: no executor configured");
@@ -136,7 +127,6 @@ export async function executeAssignAction(
       logger,
       config,
       correlationId,
-      effectiveConcurrencyLimitRef,
       allTasks,
       executor,
     };
@@ -194,45 +184,9 @@ export async function executeAssignAction(
         updateThrottleState(dispatchTeam);
       }
     } else {
-      // Check if this is a platform concurrency limit error
-      if (result.platformLimit !== undefined) {
-        const previousCap = effectiveConcurrencyLimitRef.value ?? config.maxConcurrentDispatches ?? 3;
-        effectiveConcurrencyLimitRef.value = Math.min(result.platformLimit, config.maxConcurrentDispatches ?? 3);
-        
-        log.info({ taskId: action.taskId, platformLimit: result.platformLimit, effectiveCap: effectiveConcurrencyLimitRef.value, previousCap }, "platform concurrency limit detected");
-        
-        // Emit event (non-fatal if logging fails)
-        try {
-          await logger.log("concurrency.platformLimit", "scheduler", {
-            taskId: action.taskId,
-            payload: {
-              detectedLimit: result.platformLimit,
-              effectiveCap: effectiveConcurrencyLimitRef.value,
-              previousCap,
-            },
-          });
-        } catch (logErr) {
-          log.warn({ err: logErr, taskId: action.taskId, op: "logPlatformLimit" }, "event logger write failed (best-effort)");
-        }
-        
-        // Release lease — task transitions back to ready (not blocked)
-        try {
-          await releaseLease(store, action.taskId, action.agent!);
-        } catch (releaseErr) {
-          log.error({ err: releaseErr, taskId: action.taskId, op: "releaseLease" }, "failed to release lease");
-        }
-        
-        // No retry count increment - this is capacity exhaustion, not failure
-        log.info({ taskId: action.taskId, op: "requeue" }, "task requeued to ready (platform capacity exhausted, will retry next poll)");
-
-        return { executed, failed };
-      }
-
-      // Phase 43 D-12: no-plugin-attached → hold task in ready/, no retry increment.
-      // Mirrors the platformLimit branch above — release lease, leave in ready/, emit
-      // `dispatch.held`, neither count as executed nor failed. No deadletter, no blocked
-      // transition: per PROJECT.md core value "tasks never get dropped", a briefly
-      // absent plugin (gateway restart) must not punish the task.
+      // no-plugin-attached → hold task in ready/, no retry increment.
+      // Per PROJECT.md core value "tasks never get dropped", a briefly absent
+      // plugin (gateway restart) must not punish the task.
       if (result.error === "no-plugin-attached") {
         log.info({ taskId: action.taskId, op: "hold" }, "holding task: no plugin attached");
 
@@ -364,18 +318,3 @@ export async function executeAssignAction(
   }
   return executeBody();
 }
-
-/**
- * Build dispatch actions for ready tasks.
- * 
- * Checks dependencies, leases, throttles, and creates assign/alert/block actions.
- * 
- * @param readyTasks - Tasks in ready status
- * @param allTasks - All tasks in the system
- * @param store - Task store
- * @param config - Dispatch configuration
- * @param metrics - Dispatch metrics (concurrency, blocked tasks, occupied resources)
- * @param effectiveConcurrencyLimit - Current effective concurrency limit
- * @param childrenByParent - Map of parent task ID to child tasks
- * @returns Array of scheduler actions to execute
- */

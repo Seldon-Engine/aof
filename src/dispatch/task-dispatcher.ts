@@ -33,7 +33,6 @@ export interface DispatchMetrics {
   blockedBySubtasks: Set<string>;
   circularDeps: Set<string>;
   occupiedResources: Map<string, string>;
-  effectiveConcurrencyLimit: number | null;
 }
 
 export interface DispatchResult {
@@ -57,12 +56,11 @@ export async function buildDispatchActions(
     occupiedResources: Map<string, string>;
     inProgressTasks: Task[];
   },
-  effectiveConcurrencyLimit: number | null,
   childrenByParent: Map<string, Task[]>
 ): Promise<SchedulerAction[]> {
   const actions: SchedulerAction[] = [];
-  
-  const maxDispatches = effectiveConcurrencyLimit ?? config.maxConcurrentDispatches ?? 3;
+
+  const maxDispatches = config.maxConcurrentDispatches ?? 3;
   const currentInProgress = metrics.currentInProgress;
   let pendingDispatches = 0;
   
@@ -105,7 +103,7 @@ export async function buildDispatchActions(
   let dispatchesThisPoll = 0;
   
   // Log concurrency status
-  log.info({ currentInProgress, maxDispatches, platformAdjusted: effectiveConcurrencyLimit !== null }, "concurrency limit status");
+  log.info({ currentInProgress, maxDispatches }, "concurrency limit status");
   
   for (const task of readyTasks) {
     if (metrics.blockedBySubtasks.has(task.frontmatter.id)) continue;

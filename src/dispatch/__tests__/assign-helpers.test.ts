@@ -74,7 +74,6 @@ describe("handleRunComplete", () => {
       logger: mockLogger,
       config: { dataDir: "/tmp", dryRun: false, executor: mockExecutor, maxConcurrentDispatches: 3, defaultLeaseTtlMs: 60000 },
       correlationId: "corr-123",
-      effectiveConcurrencyLimitRef: { value: null },
       allTasks: [],
       executor: mockExecutor,
     };

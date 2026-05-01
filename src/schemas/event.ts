@@ -104,9 +104,6 @@ export const EventType = z.enum([
   "scheduler.poll",
   "poll.timeout",
 
-  // Concurrency
-  "concurrency.platformLimit",
-
   // Protocol
   "protocol.message.received",
   "protocol.message.rejected",

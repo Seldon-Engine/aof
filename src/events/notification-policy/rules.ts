@@ -232,15 +232,6 @@ export const DEFAULT_RULES: NotificationRule[] = [
     template: "🔔 Scheduler alert: {payload.reason}",
   },
 
-  // ── Concurrency ──────────────────────────────────────────────────────────
-  {
-    match: { eventType: "concurrency.platformLimit" },
-    severity: "warn",
-    audience: ["operator"],
-    channel: "#aof-alerts",
-    template: "🚦 Platform concurrency limit reached ({payload.current}/{payload.limit})",
-  },
-
   // ── Murmur events ────────────────────────────────────────────────────────
   {
     match: { eventType: "murmur.review.dispatched" },

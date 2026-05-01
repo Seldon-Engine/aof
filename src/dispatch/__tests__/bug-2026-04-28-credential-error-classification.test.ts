@@ -177,7 +177,6 @@ describe("BUG-2026-04-28 — credential error classification", () => {
           defaultLeaseTtlMs: 60000,
         },
         correlationId: "corr-cred-1",
-        effectiveConcurrencyLimitRef: { value: null },
         allTasks: [],
         executor: {} as any,
       } as OnRunCompleteContext;

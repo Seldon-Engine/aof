@@ -29,7 +29,6 @@ export interface OnRunCompleteContext {
   logger: EventLogger;
   config: DispatchConfig;
   correlationId: string;
-  effectiveConcurrencyLimitRef: { value: number | null };
   allTasks: Task[];
   /** The executor, captured before closure to preserve type narrowing. */
   executor: GatewayAdapter;

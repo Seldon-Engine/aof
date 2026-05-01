@@ -189,16 +189,14 @@ export async function handleAssign(
   store: ITaskStore,
   logger: EventLogger,
   config: SchedulerConfig,
-  allTasks: Task[],
-  effectiveConcurrencyLimitRef: { value: number | null }
+  allTasks: Task[]
 ): Promise<ActionHandlerResult> {
   const assignResult = await executeAssignAction(
     action,
     store,
     logger,
     config,
-    allTasks,
-    effectiveConcurrencyLimitRef
+    allTasks
   );
   return { executed: assignResult.executed, failed: assignResult.failed };
 }
