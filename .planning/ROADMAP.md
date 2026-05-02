@@ -342,6 +342,12 @@ Plans:
 
 9. **`FilesystemTaskStore.create` retry-loop bound.** `task-store.ts:353` still loops up to 1000 times on EEXIST — leftover from the pre-`fbcdda8` per-store sequential counter. With nanoid8 suffixes, EEXIST is vanishingly rare. Cap at 5; failing fast surfaces real disk-full / permission bugs instead of looping silently.
 
+10. **Adopt `gray-matter` for frontmatter parsing** (library-swap track). Already a dep, used in only 1 file (`memory/tools/metadata.ts`); main task parser at `store/task-parser.ts` hand-rolls fence-finding + `yaml.parse/stringify`. Saves ~80 LOC, removes hand-rolled CRLF/trailing-newline edge cases.
+
+11. **Replace `TaskLocks` with `async-mutex`** (library-swap track). 73 LOC of hand-rolled per-key Promise-tracking mutex (`src/store/task-lock.ts`) → ~15-LOC `KeyedMutex` wrapper over the library. Battle-tested correctness around release-on-throw and queue ordering. Saves ~60 LOC.
+
+12. **Consolidate retry/timeout patterns onto `p-retry` + `p-timeout`** (library-swap track). Three sites duplicate the same `INITIAL_BACKOFF_MS = 1_000` / `MAX_BACKOFF_MS = 30_000` exponential pattern with no jitter (mild thundering-herd risk); 5+ sites have hand-rolled `Promise.race` + `setTimeout(reject, ...)` + `unref()` boilerplate. Saves ~140 LOC + free jitter.
+
 **Out of scope:**
 - Behavior changes (this is mechanical cleanup; user-facing surface should be identical).
 - The 5 Serena-parser-incompatible files (`events/logger.ts`, `events/notifier.ts`, `views/kanban.ts`, `views/mailbox.ts`, `events/notification-policy/engine.ts`) — they're flagged as "Noted Issues" but the parser bug is upstream Serena's, not ours.
@@ -357,7 +363,7 @@ Plans:
 - CODE_MAP.md updated to reflect post-cleanup file sizes; Serena memories refreshed
 - No release-it cut required during the phase; ship as v1.20.0 patch when complete
 
-**Risk profile:** Plans 1, 3, 4, 8, 9 are isolated mechanical refactors — low risk. Plan 2 (scheduler.poll decomposition) is the only one that touches the dispatch hot path; it goes last, gets its own integration-test pass, and ships as a separate atomic commit. Plans 5, 6, 7 are noise reduction with no behavior implication.
+**Risk profile:** Plans 1, 3, 4, 8, 9 are isolated mechanical refactors — low risk. Plans 10, 11, 12 are library-swap drop-ins (each ships as a separate atomic commit so a regression is bisectable to one swap). Plan 2 (scheduler.poll decomposition) is the only one that touches the dispatch hot path; it goes last, gets its own integration-test pass, and ships as a separate atomic commit. Plans 5, 6, 7 are noise reduction with no behavior implication.
 
 **Investigation precedent:** This phase plan was scoped from a session-driven audit on 2026-04-30 (CODE_MAP review + Serena symbolic walk of the largest files in the source tree). The audit findings are not preserved as a separate doc — the plan itself IS the captured analysis.
 
@@ -367,3 +373,83 @@ Plans:
 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 48 to break down per scope item above)
+
+### Phase 49: Architecture realignment — delete dead features, restructure modules, swap heavyweight wheels
+
+**Goal:** After Phase 48's mechanical cleanup, take the bigger structural lever: delete features that no longer earn their keep, restructure the source tree into a clean ports/adapters/services layout, and replace hand-rolled subsystems with mature libraries where the win is clear (xstate for DAG, umzug for migrations, bottleneck for throttle, possibly lancedb for memory). Targets the codebase-bloat problem the user surfaced on 2026-05-01: "for what this delivers, we should be at half the LOC." Result is intended to land at **~28-32k LOC** (vs current 50k post-Phase-48), with cleaner layering that future-proofs the platform.
+
+This phase is **architecturally invasive**, unlike Phase 48 (which is purely mechanical and behavior-preserving). Plans here add/remove user-facing capability, change module locations, and swap library dependencies. Each plan ships with an LADR (lightweight ADR) capturing the decision rationale so future-maintainers don't have to rediscover it.
+
+**Sub-waves:**
+
+**49A — Feature deletion (do this first, fastest LOC return).**
+- 49A-1: **Delete `notification-policy/` engine** entirely (956 LOC across 9 files). Subscriptions are the routing primitive now — the engine is a Splunk-lite for events that we built before subscriptions existed. Keep `INotifier` port + `outbound-channels` adapter for actual sends.
+- 49A-2: **Delete `murmur/` + `dispatch/murmur-integration.ts`** (~1,300 LOC). Original purpose forgotten; LADR backfill required ("why we are deleting this") to prevent re-introduction. Smoke test: search git log + open issues for any active reliance.
+- 49A-3: **Delete `drift/`** (~500 LOC). Org-chart-vs-live-agent diff is a redundant alarm for a problem that already alarms itself when dispatch fails.
+- 49A-4: **Delete `packaging/snapshot.ts` and `packaging/channels.ts`** (~350 LOC). Built for users who don't exist yet (DR + alpha/beta channels). Add back when there's an actual second user with actual precious data.
+- 49A-5: **Audit and likely delete `dispatch/escalation.ts`** (292 LOC). Failure escalation rules; likely overlap with the basic blocked → deadletter flow.
+
+**49B — Module restructure (mechanical move + import-rewrite, no logic change).**
+Move files into the target layout:
+```
+src/core/             — pure domain (task, workflow, condition, subscription, events)
+src/ports/            — interfaces (ITaskStore, IEventLog, IAgentRunner, IMemoryStore, INotifier, IClock)
+src/adapters/         — port implementations (filesystem-task-store, jsonl-event-log, openclaw-bridge, hybrid-memory-store, outbound-channels)
+src/services/         — domain logic using ports (scheduler, workflow-engine, subscription-router, recovery, memory)
+src/inbound/          — entry points (mcp, ipc, http, cli, protocol folds in here)
+src/projects/         — multi-project scoping (kept; needed for kanban/analytics)
+src/observability/    — read side (kanban, trace, analytics — `views/` moves here)
+src/plumbing/         — cross-cutting (config, logging, packaging, daemon)
+src/plugin.ts         — OpenClaw plugin entry, thin
+```
+Big visual diff, zero behavior delta. Ships as one atomic commit so the move history is clean. Updates CODE_MAP, regenerates Serena memories.
+
+**49C — Heavyweight library swaps.**
+- 49C-1: **xstate v5 for the DAG engine.** Replaces `dispatch/dag-evaluator.ts` (588) + `dag-condition-evaluator.ts` (229) + `dag-transition-handler.ts` (460) + `dag-context-builder.ts` + `schemas/workflow-dag.ts` (538) ≈ 1,815 LOC → ~400 LOC of xstate machine definitions in `core/workflow.ts`. Conditions become xstate guards, side-effects become actions. Free statechart visualizer enables the web-views story. Risky — touches workflow execution path; needs full integration-test pass.
+- 49C-2: **`umzug` for the migration framework.** Replaces `packaging/migrations.ts` (~140 LOC framework). Existing 7 migration files keep their content, just call the new framework. Free `up`/`down` semantics, idempotent execution, state tracking — the upgrade-pipeline hardening Phase 47 is half-trying to build. Coordinate with Phase 47 if its release-engineering work is in flight.
+- 49C-3: **`bottleneck` for `dispatch/throttle.ts`.** Replaces 134 LOC of hand-rolled per-team rate limiting with a `new Bottleneck.Group()`. Semantics need careful mapping (current code's `lastDispatchByTeam` ≠ exact `Group` minTime, but close).
+- 49C-4: **LanceDB spike for memory** (NOT a commit — produces a spike doc with go/no-go recommendation). Investigates collapsing the memory subsystem (5,859 LOC: HNSW + sqlite-vec + FTS5 hybrid + reranker + tier system + curation + warm aggregation + hot promotion) onto LanceDB's serverless vector + FTS in a single query. Could collapse memory to ~1,500 LOC and become the foundation for the "significant memory enhancement" the user is planning. Spike output: file-format migration plan + perf comparison + decision.
+
+**49D — LADR practice (cross-cutting, ships throughout).**
+Establish `.planning/ladrs/` with backfill of 8-10 historical decisions plus one new LADR per Phase 49 sub-plan:
+- 0001-event-jsonl-not-sqlite.md (backfill)
+- 0002-zod-source-of-truth.md (backfill)
+- 0003-thin-plugin-bridge-phase-43.md (backfill)
+- 0004-subscriptions-replace-notification-engine.md (49A-1)
+- 0005-delete-murmur.md (49A-2)
+- 0006-delete-drift.md (49A-3)
+- 0007-ports-adapters-restructure.md (49B)
+- 0008-xstate-for-workflows.md (49C-1)
+- 0009-umzug-for-migrations.md (49C-2)
+- 0010-bottleneck-for-throttle.md (49C-3)
+- 0011-lancedb-spike.md (49C-4 outcome, written either way)
+Each LADR is ~1 page: Context / Decision / Consequences / Alternatives. README in `.planning/ladrs/` explains the format and when to write one (every architecturally-load-bearing decision, every feature deletion, every library swap >100 LOC).
+
+**Out of scope:**
+- Web-views implementation (separate phase once `observability/` shape is in place).
+- Memory enhancement (this phase only delivers the foundation; the actual hybrid-search redesign / re-ranker plug points / etc. are a future "memory v2" phase).
+- Replacing the AOF/1 protocol with anything else.
+- Replacing `node:http` with a framework — current usage is small enough that it doesn't pay off.
+- Multi-project deletion — explicitly kept (kanban + analytics depend on it).
+
+**Acceptance:**
+- `npm run typecheck` clean after every commit
+- `npm test` green after every commit
+- `npm run test:e2e` green per sub-wave end
+- `npm run test:integration:plugin` green per sub-wave end
+- `npx madge --circular --extensions ts src/` reports 0 cycles
+- Each sub-plan ships its LADR in the same commit
+- Total LOC after phase: **28-32k** in `src/` (currently ~50k; minus −1,196 already shipped + Phase 48's −2,800 to −3,800 + Phase 49's −10,000 to −12,000 from feature deletion + restructure + library swaps)
+- CODE_MAP rewritten to reflect new layout
+- v1.21.0 minor release with hand-crafted release notes covering the architecture change
+
+**Risk profile:** 49A is medium risk (deleting features — irreversible without git history; LADRs mitigate). 49B is low semantic risk but high diff visual (one big atomic move commit). 49C-1 (xstate) is high risk — touches the workflow execution hot path; gets its own integration suite + manual smoke. 49C-2 and 49C-3 are medium drop-in risk. 49C-4 is zero risk (spike doc only; commits no production code).
+
+**Investigation precedent:** Library-wheel audit performed 2026-05-01 found 8 hand-rolled subsystems with mature library replacements (Phase 48 picks up the 3 low-risk drop-ins; Phase 49 picks up the architectural ones). Audit captured in `.planning/phases/49-.../49-CONTEXT.md`.
+
+**Requirements**: TBD (define during /gsd-plan-phase 49; expect D-NN per sub-plan plus D-LADR-PRACTICE for the cross-cutting documentation track)
+**Depends on:** Phase 48 (mechanical cleanup must land first so the restructure operates on a clean tree)
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 49 to break down per sub-wave above)

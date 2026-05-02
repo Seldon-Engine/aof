@@ -120,13 +120,34 @@ Original audit ranked findings by impact-to-effort. Items 1 and 2 above shipped 
 - With nanoid8 (~218 trillion possible suffixes per day), EEXIST is vanishingly rare. A real EEXIST means disk full / permission denied / clock skew — fail fast.
 - Cap at 5 retries. One-line change.
 
+### 10. Adopt `gray-matter` for frontmatter parsing (library-swap track)
+
+- We already pay for `gray-matter` as a runtime dep but use it in exactly one file (`src/memory/tools/metadata.ts`). The main task-file parser at `src/store/task-parser.ts` hand-rolls fence-finding + `yaml.parse/stringify` instead. Worst of both worlds: paying for the library, not benefiting from it.
+- Replace `parseTaskFile` and `serializeTask` with `gray-matter` calls. Keep the `TaskFrontmatter.parse(...)` Zod step for validation.
+- Saves ~80 LOC. Removes hand-rolled edge cases (CRLF line endings, missing trailing newline, etc.).
+
+### 11. Replace `TaskLocks` with `async-mutex` (library-swap track)
+
+- File: `src/store/task-lock.ts` — 73 LOC of hand-rolled per-key Promise-tracking mutex.
+- `async-mutex` provides `Mutex`, `Semaphore`, and a key-collection pattern with battle-tested correctness around release-on-throw, queue ordering, and fairness — all of which the hand-rolled version *almost* gets right but has subtle edges (the `inflight.get(id) === ours` slot-eviction check is correct but fragile).
+- Add `async-mutex` dep. Replace `TaskLocks` with a thin `KeyedMutex` wrapper (~15 LOC) over `Mutex` instances keyed by task id.
+- Saves ~60 LOC + correctness upgrade.
+
+### 12. Consolidate retry/timeout patterns onto `p-retry` + `p-timeout` (library-swap track)
+
+- Three sites have hand-rolled exponential backoff with the same `INITIAL_BACKOFF_MS = 1_000` / `MAX_BACKOFF_MS = 30_000` / `Math.min(backoff * 2, MAX)` pattern: `src/openclaw/chat-delivery-poller.ts`, `src/openclaw/spawn-poller.ts`, `src/daemon/standalone-adapter.ts:pollForCompletion`. None have jitter, so all pollers retry in lockstep when the daemon hiccups (mild thundering-herd risk).
+- 5+ sites have `Promise.race` + `setTimeout(reject, ...)` + manual `unref()` boilerplate for timeouts: `withSetupTimeout` and the agent-run timeout in `openclaw-executor.ts`, fetch timeouts in `standalone-adapter.ts`, etc.
+- Add `p-retry` (gives jitter for free, abort signals, max-attempts caps) and `p-timeout` (10-line library, removes the `unref()` boilerplate).
+- Saves ~140 LOC across files + free jitter on backoff.
+
 ## Wave order (suggested)
 
 1. **Wave A — mechanical, low-risk:** Plans 3, 4, 8, 9. No behavior implications.
 2. **Wave B — noise reduction:** Plans 5, 6 (router cast cleanup + historical-ref sweep). Touches many files but no behavior.
-3. **Wave C — defensive-cast reduction:** Plan 1 (chat-delivery-poller). Single file but significant. Needs the existing `chat-delivery-poller.test.ts` (20 tests) to remain green without modification.
-4. **Wave D — investigation + likely cleanup:** Plan 7 (callbackDepth fallbacks). Needs analysis before action; may grow scope if the cross-process env mutation can also go.
-5. **Wave E — risky last:** Plan 2 (scheduler.poll decomposition). Own commit. Own integration-test pass. Manual smoke against the running daemon if possible.
+3. **Wave C — library-swap drop-ins:** Plans 10, 11, 12 (`gray-matter`, `async-mutex`, `p-retry` + `p-timeout`). Each is a drop-in with equivalent semantics; ship as separate atomic commits so any regression is bisectable to a single library swap.
+4. **Wave D — defensive-cast reduction:** Plan 1 (chat-delivery-poller). Single file but significant. Needs the existing `chat-delivery-poller.test.ts` (20 tests) to remain green without modification.
+5. **Wave E — investigation + likely cleanup:** Plan 7 (callbackDepth fallbacks). Needs analysis before action; may grow scope if the cross-process env mutation can also go.
+6. **Wave F — risky last:** Plan 2 (scheduler.poll decomposition). Own commit. Own integration-test pass. Manual smoke against the running daemon if possible.
 
 ## Tools and references
 
@@ -156,4 +177,4 @@ Per phase end:
 - CODE_MAP.md updated to reflect post-cleanup file sizes and any structural changes
 - Serena memories refreshed where structural changes would invalidate them
 - v1.20.0 patch release with hand-crafted release notes per CLAUDE.md "Build & Release"
-- Total LOC reduction target: **−2,500 to −3,500** across `src/` (combined with the −1,196 already shipped in Waves 0a/0b)
+- Total LOC reduction target: **−2,800 to −3,800** across `src/` (combined with the −1,196 already shipped in Waves 0a/0b). The library-swap track (Plans 10-12) contributes ~−280 LOC of that.
