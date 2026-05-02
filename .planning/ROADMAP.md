@@ -415,8 +415,10 @@ Big visual diff, zero behavior delta. Ships as one atomic commit so the move his
 - 49E-2: **Route wake-triggered acknowledgments back to chat by default.** Same incident: agent generated a useful summary that never reached Telegram because OpenClaw's `[[reply_to_current]]` routing token was missing. Two options: (a) wake-trigger auto-wraps non-NO_REPLY assistant text with the token, or (b) introduce an AOF/1 `system.notification` envelope whose response handling explicitly routes to the captured `originatingSessionId`. (b) is cleaner long-term.
 - 49E-3: **Distinguish actionable vs FYI wakes** via a `wakeIntent: "action-required" | "informational"` field on the subscription. `done` typically informational; `blocked`/`deadletter` typically action-required. Lets agents skip the cost of processing FYI wakes.
 - 49E-4: **Backpressure & dedupe across tasks.** Today's in-flight `Set<sessionKey>` only coalesces wakes for the same session; bursts of completions targeting the same dispatcher across different tasks still produce N runs. Coalesce per-session within an N-second window into one drain.
+- 49E-5: **Redirect ephemeral session captures to `:main` at dispatch time.** Subscription-graveyard audit on 2026-05-01 found 23 of 26 ghost subscriptions captured an ephemeral `agent:X:cron:UUID` or `agent:X:subagent:UUID` sessionKey from a one-shot dispatcher (cron job or subagent). The session terminated before the dispatched task finished; the chat-send half could never resolve a platform for the dead key. The wake-injection half already redirects ephemeral keys to `:main` (de5b6bd), but at WAKE time; hoist the redirect to CAPTURE time in `mergeDispatchNotificationRecipient` so both halves benefit. Persist the original ephemeral key in a sidecar field for debugging.
+- 49E-6: **Subscription `deadletter` terminal state.** `SubscriptionStatus` lacks "exhausted automated retries, needs human review" — recovery-replay therefore retries `active` subscriptions forever (observed ghosts had 22-28 retries against the same unresolvable platform). Add `deadletter` status parallel to task-lifecycle `deadletter`; transition from `active` after 5 consecutive failures with the same `failureReason` shape; recovery-replay skips `delivered` + `cancelled` + `deadletter`. Existing `failed` semantic preserved (single-attempt non-terminal).
 
-A short-term prompt-text mitigation ships as a patch before this phase (stronger anti-action framing + explicit `[[reply_to_current]]` instructions in `EMBEDDED_WAKE_PROMPT_PREFIX`). 49E reverts that mitigation and replaces it with the structural fix.
+A short-term prompt-text mitigation ships as a patch before this phase (stronger anti-action framing + explicit `[[reply_to_current]]` instructions in `EMBEDDED_WAKE_PROMPT_PREFIX`). 49E reverts that mitigation and replaces it with the structural fix. The 2026-05-01 expungement (`scripts/expunge-stale-subscriptions.mjs` + 26 cancelled ghosts) is the one-time cleanup that 49E-5 + 49E-6 prevent from recurring.
 
 **49D — LADR practice (cross-cutting, ships throughout).**
 Establish `.planning/ladrs/` with backfill of 8-10 historical decisions plus one new LADR per Phase 49 sub-plan:
@@ -431,6 +433,8 @@ Establish `.planning/ladrs/` with backfill of 8-10 historical decisions plus one
 - 0009-umzug-for-migrations.md (49C-2)
 - 0010-bottleneck-for-throttle.md (49C-3)
 - 0011-lancedb-spike.md (49C-4 outcome, written either way)
+- 0013-redirect-ephemeral-sessionkey-at-capture.md (49E-5)
+- 0014-subscription-deadletter-terminal-state.md (49E-6)
 Each LADR is ~1 page: Context / Decision / Consequences / Alternatives. README in `.planning/ladrs/` explains the format and when to write one (every architecturally-load-bearing decision, every feature deletion, every library swap >100 LOC).
 
 **Out of scope:**
