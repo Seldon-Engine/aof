@@ -104,6 +104,13 @@ export const EventType = z.enum([
   "scheduler.poll",
   "poll.timeout",
 
+  // Failure modes
+  // INSTRUMENTATION-2026-05-02: silent_model_failure event for Phase 49E-7
+  // investigation. Keep long-term — useful even after the upstream OpenClaw
+  // fix lands so we can verify zero-rate post-fix and alert if it returns.
+  // Cleanup tracking: .planning/debug/2026-05-02-embedded-run-empty-response-and-error-propagation.md
+  "silent_model_failure",
+
   // Protocol
   "protocol.message.received",
   "protocol.message.rejected",

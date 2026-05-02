@@ -110,6 +110,26 @@ export async function handleRunComplete(
       ? classifySpawnError(outcome.error.message)
       : undefined;
 
+  // INSTRUMENTATION-2026-05-02: silent-failure investigation context.
+  // Constructed from convention — the embedded runner writes its session
+  // file at this path by default (see openclaw-executor.ts:prepareEmbeddedRun).
+  // If the path doesn't exist or is empty, that's definitive proof of the
+  // model-returned-empty-completion mode. Cleanup tracking:
+  // .planning/debug/2026-05-02-embedded-run-empty-response-and-error-propagation.md
+  const expectedSessionFile = silentModelFailure
+    ? `~/.openclaw/agents/${action.agent}/sessions/${outcome.sessionId}.jsonl`
+    : undefined;
+  const investigationPointers = silentModelFailure
+    ? {
+        // Where to find the underlying failure detail in OpenClaw's logs.
+        openclawErrLog: "~/.openclaw/logs/gateway.err.log",
+        // grep this in the openclawErrLog to confirm the payloads=0 origin.
+        grepHint: `incomplete turn detected.*sessionId=${outcome.sessionId}`,
+        // Filesystem check — file should NOT exist (or be empty) for true silent failures.
+        expectedSessionFile,
+      }
+    : undefined;
+
   if (silentModelFailure) {
     log.error(
       {
@@ -117,6 +137,8 @@ export async function handleRunComplete(
         correlationId,
         durationMs: outcome.durationMs,
         sessionId: outcome.sessionId,
+        agent: action.agent,
+        investigation: investigationPointers,
         op: "silentModelFailure",
       },
       "embedded-run silent-failure detected — deadlettering immediately",
@@ -134,6 +156,13 @@ export async function handleRunComplete(
         enforcementReason,
         enforcementAt: new Date().toISOString(),
         ...(errorClass && { errorClass }),
+        // INSTRUMENTATION-2026-05-02: capture investigation pointers in
+        // task metadata so triagers can `cat` the task file and see
+        // exactly where to look. Cleanup tracking:
+        // .planning/debug/2026-05-02-embedded-run-empty-response-and-error-propagation.md
+        ...(silentModelFailure && expectedSessionFile && {
+          silentFailureExpectedSessionFile: expectedSessionFile,
+        }),
       };
       await store.save(taskForMeta);
     }
@@ -164,10 +193,35 @@ export async function handleRunComplete(
         correlationId,
         reason: "agent_exited_without_completion",
         dispatchFailures: updatedTask?.frontmatter.metadata.dispatchFailures,
+        ...(errorClass && { errorClass }),
       },
     });
   } catch (err) {
     log.warn({ err, taskId: action.taskId, op: "logCompletionEnforcement" }, "event logger write failed (best-effort)");
+  }
+
+  // INSTRUMENTATION-2026-05-02: dedicated silent_model_failure event for
+  // queryable visibility (notification rules, `aof events` filtering,
+  // dashboard counts). Emitted in addition to completion.enforcement, not
+  // as a replacement — completion.enforcement is the lifecycle event,
+  // silent_model_failure is the diagnostic signal. Cleanup tracking:
+  // .planning/debug/2026-05-02-embedded-run-empty-response-and-error-propagation.md
+  if (silentModelFailure) {
+    try {
+      await logger.log("silent_model_failure", "scheduler", {
+        taskId: action.taskId,
+        payload: {
+          agent: action.agent,
+          sessionId: outcome.sessionId,
+          durationMs: outcome.durationMs,
+          correlationId,
+          investigation: investigationPointers,
+          phase: "49E-7",
+        },
+      });
+    } catch (err) {
+      log.warn({ err, taskId: action.taskId, op: "logSilentModelFailure" }, "event logger write failed (best-effort)");
+    }
   }
 
   // Trace capture — via safe helper

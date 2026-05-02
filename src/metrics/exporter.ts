@@ -53,6 +53,14 @@ export class AOFMetrics {
   readonly lockAcquisitionFailures: Counter;
   readonly schedulerUp: Gauge;
   readonly schedulerPollFailures: Counter;
+  /**
+   * INSTRUMENTATION-2026-05-02: counter for the silent-model-failure
+   * heuristic firing (Phase 49E-7 investigation). Keep long-term — useful
+   * even after the upstream OpenClaw fix lands so we can verify zero-rate
+   * post-fix and alert if it returns. Cleanup tracking:
+   * .planning/debug/2026-05-02-embedded-run-empty-response-and-error-propagation.md
+   */
+  readonly silentModelFailuresTotal: Counter;
   readonly contextBundleChars: Gauge;
   readonly contextBundleTokens: Gauge;
   readonly contextBudgetStatus: Counter;
@@ -122,6 +130,14 @@ export class AOFMetrics {
     this.schedulerPollFailures = new Counter({
       name: "aof_scheduler_poll_failures_total",
       help: "Scheduler poll loop failures",
+      registers: [this.registry],
+    });
+
+    // INSTRUMENTATION-2026-05-02: see silentModelFailuresTotal field doc.
+    this.silentModelFailuresTotal = new Counter({
+      name: "aof_silent_model_failures_total",
+      help: "Embedded-run silent failures detected by AOF heuristic (model returned empty completion; OpenClaw embedded runner did not propagate as error). Phase 49E-7.",
+      labelNames: ["agent", "project"] as const,
       registers: [this.registry],
     });
 

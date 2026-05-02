@@ -88,4 +88,98 @@ Worth running an explicit dispatch test against a known-simple task (e.g. "respo
 
 - Original deadletter cluster cleanup: `scripts/expunge-stale-subscriptions.mjs` (commit `77e9dfe`)
 - Prompt-text mitigation for wake notifications (separate issue, same area): commit `9c1e5c8`
+- AOF defensive heuristic + first-occurrence deadletter (commit `76e8ea6`)
+- Instrumentation for next occurrence (this section's pointers — commit landing 2026-05-02)
 - Phase 49E (wake-notification redesign + ephemeral-session redirect + subscription deadletter): `.planning/phases/49-architecture-realignment-delete-restructure-swap-wheels/49-CONTEXT.md`
+
+---
+
+## Debug recipe — when this fires next time
+
+Step 1 — **Confirm it fired and how often.**
+```bash
+# Count silent-failure events in today's log
+grep -c '"type":"silent_model_failure"' ~/.aof/data/events/$(date +%Y-%m-%d).jsonl
+
+# Last 10 occurrences with full payload
+grep '"type":"silent_model_failure"' ~/.aof/data/events/$(date +%Y-%m-%d).jsonl | tail -10 | python3 -m json.tool
+
+# Or via metrics endpoint (if metrics scrape is up)
+curl -s http://localhost:9090/metrics | grep aof_silent_model_failures_total
+```
+
+Step 2 — **Pick a representative failed task.** From the event payload you get `taskId`, `sessionId`, `agent`, `correlationId`, and an `investigation` block with `expectedSessionFile` + `grepHint`.
+
+Step 3 — **Confirm the model returned nothing.**
+```bash
+# Match the AOF sessionId to the OpenClaw runId — they're the same UUID.
+# Check OpenClaw's gateway error log for the underlying payloads=0 entry:
+grep -E "incomplete turn detected.*sessionId=$SESSION_ID" ~/.openclaw/logs/gateway.err.log
+
+# Check if the session file was written at all (true silent failures = missing/empty):
+ls -la ~/.openclaw/agents/$AGENT/sessions/$SESSION_ID.jsonl 2>&1
+```
+
+If the OpenClaw log shows `payloads=0` and the session file is missing/empty: confirmed silent failure. The model HTTP-200'd with stop_reason="stop" and zero content.
+
+Step 4 — **Determine scope.** Is this one task, one agent, one project, or universal?
+```bash
+# Group by agent
+grep '"type":"silent_model_failure"' ~/.aof/data/events/*.jsonl | \
+  python3 -c "import json,sys,collections; c=collections.Counter(); 
+[c.update([json.loads(l.split(':',1)[1])['payload']['agent']]) for l in sys.stdin if 'silent_model_failure' in l]; 
+print(c)"
+
+# If it correlates with a specific agent → likely a per-agent prompt or model config issue
+# If it spreads across all agents → likely an Anthropic API issue or AOF/OpenClaw global prompt problem
+# If it correlates with a specific time-of-day pattern → likely an upstream rate-limit / capacity issue
+```
+
+Step 5 — **Determine root cause candidates.**
+1. **Universal cross-agent + recent onset** → Anthropic capacity/credential issue. Check `~/.openclaw/logs/gateway.err.log` for `overloaded_error` or `401`/`429` entries near the failures.
+2. **Per-agent + persistent** → That agent's `AGENTS.md` is being truncated (current limit 10000 chars; check `[agent/embedded] workspace bootstrap file AGENTS.md is X chars; truncating` log entries). Truncation can cut mid-sentence and produce malformed prompts.
+3. **Per-prompt-shape** → Compare the `params.prompt` shape vs known-working dispatches. Most likely differentiator: the `formatTaskInstruction` template in `src/openclaw/openclaw-executor.ts:formatTaskInstruction` plus the routing payload.
+4. **Model-version mismatch** → Verify `agent.model` config matches what OpenClaw is actually invoking. The Phase 47 dispatch-fix made AOF pass `provider/model/authProfileId` explicitly; if the agent's configured model is unsupported by the resolved auth profile, you can get silent stops.
+
+Step 6 — **If root cause = transient (overload, rate limit):** wait it out and re-dispatch. Heuristic prevents wasted retries; the task is correctly deadlettered and visible in `aof_status_report`.
+
+Step 7 — **If root cause = systemic (truncation, prompt shape, model mismatch):** file the upstream OpenClaw fix per Phase 49E-7 OR fix the AOF-side prompt assembly OR fix the agent config.
+
+---
+
+## CLEANUP CHECKLIST — what to remove when investigation closes
+
+The instrumentation added in commit landing 2026-05-02 (after this doc) is investigation scaffolding. Some pieces are temporary; some should stay long-term as monitoring infrastructure. Track every `INSTRUMENTATION-2026-05-02` comment in source for the full inventory; this section is the authoritative removal/retention plan.
+
+**Definition of "investigation closed":**
+- Either: upstream OpenClaw fix lands so `payloads=0` propagates as `meta.error` AND the AOF defensive heuristic has fired zero times for ≥7 consecutive days post-fix
+- Or: root cause is identified as something other than the OpenClaw error-contract gap (e.g. Anthropic capacity, AGENTS.md truncation), AOF defensive heuristic stays as a long-term safety net, and only the verbose investigation-pointer instrumentation is removed.
+
+**REMOVE on close:**
+
+| Item | File | Why remove |
+|---|---|---|
+| Cross-reference pointer block in `handleRunComplete` (`investigationPointers`, `expectedSessionFile`, `grepHint`) | `src/dispatch/assign-helpers.ts` | Verbose for normal operation; useful only while actively investigating. The `silent_model_failure` event payload's `agent` + `sessionId` are sufficient for any future repeat. |
+| `silentFailureExpectedSessionFile` metadata field stamping | `src/dispatch/assign-helpers.ts` (in `taskForMeta.frontmatter.metadata` enforcement block) | Same reason as above — bloats task frontmatter for normal operation. |
+| `phase: "49E-7"` field on the `silent_model_failure` event payload | `src/dispatch/assign-helpers.ts` | Phase reference becomes meaningless after cleanup; the event itself is self-explanatory. |
+| This entire "Debug recipe" section | `.planning/debug/2026-05-02-...md` | Recipe targets the specific failure mode + investigation context. Once root cause is fixed, recipe becomes wrong/misleading. |
+| This CLEANUP CHECKLIST | `.planning/debug/2026-05-02-...md` | Self-deletes when checklist is complete. |
+| Phase 49E-7 entry in ROADMAP + 49-CONTEXT | `.planning/ROADMAP.md`, `.planning/phases/49-.../49-CONTEXT.md` | Done when investigation closes. Keep as historical record OR move to a "completed sub-plans" archive. |
+
+**KEEP long-term (becomes monitoring infrastructure):**
+
+| Item | File | Why keep |
+|---|---|---|
+| `silent_model_failure` event type in schema | `src/schemas/event.ts` | Defensive monitoring — if the failure mode returns post-fix, we want to see it immediately. Notification rule can target this event. |
+| `aof_silent_model_failures_total` Prometheus counter | `src/metrics/exporter.ts` | Same reason — long-term safety net + zero-rate becomes a positive signal that the upstream fix is holding. |
+| `isLikelyModelSilentFailure` heuristic + `errorClass: "model_silent_failure"` short-circuit | `src/dispatch/scheduler-helpers.ts`, `src/dispatch/failure-tracker.ts`, `src/dispatch/assign-helpers.ts` | Defensive: even with the upstream fix, we want immediate-deadletter behavior for any future silent-failure mode that appears (different OpenClaw bug, different model API quirk). The heuristic is generic enough to catch future variants. |
+| Regression test `bug-2026-05-02-embedded-run-silent-failure-detection.test.ts` | `src/dispatch/__tests__/` | Standard regression-test convention. Prevents the heuristic from being accidentally removed in a future refactor. |
+| Brief comment block in `handleRunComplete` referencing this debug doc + Phase 49E-7 | `src/dispatch/assign-helpers.ts` | One-line "see also" pointer is normal code documentation; a verbose instrumentation block isn't. |
+
+**TODO before closing (to wire up the kept pieces fully):**
+
+| Item | File | Status |
+|---|---|---|
+| Increment `silentModelFailuresTotal.inc({ agent, project })` from `handleRunComplete` | `src/dispatch/assign-helpers.ts` + `src/metrics/exporter.ts` | Counter is registered but not yet incremented. Needs metrics plumbed through OnRunCompleteContext (signature change cascades to executeAssignAction → handleAssign → executeActions). Defer until someone touches that path; until then `aof_silent_model_failures_total` reports `0` which still proves "no fires" via the event log instead. |
+| Stronger heuristic signal: count `aof_task_*` tool invocations via EventLogger before classifying | `src/dispatch/scheduler-helpers.ts` (or new helper) | Today's heuristic is duration-based only. A 60s task that DID call `aof_task_update` (just not `_complete`) is currently classified as silent failure but probably isn't. Phase 49E-7 acceptance criterion. |
+| Investigation note: did the original spear-phishing re-dispatch incident TASK-2026-05-02-Kmxfd5iy + FNDgZMPG re-test cleanly? | (this doc) | Test plan: dispatch a known-trivial task ("respond with 'OK' and call aof_task_complete with summary='ok'"); verify it completes. Re-dispatch the spear-phishing pair only after verification. |
