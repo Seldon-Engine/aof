@@ -146,7 +146,11 @@ describe("handleRunComplete", () => {
         sessionId: "session-1",
         success: true,
         aborted: false,
-        durationMs: 5000,
+        // Above SILENT_FAILURE_DURATION_MS_THRESHOLD (60s) so this exercises
+        // the "real agent did work but forgot to complete" path, not the
+        // silent-failure heuristic (which deadletters on first occurrence).
+        // See bug-2026-05-02-embedded-run-silent-failure-detection.test.ts
+        durationMs: 600_000,
       };
 
       await handleRunComplete(baseCtx, outcome);

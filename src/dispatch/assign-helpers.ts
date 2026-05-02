@@ -9,7 +9,7 @@
 
 import { createLogger } from "../logging/index.js";
 import { trackDispatchFailure, shouldTransitionToDeadletter, transitionToDeadletter } from "./failure-tracker.js";
-import { classifySpawnError } from "./scheduler-helpers.js";
+import { classifySpawnError, isLikelyModelSilentFailure } from "./scheduler-helpers.js";
 import { stopLeaseRenewal } from "./lease-manager.js";
 import { captureTraceSafely } from "./trace-helpers.js";
 import { deliverAllCallbacksSafely } from "./callback-helpers.js";
@@ -77,27 +77,53 @@ export async function handleRunComplete(
     return;
   }
 
-  // Path 2: Enforcement — agent finished without calling aof_task_complete
-  const enforcementReason = outcome.success
-    ? `Task failed: agent exited without calling aof_task_complete. Session lasted ${(outcome.durationMs / 1000).toFixed(1)}s. Run \`aof trace ${action.taskId}\` for session details.`
+  // Path 2: Enforcement — agent finished without calling aof_task_complete.
+  //
+  // Detect the embedded-run silent-failure mode (clean meta + short run)
+  // BEFORE composing the enforcement message: OpenClaw's runEmbeddedPiAgent
+  // swallows `incomplete turn detected: payloads=0` (model returned HTTP 200
+  // with stop_reason="stop" and zero content) and returns clean meta to us.
+  // Without detection, the task gets the generic "agent exited without
+  // calling aof_task_complete" treatment and burns the dispatchFailures
+  // budget while the model is silently producing nothing.
+  // See .planning/debug/2026-05-02-embedded-run-empty-response-and-error-propagation.md
+  const silentModelFailure = !!outcome.success && isLikelyModelSilentFailure(outcome);
+
+  const enforcementReason = silentModelFailure
+    ? `Likely model silent failure: agent run completed cleanly in ${(outcome.durationMs / 1000).toFixed(1)}s without invoking aof_task_complete. The model probably returned an empty completion (stop_reason="stop", zero content); OpenClaw's embedded runner does not propagate this as an error. Deadlettered on first occurrence — retrying a silently-failing model is wasted work.`
+    : outcome.success
+      ? `Task failed: agent exited without calling aof_task_complete. Session lasted ${(outcome.durationMs / 1000).toFixed(1)}s. Run \`aof trace ${action.taskId}\` for session details.`
+      : outcome.error
+        ? `Agent error: ${outcome.error.kind}: ${outcome.error.message}`
+        : outcome.aborted
+          ? "Agent run was aborted"
+          : "Agent run failed (unknown reason)";
+
+  // Classify the failure for the deadletter decision in shouldTransitionToDeadletter.
+  // - permanent: deterministic config errors (credentials, agent-not-found) — see
+  //   .planning/debug/2026-04-28-aof-dispatch-ghosting-and-worker-hygiene.md
+  // - model_silent_failure: NEW — OpenClaw embedded-run swallowed an empty completion
+  //   (see Phase 49E-7). Both classes deadletter on first occurrence.
+  const errorClass = silentModelFailure
+    ? "model_silent_failure"
     : outcome.error
-      ? `Agent error: ${outcome.error.kind}: ${outcome.error.message}`
-      : outcome.aborted
-        ? "Agent run was aborted"
-        : "Agent run failed (unknown reason)";
+      ? classifySpawnError(outcome.error.message)
+      : undefined;
 
-  // Classify spawn-time errors that surface via the run-complete callback
-  // so deterministic config errors (missing credentials, agent not found,
-  // etc.) deadletter immediately instead of cycling through the full
-  // dispatchFailures budget. Without this, OpenClaw's "No credentials
-  // found for profile X" surfaces as errorClass=unknown and burns
-  // ~30 min of retry/lease churn — see
-  // .planning/debug/2026-04-28-aof-dispatch-ghosting-and-worker-hygiene.md
-  const errorClass = outcome.error
-    ? classifySpawnError(outcome.error.message)
-    : undefined;
-
-  log.error({ taskId: action.taskId, correlationId, op: "completionEnforcement" }, "task still in-progress after agent completed");
+  if (silentModelFailure) {
+    log.error(
+      {
+        taskId: action.taskId,
+        correlationId,
+        durationMs: outcome.durationMs,
+        sessionId: outcome.sessionId,
+        op: "silentModelFailure",
+      },
+      "embedded-run silent-failure detected — deadlettering immediately",
+    );
+  } else {
+    log.error({ taskId: action.taskId, correlationId, op: "completionEnforcement" }, "task still in-progress after agent completed");
+  }
 
   try {
     // Store enforcement metadata on task

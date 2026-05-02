@@ -185,6 +185,40 @@ export function classifySpawnError(error: string): "transient" | "permanent" | "
 }
 
 /**
+ * Threshold for the silent-failure heuristic: a dispatched-task agent run
+ * that lasts less than this AND returns clean meta AND never called
+ * `aof_task_complete` is almost certainly a model that returned an empty
+ * completion (HTTP 200 + stop_reason="stop" + zero content) which OpenClaw
+ * logs as `incomplete turn detected: payloads=0` but does NOT propagate
+ * back via `meta.error`. Real work-doing tasks take longer than this.
+ *
+ * Set to 60 s based on production observation: silent-failure runs
+ * cluster around 20-50 s (model returns immediately); the shortest
+ * legitimate dispatched task in production logs takes several minutes.
+ *
+ * See .planning/debug/2026-05-02-embedded-run-empty-response-and-error-propagation.md
+ */
+export const SILENT_FAILURE_DURATION_MS_THRESHOLD = 60_000;
+
+/**
+ * Detect the embedded-run silent-failure pattern. Returns true when the
+ * agent run finished cleanly (no error in `meta`) but didn't call
+ * `aof_task_complete` AND finished in less than the threshold — strong
+ * indicator that the model produced an empty completion that OpenClaw's
+ * embedded runner failed to surface as an error. Treated as permanent for
+ * deadletter purposes (retrying a silently-failing model is wasted work).
+ */
+export function isLikelyModelSilentFailure(outcome: {
+  error?: { kind: string; message: string };
+  aborted: boolean;
+  durationMs: number;
+}): boolean {
+  if (outcome.error) return false;
+  if (outcome.aborted) return false;
+  return outcome.durationMs < SILENT_FAILURE_DURATION_MS_THRESHOLD;
+}
+
+/**
  * Compute exponential backoff delay for spawn failure retries with jitter.
  * Formula: min(baseMs * 3^retryCount, ceilingMs) +/- jitter
  * Base gives: 60s, 180s, 540s, 900s, 900s, ...

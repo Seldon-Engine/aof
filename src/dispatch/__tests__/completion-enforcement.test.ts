@@ -57,8 +57,8 @@ function buildAction(taskId: string, agent: string = "test-agent"): SchedulerAct
   return {
     type: "assign",
     taskId,
+    taskTitle: "test task",
     agent,
-    priority: "normal",
     reason: "test",
   };
 }
@@ -136,7 +136,6 @@ describe("Completion Enforcement (top-level)", () => {
       logger,
       config,
       task ? [task] : [],
-      { value: null },
     );
     expect(adapter.capturedOnRunComplete).toBeDefined();
     return adapter.capturedOnRunComplete!;
@@ -148,13 +147,17 @@ describe("Completion Enforcement (top-level)", () => {
 
     const onRunComplete = await dispatchAndCapture(taskId);
 
-    // Fire onRunComplete with success=true while task is still in-progress
+    // Fire onRunComplete with success=true while task is still in-progress.
+    // Use a duration above SILENT_FAILURE_DURATION_MS_THRESHOLD (60s) so this
+    // exercises the "real agent did work but forgot to complete" path, not
+    // the silent-failure heuristic (which deadletters on first occurrence).
+    // See bug-2026-05-02-embedded-run-silent-failure-detection.test.ts.
     await onRunComplete({
       taskId,
       sessionId: "mock-session-123",
       success: true,
       aborted: false,
-      durationMs: 5000,
+      durationMs: 600_000,
     });
 
     const task = await store.get(taskId);
@@ -175,7 +178,7 @@ describe("Completion Enforcement (top-level)", () => {
       sessionId: "mock-session-123",
       success: true,
       aborted: false,
-      durationMs: 12345,
+      durationMs: 600_000, // >60s — real-agent-forgot path, not silent-failure
     });
 
     const task = await store.get(taskId);
@@ -195,13 +198,13 @@ describe("Completion Enforcement (top-level)", () => {
       sessionId: "mock-session-123",
       success: true,
       aborted: false,
-      durationMs: 7500,
+      durationMs: 750_000, // 12.5min — real-agent-forgot path, not silent-failure
     });
 
     const task = await store.get(taskId);
     const reason = task?.frontmatter.metadata.enforcementReason as string;
     expect(reason).toBeDefined();
-    expect(reason).toContain("7.5s");
+    expect(reason).toContain("750.0s");
     expect(reason).toContain(`aof trace ${taskId}`);
   });
 
@@ -216,7 +219,7 @@ describe("Completion Enforcement (top-level)", () => {
       sessionId: "mock-session-123",
       success: true,
       aborted: false,
-      durationMs: 3000,
+      durationMs: 300_000, // 5min — real-agent-forgot path, not silent-failure
     });
 
     const task = await store.get(taskId);
@@ -239,7 +242,7 @@ describe("Completion Enforcement (top-level)", () => {
       sessionId: "mock-session-123",
       success: true,
       aborted: false,
-      durationMs: 4000,
+      durationMs: 400_000, // 6.7min — real-agent-forgot path, not silent-failure
     });
 
     const enforcementEvents = capturedEvents.filter(e => e.type === "completion.enforcement");
@@ -249,7 +252,7 @@ describe("Completion Enforcement (top-level)", () => {
     expect(evt.taskId).toBe(taskId);
     expect(evt.payload.agent).toBe("test-agent");
     expect(evt.payload.sessionId).toBe("mock-session-123");
-    expect(evt.payload.durationMs).toBe(4000);
+    expect(evt.payload.durationMs).toBe(400_000);
     expect(evt.payload.correlationId).toBeDefined();
     expect(evt.payload.reason).toBe("agent_exited_without_completion");
   });

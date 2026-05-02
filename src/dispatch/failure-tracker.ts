@@ -44,15 +44,22 @@ export async function trackDispatchFailure(
 
 /**
  * Check if a task should transition to deadletter based on failure count.
+ *
+ * Two errorClass values short-circuit the dispatch-failure budget and
+ * deadletter on first occurrence — retrying is deterministic wasted work
+ * for both:
+ *   - "permanent": deterministic config error (missing credentials, agent
+ *     not found, permission denied). Original incident:
+ *     .planning/debug/2026-04-28-aof-dispatch-ghosting-and-worker-hygiene.md
+ *   - "model_silent_failure": OpenClaw embedded-runner swallowed an empty
+ *     model completion (HTTP 200 + stop_reason="stop" + zero content). The
+ *     model is producing nothing; retry will produce nothing again. Original
+ *     incident: .planning/debug/2026-05-02-embedded-run-empty-response-and-error-propagation.md
  */
 export function shouldTransitionToDeadletter(task: Task): boolean {
   const failures = (task.frontmatter.metadata.dispatchFailures as number | undefined) ?? 0;
-  // Permanent errors (e.g. classified credential / api-key resolution
-  // failures) deadletter on the first occurrence — retrying is
-  // deterministic wasted work, and the task should not consume the
-  // failure budget meant for genuinely transient flakes.
   const errorClass = task.frontmatter.metadata.errorClass as string | undefined;
-  if (errorClass === "permanent") return true;
+  if (errorClass === "permanent" || errorClass === "model_silent_failure") return true;
   return failures >= MAX_DISPATCH_FAILURES;
 }
 
@@ -81,7 +88,11 @@ export async function transitionToDeadletter(
   const agent = task.frontmatter.routing?.agent;
   const deadletteredAt = new Date().toISOString();
   const deadletterReason =
-    errorClass === "permanent" ? "permanent_error" : "max_dispatch_failures";
+    errorClass === "permanent"
+      ? "permanent_error"
+      : errorClass === "model_silent_failure"
+        ? "model_silent_failure"
+        : "max_dispatch_failures";
 
   // BUG-005 + BUG-046a (Phase 46 / Bug 1A): stamp the deadletter cause
   // into the task's own frontmatter metadata atomically with the file
@@ -115,7 +126,7 @@ export async function transitionToDeadletter(
   await eventLogger.log("task.deadlettered", "system", {
     taskId,
     payload: {
-      reason: errorClass === "permanent" ? "permanent_error" : "max_dispatch_failures",
+      reason: deadletterReason,
       failureCount,
       retryCount,
       lastFailureReason,
