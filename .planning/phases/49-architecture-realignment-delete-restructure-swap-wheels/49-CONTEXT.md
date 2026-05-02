@@ -110,6 +110,30 @@ src/
 | 49C-3 | bottleneck for `dispatch/throttle.ts` | 134 LOC of hand-rolled per-team rate limiting | ~−100 | Medium — semantics need careful mapping |
 | 49C-4 | LanceDB **spike** (no production commit) | Investigation of collapsing `memory/` (5,859 LOC) onto LanceDB's serverless vector + FTS | 0 (spike doc only) | Zero — output is a go/no-go recommendation |
 
+### 49E — Wake-notification architecture redesign
+
+**Why:** 2026-05-01 production observation surfaced two structural defects in the embedded-run wake path (`src/openclaw/chat-delivery-poller.ts:wakeViaEmbeddedRun`). A short-term prompt-text mitigation shipped before this phase started (commit landing during Phase 48 / pre-49 work); the structural fix lands here.
+
+**Defects observed (TASK-2026-05-02-NXWk9aHX, swe-architect dispatcher):**
+
+1. **Wake injected as `role: "user"` content.** The wake message arrives in the dispatcher session's transcript looking identical to a real human turn. Agents are biased toward action when they see user input — the observed agent attempted to call `aof_task_complete` on the already-`done` task and was rejected by the daemon (`task is already done and cannot be re-transitioned`, daemon log 02:16:44Z). The "informational. Reply NO_REPLY..." text in the prefix wasn't load-bearing enough against the role-based action bias.
+2. **No reply-routing convention propagated.** Agent generated a useful summary text ("Status is good: the preview/parity task is complete...") at 02:17:05Z, but it never reached the originating Telegram chat because OpenClaw's `[[reply_to_current]]` routing token was missing. From the user's perspective, "nothing happened" even though the wake fired correctly, the system event was injected, the embedded-run spawned, and the agent generated a coherent acknowledgment — the entire pipeline succeeded except the last 30 feet.
+
+**Short-term fix (already in tree):** stronger anti-action framing + explicit `[[reply_to_current]]` instructions in `EMBEDDED_WAKE_PROMPT_PREFIX`. Buys correctness while we ship the structural fix below; revert when 49E lands.
+
+**Structural fix scope:**
+
+- 49E-1: **Inject wake events with the right semantic role.** Investigate OpenClaw's session-event API for a non-user injection path (likely `enqueueSystemEvent` is already correct for the heartbeat path; the embedded-run path is the offender because it's a `prompt:` argument, not a queued system event). Two candidates:
+  - Use `runtime.system.enqueueSystemEvent` for ALL wake paths (heartbeat-enabled AND heartbeat-disabled agents), and use `runEmbeddedPiAgent` only as a wake trigger that drains the queue without putting the wake content in the prompt itself. Drains the queue as turn-context (system events), not as user input.
+  - If OpenClaw doesn't expose a "trigger-only" run mode, file an upstream feature request and keep the prompt-text path as a documented exception with the Phase-49 anti-action prefix.
+- 49E-2: **Route wake-triggered acknowledgments back to chat by default.** Either (a) the wake-trigger automatically wraps any non-NO_REPLY assistant text with the `[[reply_to_current]]` token before delivery, or (b) the AOF/1 protocol gains an explicit `system.notification` envelope type whose response handling is "if the agent emits text, route to the captured `originatingSessionId`." Option (b) is cleaner long-term — it makes the routing explicit at the protocol layer rather than implicit in OpenClaw conventions.
+- 49E-3: **Distinguish actionable wakes from FYI wakes at the API.** Today `notifyOnCompletion` triggers a wake on every status transition without distinguishing "task you might need to do something about" (`blocked`, `deadletter`) from "task you can ack and move on" (`done`, `cancelled`, `review` after a known handoff). Introduce a `wakeIntent: "action-required" | "informational"` field on the subscription that the prompt template (or system-event role) can vary on. Lets agents skip the cost of processing FYI wakes during heavy work.
+- 49E-4: **Backpressure & dedupe.** Today the in-flight `Set<sessionKey>` dedupe coalesces concurrent wakes for the same session, but a burst of wakes against the SAME dispatcher across DIFFERENT tasks (e.g. swe-architect dispatching 10 review subtasks that all complete around the same time) still produces 10 separate embedded runs. Investigate whether to coalesce wake events per-session within an N-second window into a single run that drains a batch of system events.
+
+**Risk:** Medium. The system-event injection path is heartbeat-tied, and OpenClaw's heartbeat lifecycle is opaque from our side — there may be a semantic gap where `enqueueSystemEvent` without a heartbeat does nothing. Investigation first, structural change second.
+
+**LADR:** 0012-wake-notification-injection-semantics (lands with 49E).
+
 ### 49D — LADR practice (cross-cutting)
 
 Establishes `.planning/ladrs/` with backfill of historical decisions plus one LADR per new sub-plan in this phase.
@@ -129,6 +153,7 @@ Initial LADR set:
 | 0009 | umzug-for-migrations | 49C-2 |
 | 0010 | bottleneck-for-throttle | 49C-3 |
 | 0011 | lancedb-spike | 49C-4 outcome |
+| 0012 | wake-notification-injection-semantics | 49E |
 
 LADR template (1 page each):
 - **Context** — what was the situation, what problem prompted the decision
@@ -152,6 +177,7 @@ LADR template (1 page each):
 3. **Wave 3 — 49C-2 + 49C-3: Library swaps that don't touch the hot path.** Umzug + bottleneck. Each: own commit, own LADR. Estimated: 1 day total.
 4. **Wave 4 — 49C-4: LanceDB spike.** Spike doc + perf comparison. NO production commit; outputs a go/no-go for a future "memory v2" phase. Estimated: 1-2 days.
 5. **Wave 5 — 49C-1: xstate for DAG.** Risky, last. Own commit, own integration test pass, manual smoke. Estimated: 2-3 days.
+6. **Wave 6 — 49E: Wake-notification redesign.** Investigation-first (49E-1 + 49E-2 are spike-then-implement), then 49E-3 and 49E-4. Coordinate with whoever is using `notifyOnCompletion` in production (currently swe-architect dispatching review subtasks). Estimated: 2-3 days. Lands with the short-term prompt-text mitigation reverted in the same commit so we don't carry both layers.
 
 LADRs ship in the same commit as their associated sub-plan, not separately.
 
@@ -203,6 +229,8 @@ Per phase end:
 3. **49C-1 xstate version pinning** — xstate v5 is the target (significantly different from v4); confirm before locking.
 4. **49B move tooling** — `tsc --listFiles` + `madge` + a script to rewrite imports. Worth investing in tooling if we anticipate future large moves; otherwise a one-shot bash script is fine.
 5. **LADR storage** — `.planning/ladrs/` is the current proposal; confirm this is the right location vs `.planning/decisions/` or `docs/architecture/`.
+6. **49E-1 OpenClaw API survey** — does `runtime.system.enqueueSystemEvent` work standalone (without an active heartbeat) when paired with a separate trigger? If not, we need an upstream feature request OR we keep the prompt-text path with the Phase-49 anti-action prefix as the permanent design. Check `~/Projects/openclaw/src/plugins/types.ts` and the `pi-embedded-runner/run.ts` source before committing to a direction.
+7. **49E-3 wakeIntent default** — should `done` default to `"informational"` and `blocked`/`deadletter` to `"action-required"`? Or should the dispatching agent choose at `aof_dispatch` time? Defer to /gsd-discuss-phase 49.
 
 ## Tools and references
 

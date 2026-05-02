@@ -33,7 +33,17 @@ const EMBEDDED_WAKE_TIMEOUT_MS = 120_000; // 2 minutes — enough for a wake tur
  * system events as turn-context, not as the prompt itself.
  */
 const EMBEDDED_WAKE_PROMPT_PREFIX =
-  "[AOF wake notification — informational. Reply NO_REPLY if this doesn't affect your active work.]\n\n";
+  "[AOF status notification — read-only. The task below has ALREADY transitioned " +
+  "to its reported state; the daemon has recorded the transition. Do NOT call " +
+  "aof_task_complete, aof_task_update, or any other tool that would change the " +
+  "task's state — those calls will be rejected by the daemon (the task is in a " +
+  "terminal state).\n\n" +
+  "What to do: (a) if this notification is unrelated to your active work, reply " +
+  "with the literal text NO_REPLY and nothing else; (b) if you want to acknowledge " +
+  "or summarize this status to the originating chat, prefix your reply with " +
+  "[[reply_to_current]] so it routes back to the user — assistant text without " +
+  "that prefix stays in your session transcript and is NOT delivered to the " +
+  "human. Default to NO_REPLY unless an acknowledgment is genuinely useful.]\n\n";
 
 /**
  * Per-process set of sessionKeys with an in-flight embedded wake run.
