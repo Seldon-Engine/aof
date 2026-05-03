@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.19.1](https://github.com/d0labs/aof/compare/v1.19.0...v1.19.1) (2026-05-03)
+
+### Bug Fixes
+
+* **chat-delivery-poller:** tighten wake-prompt to prevent action bias and silent acks ([9c1e5c8](https://github.com/d0labs/aof/commit/9c1e5c89ec347fce4f4dc1994611bccb1d0f5532))
+* **dispatch:** detect embedded-run silent failures and deadletter immediately ([76e8ea6](https://github.com/d0labs/aof/commit/76e8ea6e79c2e94abcf60dc1fa82601d2534ad52))
+
+### Refactor
+
+* **dispatch:** excise dormant platformLimit dynamic-throttling path ([23f2055](https://github.com/d0labs/aof/commit/23f20555a21788f48cf66c51648cc47ff899330d))
+* **openclaw:** excise dead OpenClawAdapter class and barrel re-export ([01da21d](https://github.com/d0labs/aof/commit/01da21d65b01e07d03c408e895712af7a36ab6c4))
+
+### Tests
+
+* **adapter:** cover agent_end forwarding for Codex-shape event payloads ([fe4ea79](https://github.com/d0labs/aof/commit/fe4ea795dbc9a42bd5d807b0f597bb9fea7e3fcd))
+* **e2e:** align tool-execution suite with Phase 46-05 routing contract ([a016b06](https://github.com/d0labs/aof/commit/a016b0660203c78139177afd991d056f482efd9f))
+
 ## [1.19.0](https://github.com/d0labs/aof/compare/v1.18.1...v1.19.0) (2026-04-29)
 
 ### Features
