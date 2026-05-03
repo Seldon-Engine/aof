@@ -92,13 +92,8 @@ export function registerAofPlugin(
     invocationContextStore.clearSessionRoute(m);
     void client.postSessionEnd(m).catch((err) => log.error({ err }, "postSessionEnd failed"));
   });
-  // OpenClaw >= 2026.4.23 gates `agent_end` (along with `llm_input`/`llm_output`)
-  // behind `plugins.entries.aof.hooks.allowConversationAccess=true` for non-bundled
-  // plugins. Registration silently no-ops if the opt-in is missing — the gateway
-  // emits a `typed hook "agent_end" blocked` warning, but the api.on call returns
-  // void either way. The startup log line below makes the dependency explicit so
-  // operators don't have to spelunk gateway diagnostics to diagnose dispatch
-  // latency regressions. See CLAUDE.md "Fragile — Conversation-access hook gate".
+  // `agent_end` is gated by `allowConversationAccess` on OpenClaw >= 2026.4.23
+  // (silent no-op without it). See CLAUDE.md "Conversation-access hook gate".
   api.on("agent_end", (event, ctx) => {
     void client.postAgentEnd(withCtx(event, ctx)).catch((err) => log.error({ err }, "postAgentEnd failed"));
   });

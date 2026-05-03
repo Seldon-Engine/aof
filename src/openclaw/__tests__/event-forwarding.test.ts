@@ -77,13 +77,8 @@ describe("OpenClaw plugin event forwarding (D-07, A1-amended)", () => {
   });
 
   it("agent_end forwards Codex-shape event payloads without throwing", async () => {
-    // OpenClaw 2026.4.23 bridged native Codex app-server turns through
-    // before_prompt_build / before_compaction / after_compaction / agent_end
-    // (commits 7a958d920c, 41c5ffc5d5). After enabling
-    // plugins.entries.aof.hooks.allowConversationAccess=true on >=4.24,
-    // AOF's agent_end handler now receives Codex-shape events alongside Pi.
-    // The forwarder must not choke on the alternate payload shape — it just
-    // spreads through `withCtx(event, ctx)` and fires postAgentEnd.
+    // OpenClaw 2026.4.23 bridges Codex app-server turns through agent_end too,
+    // so the forwarder must accept payloads without Pi-shape fields.
     const client = {
       postSessionEnd: vi.fn(async () => undefined),
       postAgentEnd: vi.fn(async () => undefined),
