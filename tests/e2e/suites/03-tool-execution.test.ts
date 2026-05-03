@@ -42,6 +42,7 @@ describe("E2E: Tool Execution", () => {
       const result = await aofDispatch(ctx, {
         title: "New dispatched task",
         brief: "Task created via aof_dispatch tool",
+        agent: "test-agent-1",
         actor: "test-agent",
       });
 
@@ -49,7 +50,7 @@ describe("E2E: Tool Execution", () => {
       expect(result.summary).toBeDefined();
       expect(typeof result.summary).toBe("string");
       expect(result.taskId).toBeDefined();
-      expect(result.taskId).toMatch(/^TASK-\d{4}-\d{2}-\d{2}-\d{3}$/);
+      expect(result.taskId).toMatch(/^TASK-\d{4}-\d{2}-\d{2}-[23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]{8}$/);
       expect(result.status).toBe("ready");
       expect(result.filePath).toBeDefined();
 
@@ -81,6 +82,7 @@ describe("E2E: Tool Execution", () => {
         title: "High priority task",
         brief: "Urgent work",
         priority: "high",
+        agent: "test-agent-1",
         actor: "test-agent",
       });
 
@@ -95,6 +97,7 @@ describe("E2E: Tool Execution", () => {
         title: "Task with metadata",
         brief: "Has tags",
         metadata: { tags: ["bug", "critical"], type: "bugfix" },
+        agent: "test-agent-1",
         actor: "test-agent",
       });
 
@@ -117,6 +120,7 @@ describe("E2E: Tool Execution", () => {
         title: "Dependent task",
         brief: "Depends on parent",
         dependsOn: [parentTask.frontmatter.id],
+        agent: "test-agent-1",
         actor: "test-agent",
       });
 
@@ -138,6 +142,7 @@ describe("E2E: Tool Execution", () => {
         title: "Subtask",
         brief: "Child of parent epic",
         parentId: parentTask.frontmatter.id,
+        agent: "test-agent-1",
         actor: "test-agent",
       });
 
@@ -151,6 +156,7 @@ describe("E2E: Tool Execution", () => {
       const result = await aofDispatch(ctx, {
         title: "Task for file check",
         brief: "Verify file location",
+        agent: "test-agent-1",
         actor: "test-agent",
       });
 
@@ -166,6 +172,7 @@ describe("E2E: Tool Execution", () => {
       const result = await aofDispatch(ctx, {
         title: "Event logging test",
         brief: "Check event log",
+        agent: "test-agent-1",
         actor: "test-agent",
       });
 
@@ -190,6 +197,7 @@ describe("E2E: Tool Execution", () => {
       const result = await aofDispatch(ctx, {
         title: "Status transition test",
         brief: "Verify task status",
+        agent: "test-agent-1",
         actor: "test-agent",
       });
 
@@ -203,6 +211,7 @@ describe("E2E: Tool Execution", () => {
       const result = await aofDispatch(ctx, {
         title: "Response envelope test",
         brief: "Check response structure",
+        agent: "test-agent-1",
         actor: "test-agent",
       });
 
@@ -223,6 +232,7 @@ describe("E2E: Tool Execution", () => {
       const result = await aofDispatch(ctx, {
         title: "Brief test",
         brief: "This is the brief/description",
+        agent: "test-agent-1",
         actor: "test-agent",
       });
 
@@ -235,6 +245,7 @@ describe("E2E: Tool Execution", () => {
         title: "Priority normalization",
         brief: "Test priority",
         priority: "critical",
+        agent: "test-agent-1",
         actor: "test-agent",
       });
 
