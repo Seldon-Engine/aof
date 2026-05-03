@@ -76,6 +76,50 @@ describe("OpenClaw plugin event forwarding (D-07, A1-amended)", () => {
     expect(client.postSessionEnd).not.toHaveBeenCalled();
   });
 
+  it("agent_end forwards Codex-shape event payloads without throwing", async () => {
+    // OpenClaw 2026.4.23 bridged native Codex app-server turns through
+    // before_prompt_build / before_compaction / after_compaction / agent_end
+    // (commits 7a958d920c, 41c5ffc5d5). After enabling
+    // plugins.entries.aof.hooks.allowConversationAccess=true on >=4.24,
+    // AOF's agent_end handler now receives Codex-shape events alongside Pi.
+    // The forwarder must not choke on the alternate payload shape — it just
+    // spreads through `withCtx(event, ctx)` and fires postAgentEnd.
+    const client = {
+      postSessionEnd: vi.fn(async () => undefined),
+      postAgentEnd: vi.fn(async () => undefined),
+      postBeforeCompaction: vi.fn(async () => undefined),
+      postMessageReceived: vi.fn(async () => undefined),
+    };
+    const events: Record<string, (event: unknown, ctx?: unknown) => void> = {};
+    await loadEventForwardingWiring({ client, events });
+
+    // Codex-shape: model id with provider prefix, runId instead of agent,
+    // sessionId rather than sessionKey, no agentId on the event itself.
+    const codexEvent = {
+      runId: "codex-run-7c2a",
+      model: "codex/gpt-5.5",
+      stopReason: "stop",
+      durationMs: 1820,
+    };
+    const codexCtx = {
+      sessionId: "ses-abc-123",
+      messageProvider: "codex",
+    };
+    forwardEvents_invoke(events, "agent_end", codexEvent, codexCtx);
+
+    expect(client.postAgentEnd).toHaveBeenCalledTimes(1);
+    // withCtx merges event+ctx into a flat record; Codex fields and ctx
+    // routing fields must both survive the merge.
+    expect(client.postAgentEnd).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "codex-run-7c2a",
+        model: "codex/gpt-5.5",
+        sessionId: "ses-abc-123",
+        messageProvider: "codex",
+      }),
+    );
+  });
+
   it("D-07: before_compaction forwards via client.postBeforeCompaction and clears local store", async () => {
     const client = {
       postSessionEnd: vi.fn(async () => undefined),
