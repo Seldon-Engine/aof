@@ -1,16 +1,13 @@
 # AOF — Project Instructions
 
 ## Context
-Deterministic orchestration for multi-agent systems. No LLMs in the control plane. Tasks are Markdown+YAML frontmatter files in `tasks/<status>/`, physically moved on transitions. Two entry points converge on one core: plugin mode (`src/plugin.ts` → OpenClawAdapter, in-process) and standalone mode (`src/daemon/` → StandaloneAdapter, HTTP). Both feed `AOFService` → `poll()` → dispatch pipeline. These paths never cross.
-**Stack**: TypeScript ESM, Node >=22, Zod, Pino, better-sqlite3, hnswlib-node, Commander.js, Vitest.
-**Tests**: ~3,017 unit (10s), 224 E2E (sequential, single fork, 60s). `createTestHarness()` for integration, `createMockStore()`/`createMockLogger()` for unit. Regression tests: `bug-NNN-description.test.ts`.
-See `CODE_MAP.md` for full architecture, module layering, and subsystem details.
+Deterministic orchestration for multi-agent systems. No LLMs in the control plane; tasks are Markdown+YAML files in `tasks/<status>/` that physically move on transitions. Plugin mode (in-process via OpenClaw) and standalone mode (HTTP daemon) converge on `AOFService` → `poll()` → dispatch. **See `CODE_MAP.md` for architecture, module layering, IPC contracts, and subsystem details — don't duplicate that here.**
 
 ## Engineering Standards
-- **TDD**: Failing test first. Tests describe behavior, not implementation details. Integration tests over scattered unit tests.
-- **TBD**: Small, atomic commits to main. No long-lived branches. Feature flags over feature branches when gating.
-- **Root causes over bandaids, always.** No side effects. No workarounds that paper over the issue.
-- **When you make a mistake that gets corrected** → document it in `lessons.md`.
+- **TDD**: Failing test first. Tests describe behavior, not implementation details. Integration over scattered unit tests.
+- **TBD**: Small atomic commits to main. No long-lived branches. Feature flags over feature branches.
+- **Root causes over bandaids, always.** No workarounds that paper over the issue.
+- **Mistakes that get corrected** → document in `lessons.md`.
 
 ## Conventions
 - **Config**: `getConfig()` from `src/config/registry.ts`. No `process.env` elsewhere (exception: `AOF_CALLBACK_DEPTH` cross-process).
@@ -23,18 +20,18 @@ See `CODE_MAP.md` for full architecture, module layering, and subsystem details.
 - **Barrels**: `index.ts` = pure re-exports only. No logic.
 
 ## Feature Anatomy
-Schema (`src/schemas/`) → store (if task-related) → logic (`src/dispatch/` or domain module) → tool handler (`src/tools/*-tools.ts`) → registry (`tool-registry.ts`) → tests (colocated `__tests__/`). CLI command optional. Tools needing adapter-specific behavior get overrides in `mcp/tools.ts` or `openclaw/adapter.ts`.
+Schema (`src/schemas/`) → store (if task-related) → logic (`src/dispatch/` or domain module) → tool handler (`src/tools/*-tools.ts`) → registry (`tool-registry.ts`) → tests (colocated `__tests__/`). CLI command optional. Adapter-specific overrides in `mcp/tools.ts` or `openclaw/adapter.ts`.
 
 ## Fragile — Tread Carefully
-- **Plugin/standalone executor wiring** (`plugin.ts`, `openclaw/adapter.ts`, `daemon/daemon.ts`): Two separate code paths. Changes risk breaking one mode while testing the other.
-- **MCP tool skip-list** (`mcp/tools.ts:326`): Hardcoded 5-name array. Must update manually when adding MCP-specific overrides.
-- **Dispatch chain** (`scheduler.ts` → `task-dispatcher.ts` → `action-executor.ts` → `assign-executor.ts`): Tightly coupled. Changes cascade.
-- **`AOF_CALLBACK_DEPTH`** env mutation (`dispatch/callback-delivery.ts`): Only exception to config-only env access. Don't add more.
-- **Chat-delivery cross-process chain**: `OpenClawChatDeliveryNotifier` (daemon) → `QueueBackedMessageTool` → `ChatDeliveryQueue` → `/v1/deliveries/wait` (plugin long-poll) → `sendChatDelivery` → OpenClaw `api.runtime.channel.<platform>.sendMessage<Platform>` → ACK back → queue resolves the awaiter → notifier updates subscription. The notifier's `messageTool.send()` BLOCKS on plugin ACK — a slow/broken plugin stalls the EventLogger callback. Not fatal (EventLogger catches thrown callbacks) but visible in log latency. Don't add async work to that chain without understanding this.
+- **Plugin/standalone executor wiring** (`plugin.ts`, `openclaw/adapter.ts`, `daemon/daemon.ts`): two separate code paths. Changes risk breaking one mode while testing the other.
+- **MCP tool skip-list** (`mcp/tools.ts:326`): hardcoded 5-name array. Update manually when adding MCP-specific overrides.
+- **Dispatch chain** (`scheduler.ts` → `task-dispatcher.ts` → `action-executor.ts` → `assign-executor.ts`): tightly coupled, changes cascade.
+- **`AOF_CALLBACK_DEPTH`** env mutation (`dispatch/callback-delivery.ts`): only exception to config-only env access. Don't add more.
+- **Chat-delivery cross-process chain** (full pipeline in CODE_MAP.md → "Chat-delivery pipeline"): the daemon-side notifier's `messageTool.send()` BLOCKS on plugin ACK — a slow/broken plugin stalls the EventLogger callback (caught, but visible as latency). Don't add async work to that chain without understanding this.
 - **Conversation-access hook gate** (OpenClaw ≥ 2026.4.23): non-bundled plugins must set `plugins.entries.aof.hooks.allowConversationAccess=true` or `agent_end`/`llm_input`/`llm_output` registrations are silently dropped. Symptom: dispatch latency regresses to `pollIntervalMs` (30s) because `triggerPoll("agent_end")` never fires. Gateway log shows `typed hook ... blocked` at boot.
 
 ## Code Navigation — tool preference order
-**Always Serena first, then ripgrep, then the boring old tools.** This is not a suggestion.
+**Always Serena first, then ripgrep, then the boring old tools.**
 
 | Task | Preferred | Fallback |
 |---|---|---|
@@ -47,93 +44,67 @@ Schema (`src/schemas/`) → store (if task-related) → logic (`src/dispatch/` o
 | Existing project context | `read_memory` | — |
 
 Rules that catch common reflexes:
-- **"Is this symbol used in production?"** is `find_referencing_symbols`, *never* `grep \| grep -v __tests__`. One call, structured answer, no re-export blind spots.
-- **Never `Read` an entire file before you know which symbol you want.** Overview first.
-- **Never `cat`/`sed`/`awk` source files via Bash.** Use Serena or Read.
-- `rg` beats `grep` for everything. If you're typing `grep -rn`, stop and use `rg`.
+- **"Is this symbol used in production?"** is `find_referencing_symbols`, *never* `grep | grep -v __tests__`. One call, structured answer, no re-export blind spots.
+- **Never `Read` a whole file before you know which symbol you want.** Overview first.
+- **Never `cat`/`sed`/`awk` source files via Bash.** Use Serena or Read. `rg` beats `grep` for everything.
 
-Serena parser gaps (use `Read` for these only): `events/logger.ts`, `events/notifier.ts`, `views/kanban.ts`, `views/mailbox.ts`, `events/notification-policy/engine.ts`.
+Serena parser gaps (use `Read` only): `events/logger.ts`, `events/notifier.ts`, `views/kanban.ts`, `views/mailbox.ts`, `events/notification-policy/engine.ts`. Refresh Serena memories after structural changes (new modules, moved files, renamed interfaces) — stale memories actively mislead.
 
-After structural changes (new modules, moved files, renamed interfaces), update Serena memories — stale memories actively mislead future sessions.
-
-## Build & Release
+## Build & Test
 ```bash
-npm run typecheck && npm test     # Must pass before commit
-npm run test:e2e                  # E2E suite
-npm run build                     # Full build
-npm run docs:generate             # Regen CLI docs (pre-commit hook enforces)
-npm run release:patch|minor|major # GitHub-only. NEVER pass --no-npm (skips version bump, not just publish).
-npm run deploy                    # Build + deploy to ~/.aof + symlink plugin
+npm run typecheck && npm test     # gates a commit
+npm run test:e2e                  # E2E suite (sequential, single fork)
+npm run build                     # full build
+npm run docs:generate             # CLI doc regen (pre-commit hook enforces)
 ```
 
-**After `npm run deploy`, restart BOTH launchd jobs** — the gateway AND the standalone daemon:
+## Deploy & Restart
+`npm run deploy` builds and deploys to `~/.aof` + symlinks plugin. After deploy, **restart both** launchd jobs:
 ```bash
-launchctl kickstart -k "gui/$(id -u)/ai.openclaw.aof"       # standalone daemon (owns /v1/* routes)
-launchctl kickstart -k "gui/$(id -u)/ai.openclaw.gateway"   # OpenClaw gateway (hosts the plugin)
+launchctl kickstart -k "gui/$(id -u)/ai.openclaw.aof"        # standalone daemon (owns /v1/* routes)
+launchctl kickstart -k "gui/$(id -u)/ai.openclaw.gateway"    # OpenClaw gateway + plugin
 ```
-Restarting only the gateway is a trap: the plugin reloads with new code and starts polling new IPC routes, but the daemon keeps the old code in memory and returns 404 until it's restarted. A silent 30s-backoff loop results.
+Restarting only the gateway is a trap: the plugin reloads with new code and starts polling new IPC routes, but the daemon keeps the old code in memory and 404s — silent 30s-backoff loop.
 
-**Before kickstarting, verify the `op run` wrapper is still present in the plists.** Upgrades and manual edits have historically stripped it out (see the `*.plist.bak-pre-oprun-restore-*` backups in `~/Library/LaunchAgents/`); without it the process runs with no 1Password-sourced env vars, and the failure mode (missing API keys, empty tokens) is usually a cascade of unrelated-looking errors. Quick check:
+Before kickstart, verify the `op run` wrapper survived (upgrades have stripped it; backups at `*.plist.bak-pre-oprun-restore-*`). Without it, processes start with no 1Password env vars and the failure cascades:
 ```bash
-rg -A 1 "ProgramArguments" ~/Library/LaunchAgents/ai.openclaw.gateway.plist ~/Library/LaunchAgents/ai.openclaw.aof.plist | rg "oprun|op run|\.openclaw/bin/"
-```
-The gateway plist should invoke `openclaw-gateway-oprun.sh` (or equivalent `op run --env-file …` wrapper). If the line is missing, restore from the most recent `.bak-pre-oprun-restore-*` backup before kickstarting — otherwise the restart will bring the process up in a broken state. Do this check even when only restarting (not just deploying).
-
-**Stale OpenClaw processes come in TWO distinct flavors. Know which one you're hitting.**
-
-_Flavor 1 — zombie `openclaw-agent` (per-session, cache stale AOF plugin code):_ OpenClaw reloads the AOF plugin per-session, but process-resident agents (workspace processes started on some prior day) hold whatever plugin code they loaded at startup. After an AOF version bump that crosses an architectural boundary (e.g. Phase 43 thin-bridge, pre vs post), those agents continue running OLD plugin code — including a pre-thin-bridge in-process `AOFService` + `EventLogger` that appends to the same `events/YYYY-MM-DD.jsonl` as the new daemon. Symptoms: two interleaved `eventId` sequences in one file, `aof_dispatch` calls logged by an unexpected logger, transitions that never reach the new daemon's notifier callbacks. Detect with `ps -eo pid,lstart,command | grep openclaw-agent` and kill any agent process whose start time pre-dates the AOF install, or just **reboot**. There is no live plugin-reload mechanism.
-
-_Flavor 2 — stale `openclaw` worker (whole-gateway-subsystem, cache stale OpenClaw chunks):_ `npm install -g openclaw@latest` replaces files on disk but does NOT restart already-running worker processes. Those workers keep their old chunk hashes in Node's module cache; when a lazy-loaded chunk is needed post-upgrade, Node resolves against the current disk state and fails with `Cannot find module './send-XYZ.js'` against a disappeared chunk hash. `launchctl kickstart` only recycles the primary `openclaw-gateway` process, not the per-session `openclaw` workers it has already spawned. Symptoms: intermittent wake-up / delivery failures where some attempts succeed (routed to the fresh gateway) and others fail with missing-chunk or missing-env-var errors (routed to a stale worker); `ps -eo pid,lstart,command | grep '^[[:space:]]*[0-9]* .* openclaw[[:space:]]*$'` shows many workers with `lstart` predating the install. Detect with `stat -f %m /opt/homebrew/lib/node_modules/openclaw/` vs each worker's `lstart`; kill workers older than the install mtime. Upstream doesn't provide a worker-reload mechanism and we can't patch OpenClaw. Phase 999.5 (backlog) is automating detection in `scripts/deploy.sh`; until it lands, do the `ps | awk | kill` dance manually after every OpenClaw upgrade.
-
-Both flavors can coexist. After an OpenClaw upgrade AND an AOF deploy, you may need to clean up both categories.
-
-**Release notes are ALWAYS hand-crafted — never ship the auto-generated `@release-it/conventional-changelog` dump to users.** Immediately after `release-it` completes, overwrite the GitHub release notes with a structured highlights document. A release is not "done" until this step runs.
-
-```bash
-# After release-it succeeds:
-gh release edit v<version> --notes-file /tmp/v<version>-notes.md
+rg "oprun|op run" ~/Library/LaunchAgents/ai.openclaw.{gateway,aof}.plist
 ```
 
-Required sections, in this order:
-1. **TL;DR** — 1–2 sentences: what changed, what the user needs to do to upgrade.
-2. **What's New** (features) / **Bug Fixed** (patches) — user-visible behavior change, not commit titles. Tables for enumerable things (routes, flags, config keys).
-3. **Upgrade Notes** — required upgrade actions (migrations, deprecations, config changes, compatibility breaks). Call out migration numbers and idempotence.
-4. **Architecture Internals** (for minor+) OR **Test Infrastructure** (if infra work shipped) — for developers working on AOF itself; keep brief.
-5. **Full Changelog** — link to the `v<prev>...v<this>` compare URL.
+## Stale OpenClaw Processes
+After any OpenClaw upgrade or AOF deploy, two flavors of stale process can persist (clean both):
 
-Hard rules for the notes body:
-- No GSD phase internals (`43-08`, `D-01/D-04`, `WR-01`) in user-facing copy — those are internal references.
-- No bare conventional-commit dumps (`feat(X): ...` lists) — readers shouldn't have to decode commit subjects to learn what changed.
-- Cite concrete commands users will run (`aof setup --auto --upgrade`), concrete paths (`~/.aof/data/daemon.sock`), concrete error strings they might see in logs.
-- "Who is affected" paragraph whenever a bug fix is user-visible.
+- **Flavor 1 — `openclaw-agent` zombies** (per-session, hold old AOF plugin code from startup): `ps -eo pid,lstart,command | grep openclaw-agent` → kill any with `lstart` predating the deploy. Symptom: interleaved eventId sequences in `events/YYYY-MM-DD.jsonl`, transitions that never reach the new daemon's notifier.
+- **Flavor 2 — `openclaw` worker zombies** (gateway worker pool, hold old OpenClaw module-cache hashes after `npm install -g openclaw@latest`): `stat -f %m /opt/homebrew/lib/node_modules/openclaw/` vs each worker's `lstart` → kill workers older than the install. Symptom: intermittent `Cannot find module './send-*.js'` errors. `launchctl kickstart` does NOT recycle workers. Phase 999.5 backlog automates this in `scripts/deploy.sh`.
 
-If you're tempted to skip the notes pass because "it was a small release" or "the commits are self-explanatory": they aren't. Do it anyway.
+## Release
+```bash
+npm run release:patch|minor|major   # GitHub-only. NEVER pass --no-npm — it silently skips the version bump.
+```
 
-## End-to-end debugging via the OpenClaw agent channel
-Some classes of bug only surface through the full plugin → daemon → tool-call pipeline (dispatch races, MCP envelope forwarding, agent-driven workflows). For these, the fastest loop is: you (Claude) drive AOF tool calls from the OpenClaw side by messaging the user's running `main` agent, receive its raw JSON responses, and correlate them with code reads and store state.
+**Release notes are hand-crafted.** Auto-generated `@release-it/conventional-changelog` dumps don't ship to users. After `release-it` succeeds, overwrite via `gh release edit v<version> --notes-file /tmp/v<version>-notes.md`. Required structure:
 
-**Send channel:** `openclaw agent --agent main --session-id <sid> --message "…"`. The flag is `--session-id`, NOT `--to` (which is E.164-only). Discover candidate sessions with `openclaw sessions --agent main --active 1440 --json` and pick a `kind: "direct"` session that's well under its `contextTokens` budget — avoid the user's active `group`/channel sessions.
+1. **TL;DR** — what changed, what user does to upgrade
+2. **What's New** / **Bug Fixed** — user-visible behavior, not commit titles
+3. **Upgrade Notes** — required actions (migrations, deprecations, config changes)
+4. **Internals** — brief, only for minor+
+5. **Full Changelog** — `v<prev>...v<this>` link
 
-**Receive channel:** the `openclaw agent` CLI's stdout **does NOT reliably deliver the reply** — it hangs indefinitely in OpenClaw ≥ `2026.4.22` even when the RPC completes and the agent finishes producing output. Do not wait on its stdout. Instead, read the agent's on-disk session transcript at `~/.openclaw/agents/<agent>/sessions/<session-id>.jsonl`. Assistant replies land as JSONL records of the form `{"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"…"}],"stopReason":"stop",...}}`. The transcript is the authoritative record and doesn't depend on the CLI's delivery mechanism.
+Hard rules: no GSD phase internals (`43-08`, `D-01`) in user copy; no bare commit-title dumps; cite concrete commands and paths users will run; "Who is affected" paragraph for user-visible bugfixes.
 
-**Helper (reusable within a session):** write a small send-and-wait script that (1) records the JSONL line count as a baseline, (2) fires the CLI in the background with stdout/stderr discarded (`nohup openclaw agent … >/dev/null 2>&1 </dev/null &`), (3) polls from `tail -n +$((BEFORE+1))` for a new record matching `.type=="message" and .message.role=="assistant" and .message.stopReason=="stop"`, (4) extracts `.message.content[] | select(.type=="text") | .text`. Filter on `stopReason=="stop"` so you skip intermediate tool-call / thinking records. When emitting the final text, keep it JSON-encoded through `head -n 1` and unwrap with `jq -r` only AFTER selecting the line — `jq -r` unescapes embedded newlines, and `head -n 1` on that output chops replies mid-string. Typical round-trip once the session is warm: ~8–15s.
+## End-to-End Debugging via OpenClaw Agent Channel
+When a bug only surfaces through the full plugin → daemon → tool-call pipeline, drive the user's running `main` agent from this conversation.
 
-**When to use this channel:**
-- Reproducing bugs that need a real agent to exercise the MCP → daemon path (e.g. parallel tool_use races, envelope forwarding, invocation-context, completion enforcement).
-- Smoke-testing a freshly deployed fix end-to-end (dispatch a task, drive updates, observe state).
-- Anything where "can the agent actually talk to AOF through the gateway plugin right now" is the load-bearing question.
+- **Send:** `openclaw agent --agent main --session-id <sid> --message "…"`. Find candidates via `openclaw sessions --agent main --active 1440 --json` — pick `kind:"direct"` with low `contextTokens`.
+- **Receive:** the CLI's stdout hangs unreliably on OpenClaw ≥ 2026.4.22. Read transcripts at `~/.openclaw/agents/<agent>/sessions/<session-id>.jsonl` — assistant replies are records with `.type=="message" && .message.role=="assistant" && .message.stopReason=="stop"`.
+- **Use for:** repro requiring real MCP→daemon path (parallel tool_use races, envelope forwarding, completion enforcement); end-to-end smoke after a deploy.
+- **Don't use for:** unit-testable logic (write a vitest test); reads satisfiable via direct IPC `curl --unix-socket ~/.aof/data/daemon.sock http://localhost/v1/tool/invoke` (faster, isolates plugin vs daemon).
 
-**When NOT to use this channel:**
-- Pure unit-testable logic — write the vitest test instead.
-- Reads you can satisfy with a direct `curl --unix-socket ~/.aof/data/daemon.sock http://localhost/v1/tool/invoke` call. Direct IPC bypasses the plugin and is faster to iterate on; use it to isolate whether a bug is in the plugin path or the daemon path.
+Stale `openclaw-agent` processes (Flavor 1 above) cache plugin code from their start time — confirm session agent `lstart` is newer than the deploy or you'll fake-reproduce.
 
-**Zombie agent caveat (Flavor 1 — stale AOF plugin code):** long-running `openclaw-agent` processes cache AOF plugin code at startup (`ps -eo pid,lstart,command | grep openclaw-agent`). If a zombie pre-dates the most recent `npm run deploy`, it runs stale plugin code and may mask or fake-reproduce bugs. Force a fresh plugin load by confirming the session's agent process start time is newer than the deploy, or reboot / `kill` the zombies. **This is NOT the same as the "stale openclaw worker" problem** (Flavor 2 in Build & Release) — that one affects the gateway's worker pool after an `npm install -g openclaw@latest` and manifests as `Cannot find module './send-*.js'` errors, not stale AOF code. If you're seeing intermittent wake-up failures where some attempts succeed and others fail with missing-chunk errors, you want Flavor 2, not this one.
-
-## Orphan vitest workers
-Vitest uses a tinypool worker pool. When a `npm test` / `npx vitest` invocation is aborted mid-run (timeout, Ctrl-C, tool cancellation), the pool's child `node (vitest N)` processes are frequently leaked — they keep running at 100% CPU, holding ports and file handles. Root cause isn't ours; vitest's pool cleanup on SIGTERM is unreliable under some circumstances.
-
-**After ANY aborted or timed-out test run, immediately:**
+## Orphan Vitest Workers
+After **any** aborted/timed-out test run, immediately:
 ```bash
 ps -eo pid,command | grep -E "node \(vitest" | grep -v grep | awk '{print $1}' | xargs -r kill -9
 ```
-Then verify with `ps -eo pid,pcpu,command | grep vitest | grep -v grep` — should be empty. Do this before starting a follow-up test run to avoid pool-contention flakes.
+Vitest's tinypool leaks workers on SIGTERM. Verify with `ps -eo pid,pcpu,command | grep vitest | grep -v grep` (should be empty) before another run.
