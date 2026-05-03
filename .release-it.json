@@ -46,6 +46,9 @@
       "node scripts/stamp-version.mjs",
       "git add openclaw.plugin.json",
       "git add package-lock.json"
+    ],
+    "after:release": [
+      "node scripts/post-release-notes-reminder.mjs"
     ]
   }
 }
