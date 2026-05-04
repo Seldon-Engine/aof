@@ -5,6 +5,31 @@
   "kind": "memory",
   "description": "Deterministic task orchestration layer for multi-agent systems. Provides filesystem-first kanban, context-aware dispatch, org chart governance, and real-time views.",
   "main": "dist/plugin.js",
+  "contracts": {
+    "tools": [
+      "aof_dispatch",
+      "aof_task_update",
+      "aof_task_edit",
+      "aof_task_cancel",
+      "aof_task_complete",
+      "aof_task_dep_add",
+      "aof_task_dep_remove",
+      "aof_task_block",
+      "aof_task_unblock",
+      "aof_status_report",
+      "aof_context_load",
+      "aof_task_subscribe",
+      "aof_task_unsubscribe",
+      "aof_project_create",
+      "aof_project_list",
+      "memory_search",
+      "memory_store",
+      "memory_update",
+      "memory_delete",
+      "memory_list",
+      "memory_get"
+    ]
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
