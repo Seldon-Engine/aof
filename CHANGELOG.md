@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.19.2](https://github.com/d0labs/aof/compare/v1.19.1...v1.19.2) (2026-05-04)
+
+### Bug Fixes
+
+* **manifest:** declare all 21 tools in contracts.tools ([0d60033](https://github.com/d0labs/aof/commit/0d60033fc61b93da9d9b95b99d8e678ac33c1e7c))
+
 ## [1.19.1](https://github.com/d0labs/aof/compare/v1.19.0...v1.19.1) (2026-05-03)
 
 ### Bug Fixes
