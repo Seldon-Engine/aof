@@ -13,6 +13,11 @@ import type { HnswIndex } from "../../memory/store/hnsw-index.js";
 import { generateMemoryConfigFile, auditMemoryConfigFile } from "../../commands/memory.js";
 import { loadOrgChart } from "../../org/index.js";
 import { FilesystemTaskStore } from "../../store/task-store.js";
+import {
+  disableAofAsMemoryPlugin,
+  isAofMemorySlot,
+  isAofMemoryEnabled,
+} from "../../packaging/openclaw-cli.js";
 
 // ─── Health Report Types ────────────────────────────────────────────────────
 
@@ -121,6 +126,60 @@ export function registerMemoryCommands(program: Command): void {
   const memory = program
     .command("memory")
     .description("Memory V2 commands");
+
+  // ─── disable ────────────────────────────────────────────────────────────
+  // Inverse of the memory wiring done by `aof setup`. Lets a user transition
+  // away from AOF as the memory provider to one of OpenClaw's built-in plugins.
+  memory
+    .command("disable")
+    .description("Disable AOF as the memory provider; optionally restore another plugin into the slot")
+    .option("--restore <plugin>", "Plugin to install into plugins.slots.memory (e.g. memory-core)")
+    .option("--yes", "Skip confirmation prompt", false)
+    .action(async (opts: { restore?: string; yes: boolean }) => {
+      const inSlot = await isAofMemorySlot();
+      const moduleEnabled = await isAofMemoryEnabled();
+
+      if (!inSlot && !moduleEnabled) {
+        console.log("AOF is not configured as the memory provider — nothing to do.");
+        return;
+      }
+
+      console.log("Current state:");
+      console.log(`  plugins.slots.memory       = ${inSlot ? "aof" : "(not aof)"}`);
+      console.log(`  modules.memory.enabled     = ${moduleEnabled}`);
+      if (inSlot) {
+        if (opts.restore) {
+          console.log(`\nWill set plugins.slots.memory = "${opts.restore}" and enable that plugin.`);
+        } else {
+          console.log("\nWill clear plugins.slots.memory (no replacement specified).");
+          console.log("Pass --restore <plugin> to swap in another memory provider in one step.");
+        }
+      }
+
+      if (!opts.yes) {
+        const { confirm } = await import("@inquirer/prompts");
+        const ok = await confirm({ message: "Proceed?", default: false });
+        if (!ok) {
+          console.log("Aborted.");
+          return;
+        }
+      }
+
+      try {
+        const result = await disableAofAsMemoryPlugin(opts.restore);
+        console.log("\nAOF memory module disabled (modules.memory.enabled=false).");
+        if (result.restored) {
+          console.log(`Restored "${result.restored}" as the memory plugin.`);
+        } else if (result.slotCleared) {
+          console.log("Cleared plugins.slots.memory.");
+        }
+        console.log("\n⚠️  Restart the OpenClaw gateway to activate the change:");
+        console.log("    launchctl kickstart -k \"gui/$(id -u)/ai.openclaw.gateway\"");
+      } catch (e) {
+        console.error(`Failed to disable AOF memory: ${e instanceof Error ? e.message : String(e)}`);
+        process.exitCode = 1;
+      }
+    });
 
   memory
     .command("generate [path]")

@@ -75,6 +75,67 @@ export interface SetupOptions {
   legacy: boolean;
   openclawPath?: string;
   template: "minimal" | "full";
+  /**
+   * Whether AOF should claim `plugins.slots.memory`.
+   * - "auto" (default): claim only if the slot is empty or already held by AOF;
+   *   if another plugin holds it, prompt in interactive mode and skip in --auto.
+   * - "force": always claim, even if another plugin holds the slot.
+   * - "never": never touch the slot — leave the existing memory provider alone.
+   */
+  claimMemory: "auto" | "force" | "never";
+}
+
+/**
+ * Decision about whether `aof setup` should claim the memory plugin slot.
+ *
+ * `displacing` carries the name of the plugin being replaced (if any) so the
+ * subsequent `configureAofAsMemoryPlugin` call can disable it cleanly.
+ */
+export interface MemoryClaimDecision {
+  claim: boolean;
+  displacing?: string;
+  reason: string;
+}
+
+/**
+ * Decide whether to claim `plugins.slots.memory` for AOF, given the user's
+ * `--claim-memory` / `--no-claim-memory` choice and the current slot holder.
+ */
+export async function decideMemoryClaim(
+  mode: "auto" | "force" | "never",
+  slotHolder: string | undefined,
+  auto: boolean,
+): Promise<MemoryClaimDecision> {
+  if (mode === "never") {
+    return { claim: false, reason: "--no-claim-memory flag" };
+  }
+
+  // Already ours — re-asserting the slot is harmless and idempotent.
+  if (!slotHolder || slotHolder === "aof") {
+    return { claim: true, reason: slotHolder === "aof" ? "AOF already in slot" : "memory slot empty" };
+  }
+
+  if (mode === "force") {
+    return { claim: true, displacing: slotHolder, reason: "--claim-memory flag" };
+  }
+
+  // mode === "auto" and a different plugin holds the slot.
+  if (auto) {
+    return {
+      claim: false,
+      reason: `--auto mode and "${slotHolder}" already holds the memory slot`,
+    };
+  }
+
+  // Interactive: ask before stealing.
+  const { confirm } = await import("@inquirer/prompts");
+  const wantsClaim = await confirm({
+    message: `"${slotHolder}" is the current memory plugin. Disable it and use AOF instead?`,
+    default: false,
+  });
+  return wantsClaim
+    ? { claim: true, displacing: slotHolder, reason: "user confirmed" }
+    : { claim: false, reason: "user declined" };
 }
 
 // --- Migration registry ---
@@ -173,7 +234,12 @@ async function migrateLegacyData(dataDir: string): Promise<void> {
  * Used when the `openclaw` CLI binary is not in PATH (common during fresh installs
  * where the shell hasn't been reloaded, or when openclaw is installed but not on PATH).
  */
-async function wireOpenClawPluginDirect(dataDir: string, configPath: string): Promise<void> {
+async function wireOpenClawPluginDirect(
+  dataDir: string,
+  configPath: string,
+  claimMemory: "auto" | "force" | "never",
+  auto: boolean,
+): Promise<void> {
   try {
     const raw = await readFile(configPath, "utf-8");
     const config = JSON.parse(raw) as Record<string, unknown>;
@@ -223,10 +289,26 @@ async function wireOpenClawPluginDirect(dataDir: string, configPath: string): Pr
       deepSet(config, "plugins.allow", allowList);
     }
 
-    // 3. Set memory slot
-    deepSet(config, "plugins.slots.memory", "aof");
-    deepSet(config, "plugins.entries.aof.config.modules.memory.enabled", true);
-    say("AOF configured as memory plugin");
+    // 3. Set memory slot (gated — same decision logic as the CLI-driven path)
+    const currentSlot = deepGet(config, "plugins.slots.memory") as string | undefined;
+    const decision = await decideMemoryClaim(claimMemory, currentSlot, auto);
+    if (decision.claim) {
+      if (decision.displacing && decision.displacing !== "aof") {
+        deepSet(config, `plugins.entries.${decision.displacing}.enabled`, false);
+      }
+      deepSet(config, "plugins.slots.memory", "aof");
+      deepSet(config, "plugins.entries.aof.config.modules.memory.enabled", true);
+      say(
+        decision.displacing
+          ? `Replaced ${decision.displacing} as memory plugin`
+          : "AOF configured as memory plugin",
+      );
+    } else {
+      say(`Skipped memory-plugin claim (${decision.reason})`);
+      if (currentSlot && currentSlot !== "aof") {
+        say(`Current memory plugin: ${currentSlot} (left unchanged)`);
+      }
+    }
 
     // 4. Ensure the OpenClaw extension dir is in plugins.load.paths.
     //    The symlink at ~/.openclaw/extensions/aof → $INSTALL_DIR/dist/ is the
@@ -304,7 +386,12 @@ async function deploySkillFiles(): Promise<void> {
  * Wire AOF as an OpenClaw plugin.
  * Soft requirement: skips with warning if OpenClaw not found.
  */
-async function wireOpenClawPlugin(dataDir: string, openclawPath?: string): Promise<void> {
+async function wireOpenClawPlugin(
+  dataDir: string,
+  openclawPath: string | undefined,
+  claimMemory: "auto" | "force" | "never",
+  auto: boolean,
+): Promise<void> {
   // Detect OpenClaw
   let detected = false;
   let cliAvailable = false;
@@ -343,7 +430,7 @@ async function wireOpenClawPlugin(dataDir: string, openclawPath?: string): Promi
   if (!cliAvailable) {
     warn("OpenClaw CLI not in PATH — using direct config file editing");
     if (configPath) {
-      await wireOpenClawPluginDirect(dataDir, configPath);
+      await wireOpenClawPluginDirect(dataDir, configPath, claimMemory, auto);
     } else {
       warn("Cannot wire plugin: no config path and no CLI. Run 'aof setup' after OpenClaw is in PATH.");
     }
@@ -380,14 +467,24 @@ async function wireOpenClawPlugin(dataDir: string, openclawPath?: string): Promi
     return;
   }
 
-  // Configure memory plugin
+  // Configure memory plugin (gated — see decideMemoryClaim)
+  let memoryClaimed = false;
   try {
     const memInfo = await detectMemoryPlugin();
-    await configureAofAsMemoryPlugin(memInfo.slotHolder);
-    if (memInfo.slotHolder && memInfo.slotHolder !== "aof") {
-      say(`Replaced ${memInfo.slotHolder} as memory plugin`);
+    const decision = await decideMemoryClaim(claimMemory, memInfo.slotHolder, auto);
+    if (decision.claim) {
+      await configureAofAsMemoryPlugin(decision.displacing);
+      memoryClaimed = true;
+      if (decision.displacing) {
+        say(`Replaced ${decision.displacing} as memory plugin`);
+      } else {
+        say("AOF configured as memory plugin");
+      }
     } else {
-      say("AOF configured as memory plugin");
+      say(`Skipped memory-plugin claim (${decision.reason})`);
+      if (memInfo.slotHolder && memInfo.slotHolder !== "aof") {
+        say(`Current memory plugin: ${memInfo.slotHolder} (left unchanged)`);
+      }
     }
   } catch (e) {
     warn(`Failed to configure memory plugin: ${e instanceof Error ? e.message : String(e)}`);
@@ -413,7 +510,11 @@ async function wireOpenClawPlugin(dataDir: string, openclawPath?: string): Promi
     warn("Rolling back plugin wiring...");
     try {
       await openclawConfigUnset("plugins.entries.aof");
-      await openclawConfigUnset("plugins.slots.memory");
+      // Only clear the memory slot if AOF claimed it during this setup —
+      // otherwise we'd strip the user's existing memory provider.
+      if (memoryClaimed) {
+        await openclawConfigUnset("plugins.slots.memory");
+      }
       warn("Plugin wiring rolled back. AOF files are still installed.");
       warn("Re-run 'aof setup' or manually configure the plugin.");
     } catch (rollbackErr) {
@@ -452,7 +553,7 @@ async function wireOpenClawPlugin(dataDir: string, openclawPath?: string): Promi
  * Run the full setup flow.
  */
 export async function runSetup(opts: SetupOptions): Promise<void> {
-  const { dataDir, auto, upgrade, legacy, openclawPath, template } = opts;
+  const { dataDir, auto, upgrade, legacy, openclawPath, template, claimMemory } = opts;
 
   console.log(`\n  AOF Setup${auto ? " (auto mode)" : ""}`);
   console.log(`  Target: ${dataDir}\n`);
@@ -545,7 +646,7 @@ export async function runSetup(opts: SetupOptions): Promise<void> {
 
   // 5. OpenClaw plugin wiring
   console.log("\n  Configuring OpenClaw integration...");
-  await wireOpenClawPlugin(dataDir, openclawPath);
+  await wireOpenClawPlugin(dataDir, openclawPath, claimMemory, auto);
 
   say("Setup complete");
 }
@@ -562,6 +663,8 @@ export function registerSetupCommand(program: Command): void {
     .option("--legacy", "Legacy installation detected at ~/.openclaw/aof/", false)
     .option("--openclaw-path <path>", "Explicit OpenClaw config path")
     .option("--template <template>", "Org chart template (minimal or full)", "minimal")
+    .option("--claim-memory", "Force AOF to take over the memory plugin slot even if another plugin holds it")
+    .option("--no-claim-memory", "Never touch the memory plugin slot — keep existing provider")
     .action(
       async (opts: {
         auto: boolean;
@@ -570,8 +673,13 @@ export function registerSetupCommand(program: Command): void {
         legacy: boolean;
         openclawPath?: string;
         template: string;
+        claimMemory?: boolean;
       }) => {
         try {
+          // Commander gives: undefined (default), true (--claim-memory), false (--no-claim-memory)
+          const claimMemory: "auto" | "force" | "never" =
+            opts.claimMemory === true ? "force" : opts.claimMemory === false ? "never" : "auto";
+
           await runSetup({
             dataDir: normalizePath(opts.dataDir),
             auto: opts.auto,
@@ -579,6 +687,7 @@ export function registerSetupCommand(program: Command): void {
             legacy: opts.legacy,
             openclawPath: opts.openclawPath,
             template: (opts.template === "full" ? "full" : "minimal") as "minimal" | "full",
+            claimMemory,
           });
         } catch (e) {
           err(e instanceof Error ? e.message : String(e));

@@ -196,6 +196,42 @@ export async function configureAofAsMemoryPlugin(currentPlugin?: string): Promis
 }
 
 /**
+ * Disable AOF as the memory provider.
+ *
+ * Always sets `plugins.entries.aof.config.modules.memory.enabled = false` so
+ * the runtime module no-ops. If AOF currently holds `plugins.slots.memory`:
+ *   - When `restorePlugin` is given, swap the slot to that plugin and
+ *     re-enable its entry (the inverse of `configureAofAsMemoryPlugin`).
+ *   - Otherwise, clear the slot — callers must then choose another plugin
+ *     manually (or accept the OpenClaw default, which is no memory provider).
+ *
+ * If another plugin is already in the slot, leaves it untouched.
+ */
+export async function disableAofAsMemoryPlugin(restorePlugin?: string): Promise<{
+  /** True when the memory slot was cleared (no plugin holds it now). */
+  slotCleared: boolean;
+  /** Name of the plugin restored into the slot, if any. */
+  restored?: string;
+}> {
+  await openclawConfigSet("plugins.entries.aof.config.modules.memory.enabled", false);
+
+  const slot = await openclawConfigGet("plugins.slots.memory");
+  if (slot !== "aof") {
+    // Another plugin (or nothing) holds the slot — don't touch it.
+    return { slotCleared: false };
+  }
+
+  if (restorePlugin && restorePlugin !== "aof") {
+    await openclawConfigSet("plugins.slots.memory", restorePlugin);
+    await openclawConfigSet(`plugins.entries.${restorePlugin}.enabled`, true);
+    return { slotCleared: false, restored: restorePlugin };
+  }
+
+  await openclawConfigUnset("plugins.slots.memory");
+  return { slotCleared: true };
+}
+
+/**
  * Check if AOF's memory module is currently enabled.
  */
 export async function isAofMemoryEnabled(): Promise<boolean> {
