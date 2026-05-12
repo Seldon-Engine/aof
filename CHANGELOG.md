@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.20.0](https://github.com/d0labs/aof/compare/v1.19.2...v1.20.0) (2026-05-12)
+
+### Features
+
+* **memory:** make AOF memory-plugin claim optional ([c405f2b](https://github.com/d0labs/aof/commit/c405f2b8e8f7f00d061b0ee2e40e36aae47368de))
+
 ## [1.19.2](https://github.com/d0labs/aof/compare/v1.19.1...v1.19.2) (2026-05-04)
 
 ### Bug Fixes
